@@ -59,8 +59,9 @@ struct AgentIDEApp: App {
                     RootView(model: model)
                 }
             }
-            .frame(minWidth: 1100, minHeight: 700)
+            .frame(minWidth: 1680, minHeight: 700)
         }
+        .defaultSize(width: 1700, height: 900)
         .commands {
             if startupError == nil {
                 CommandMenu("Terminal") {

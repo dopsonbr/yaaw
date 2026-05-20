@@ -109,6 +109,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         projects.first { $0.id == selectedProjectID }
     }
 
+    public var windowTitle: String {
+        guard let project = selectedProject else { return "Agent IDE" }
+        guard let thread = selectedThread else { return "\(project.displayName) - Agent IDE" }
+        return "\(project.displayName) - \(thread.displayName)"
+    }
+
     public var selectedProjectDirectoryState: ProjectDirectoryState? {
         selectedProject.map { directoryState(for: $0.rootDirectory) }
     }

@@ -9,7 +9,7 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
     var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
 
     func makeNSView(context: Context) -> NSView {
-        let container = NSView()
+        let container = TerminalContainerView()
         container.wantsLayer = true
         attachTerminal(to: container)
         return container
@@ -44,14 +44,30 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
             container.addSubview(terminal)
         }
 
-        terminal.frame = container.bounds
         terminal.autoresizingMask = [.width, .height]
+        terminal.frame = container.bounds
+        if let terminalContainer = container as? TerminalContainerView {
+            terminalContainer.terminalView = terminal
+        }
+        terminal.fitToSize()
         terminal.setSurfaceVisible(true)
         GhosttyTerminalStateRegistry.shared.configure(
             entry,
             for: request,
             onTitleChange: onTitleChange
         )
+    }
+}
+
+@available(macOS 14.0, *)
+private final class TerminalContainerView: NSView {
+    weak var terminalView: TerminalView?
+
+    override func layout() {
+        super.layout()
+        guard let terminalView else { return }
+        terminalView.frame = bounds
+        terminalView.fitToSize()
     }
 }
 
@@ -70,8 +86,6 @@ private final class GhosttyTerminalStateRegistry {
     static let shared = GhosttyTerminalStateRegistry()
 
     private var entriesByRole: [TerminalRole: Entry] = [:]
-    private var pendingInitialCommands: Set<TerminalRole> = []
-    private var sentInitialCommands: Set<TerminalRole> = []
 
     private init() {}
 
@@ -80,12 +94,14 @@ private final class GhosttyTerminalStateRegistry {
             return entry
         }
 
-        let state = TerminalViewState(theme: draculaTerminalTheme, terminalConfiguration: draculaTerminalConfiguration)
+        let state = TerminalViewState(
+            theme: draculaTerminalTheme,
+            terminalConfiguration: terminalConfiguration(for: request)
+        )
         let view = TerminalView(frame: .zero)
         view.delegate = state
         let entry = Entry(request: request, state: state, view: view)
         entriesByRole[request.role] = entry
-        sentInitialCommands.remove(request.role)
         configure(entry, for: request, onTitleChange: { _, _ in })
         return entry
     }
@@ -97,18 +113,18 @@ private final class GhosttyTerminalStateRegistry {
     ) {
         let options = TerminalSurfaceOptions(
             backend: .exec,
-            fontSize: 13,
+            fontSize: 12,
             workingDirectory: request.workingDirectory.path,
             context: .split
         )
         entry.state.configuration = options
+        entry.state.controller.setTerminalConfiguration(terminalConfiguration(for: request))
         entry.delegate.onTitleChange = { title in
             onTitleChange(request.role, title)
         }
         entry.view.delegate = entry.delegate
         entry.view.controller = entry.state.controller
         entry.view.configuration = options
-        scheduleInitialCommandIfNeeded(for: request, state: entry.state)
     }
 
     func closeAll() {
@@ -117,38 +133,11 @@ private final class GhosttyTerminalStateRegistry {
             entry.view.removeFromSuperview()
         }
         entriesByRole.removeAll()
-        pendingInitialCommands.removeAll()
-        sentInitialCommands.removeAll()
     }
 
-    private func scheduleInitialCommandIfNeeded(for request: TerminalLaunchRequest, state: TerminalViewState) {
-        switch request.role {
-        case .project, .nvim, .lazygit:
-            break
-        case .global:
-            return
-        }
-
-        guard !pendingInitialCommands.contains(request.role),
-              !sentInitialCommands.contains(request.role),
-              !request.command.isEmpty
-        else { return }
-        pendingInitialCommands.insert(request.role)
-        let role = request.role
-        let commandLine = shellCommandLine(for: request.command) + "\r"
-
-        Task { @MainActor [weak self, weak state] in
-            guard let self else { return }
-            defer { self.pendingInitialCommands.remove(role) }
-            for _ in 0..<20 {
-                guard let state else { return }
-                if state.send(commandLine) {
-                    self.sentInitialCommands.insert(role)
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(100))
-            }
-        }
+    private func terminalConfiguration(for request: TerminalLaunchRequest) -> TerminalConfiguration {
+        guard !request.command.isEmpty else { return draculaTerminalConfiguration }
+        return draculaTerminalConfiguration.custom("command", shellCommandLine(for: request.command))
     }
 
     private func shellCommandLine(for command: [String]) -> String {
@@ -253,9 +242,9 @@ private let draculaTerminalConfiguration = TerminalConfiguration { config in
     config.withCursorColor(draculaHex(.pink))
     config.withCursorText(draculaHex(.background))
     config.withBoldColor(draculaHex(.yellow))
-    config.withFontSize(13)
-    config.withWindowPaddingX(10)
-    config.withWindowPaddingY(8)
+    config.withFontSize(12)
+    config.withWindowPaddingX(0)
+    config.withWindowPaddingY(0)
 }
 
 private func draculaHex(_ role: DraculaRole) -> String {

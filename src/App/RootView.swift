@@ -6,76 +6,90 @@ struct RootView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                if model.layoutState.isSidebarCollapsed {
-                    CollapsedPanelRail(
-                        systemImage: "sidebar.left",
-                        accessibilityLabel: "Expand sidebar",
-                        action: model.toggleSidebarCollapsed
-                    )
-                    .frame(width: 44)
-                } else {
-                    SidebarView(model: model)
-                        .frame(width: model.layoutState.sidebarWidth)
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    if model.layoutState.isSidebarCollapsed {
+                        CollapsedPanelRail(
+                            systemImage: "sidebar.left",
+                            accessibilityLabel: "Expand sidebar",
+                            action: model.toggleSidebarCollapsed
+                        )
+                        .frame(width: 44)
+                    } else {
+                        SidebarView(model: model)
+                            .frame(width: model.layoutState.sidebarWidth)
 
-                    VerticalResizeHandle(
-                        accessibilityLabel: "Resize sidebar",
-                        onDrag: { delta in
-                            model.setSidebarWidth(model.layoutState.sidebarWidth + delta)
-                        }
-                    )
+                        VerticalResizeHandle(
+                            accessibilityLabel: "Resize sidebar",
+                            onDrag: { delta in
+                                model.setSidebarWidth(model.layoutState.sidebarWidth + delta)
+                            }
+                        )
+                    }
+
+                    Divider()
+                        .overlay(dracula(.currentLine))
+
+                    MainWorkspaceView(model: model)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    Divider()
+                        .overlay(dracula(.currentLine))
+
+                    if !model.layoutState.isRightPanelCollapsed && geometry.size.width < rightPanelAdaptiveMinimumWidth {
+                        CollapsedPanelRail(
+                            systemImage: "sidebar.right",
+                            accessibilityLabel: "Right panel hidden until the window is wider",
+                            action: {}
+                        )
+                        .frame(width: 44)
+                        .disabled(true)
+                        .opacity(0.65)
+                    } else if model.layoutState.isRightPanelCollapsed {
+                        CollapsedPanelRail(
+                            systemImage: "sidebar.right",
+                            accessibilityLabel: "Expand right panel",
+                            action: model.toggleRightPanelCollapsed
+                        )
+                        .frame(width: 44)
+                    } else {
+                        VerticalResizeHandle(
+                            accessibilityLabel: "Resize right panel",
+                            onDrag: { delta in
+                                model.setRightPanelWidth(model.layoutState.rightPanelWidth - delta)
+                            }
+                        )
+
+                        RightPanelView(model: model)
+                            .frame(width: model.layoutState.rightPanelWidth)
+                    }
                 }
 
-                Divider()
-                    .overlay(dracula(.currentLine))
-
-                MainWorkspaceView(model: model)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Divider()
-                    .overlay(dracula(.currentLine))
-
-                if model.layoutState.isRightPanelCollapsed {
-                    CollapsedPanelRail(
-                        systemImage: "sidebar.right",
-                        accessibilityLabel: "Expand right panel",
-                        action: model.toggleRightPanelCollapsed
-                    )
-                    .frame(width: 44)
-                } else {
-                    VerticalResizeHandle(
-                        accessibilityLabel: "Resize right panel",
-                        onDrag: { delta in
-                            model.setRightPanelWidth(model.layoutState.rightPanelWidth - delta)
-                        }
-                    )
-
-                    RightPanelView(model: model)
-                        .frame(width: model.layoutState.rightPanelWidth)
-                }
+                GlobalTerminalBar(
+                    isExpanded: model.isGlobalTerminalExpanded,
+                    height: model.layoutState.globalTerminalHeight,
+                    request: model.terminalLaunchRequest(for: .global),
+                    onToggle: model.toggleGlobalTerminal,
+                    onResize: { delta in
+                        model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
+                    },
+                    onAppearExpanded: {
+                        model.activateGlobalTerminal()
+                    }
+                )
             }
-
-            GlobalTerminalBar(
-                isExpanded: model.isGlobalTerminalExpanded,
-                height: model.layoutState.globalTerminalHeight,
-                request: model.terminalLaunchRequest(for: .global),
-                onToggle: model.toggleGlobalTerminal,
-                onResize: { delta in
-                    model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
-                },
-                onAppearExpanded: {
-                    model.activateGlobalTerminal()
-                }
-            )
         }
         .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
+        .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             GhosttyTerminalRuntime.closeAll()
         }
     }
 }
+
+private let rightPanelAdaptiveMinimumWidth = 1_680.0
 
 private struct SidebarView: View {
     @ObservedObject var model: AppModel
@@ -381,15 +395,7 @@ private struct MainWorkspaceView: View {
     private let capturePoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(model.selectedThread?.displayName ?? "Hello World Thread")
-                    .font(.title.weight(.semibold))
-
-                Text("SwiftPM native macOS scaffold")
-                    .foregroundStyle(dracula(.comment))
-            }
-
+        VStack(alignment: .leading, spacing: 8) {
             if case .missing(let path) = model.selectedThreadWorkingDirectoryState {
                 MissingDirectoryBanner(
                     title: "Working directory is missing",
@@ -405,7 +411,6 @@ private struct MainWorkspaceView: View {
             }
 
             TerminalPlaceholderView(
-                title: model.projectTerminal.title,
                 request: selectedProjectTerminalRequest,
                 unavailableMessage: selectedProjectTerminalUnavailableMessage,
                 onTitleChange: { role, title in
@@ -421,10 +426,8 @@ private struct MainWorkspaceView: View {
             .onReceive(capturePoll) { _ in
                 model.pollSelectedAgentCLICaptureLog()
             }
-
-            Spacer()
         }
-        .padding(24)
+        .padding(8)
         .background(dracula(.background))
     }
 
@@ -445,8 +448,8 @@ private struct RightPanelView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
                 Button {
                     model.toggleRightPanelCollapsed()
                 } label: {
@@ -461,20 +464,20 @@ private struct RightPanelView: View {
                     Button {
                         model.selectRightPanelMode(mode)
                     } label: {
-                        Text(mode.displayName)
+                        Label(mode.displayName, systemImage: iconName(for: mode))
+                            .labelStyle(.titleAndIcon)
                             .font(.caption.weight(.semibold))
                     }
                     .buttonStyle(.plain)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
                     .background(model.selectedRightPanelMode == mode ? dracula(.currentLine) : dracula(.background))
                     .foregroundStyle(model.selectedRightPanelMode == mode ? dracula(.pink) : dracula(.foreground))
                     .accessibilityLabel("\(mode.displayName) right panel")
                 }
             }
-
-            Divider()
-                .overlay(dracula(.currentLine))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
 
             switch model.selectedRightPanelMode {
             case .files:
@@ -498,7 +501,6 @@ private struct RightPanelView: View {
 
             case .nvim:
                 TerminalPlaceholderView(
-                    title: "nvim",
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "nvim")
                 )
@@ -509,7 +511,6 @@ private struct RightPanelView: View {
 
             case .git:
                 TerminalPlaceholderView(
-                    title: "Git",
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "lazygit")
                 )
@@ -518,10 +519,7 @@ private struct RightPanelView: View {
                         model.activateSelectedRightPanelTerminal()
                     }
             }
-
-            Spacer()
         }
-        .padding(18)
         .background(dracula(.background))
     }
 
@@ -542,6 +540,17 @@ private struct RightPanelView: View {
             return "Missing working directory for \(tool): \(path)"
         }
         return "Terminal unavailable for \(tool)"
+    }
+
+    private func iconName(for mode: RightPanelMode) -> String {
+        switch mode {
+        case .files:
+            return "doc.on.doc"
+        case .nvim:
+            return "terminal"
+        case .git:
+            return "arrow.triangle.branch"
+        }
     }
 }
 
@@ -580,14 +589,18 @@ private struct FileBrowserPanel: View {
     @Binding var searchQuery: String
     let onRefresh: () -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
+    @State private var expandedFolders: Set<String> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("Files")
-                    .font(.headline)
-
-                Spacer()
+                TextField("Search files", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(dracula(.currentLine))
+                    .foregroundStyle(dracula(.foreground))
+                    .accessibilityLabel("Search files")
 
                 Button(action: onRefresh) {
                     Image(systemName: "arrow.clockwise")
@@ -597,23 +610,6 @@ private struct FileBrowserPanel: View {
                 .help("Refresh files")
                 .accessibilityLabel("Refresh files")
             }
-
-            if let rootPath = state.rootPath {
-                Text(rootPath)
-                    .font(.caption)
-                    .foregroundStyle(dracula(.comment))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .accessibilityLabel("Working directory \(rootPath)")
-            }
-
-            TextField("Search files", text: $searchQuery)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(dracula(.currentLine))
-                .foregroundStyle(dracula(.foreground))
-                .accessibilityLabel("Search files")
 
             HStack(spacing: 6) {
                 if state.isIndexing {
@@ -637,14 +633,37 @@ private struct FileBrowserPanel: View {
             }
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(state.visibleEntries) { entry in
-                        FileBrowserRow(entry: entry, onOpenFile: onOpenFile)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        ForEach(FileBrowserTreeBuilder.roots(from: state.visibleEntries)) { node in
+                            FileBrowserTreeRow(
+                                node: node,
+                                depth: 0,
+                                expandedFolders: $expandedFolders,
+                                onOpenFile: onOpenFile
+                            )
+                        }
+                    } else {
+                        ForEach(state.visibleEntries) { entry in
+                            FileBrowserSearchRow(entry: entry, onOpenFile: onOpenFile)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .onChange(of: state.entries) {
+                seedExpandedFolders()
+            }
+            .onChange(of: state.rootPath) {
+                expandedFolders.removeAll()
+                seedExpandedFolders()
+            }
+            .onAppear {
+                seedExpandedFolders()
+            }
         }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
     }
 
     private var statusText: String {
@@ -654,67 +673,221 @@ private struct FileBrowserPanel: View {
         let ignored = metadata.ignoredDirectoryCount == 1 ? "1 ignored directory" : "\(metadata.ignoredDirectoryCount) ignored directories"
         return "\(state.visibleEntries.count) of \(metadata.fileCount) items, \(ignored)"
     }
+
+    private func seedExpandedFolders() {
+        expandedFolders = Set(
+            state.entries
+                .filter { $0.isDirectory && !$0.relativePath.contains("/") }
+                .map(\.relativePath)
+        )
+    }
 }
 
-private struct FileBrowserRow: View {
+private struct FileBrowserTreeNode: Identifiable {
+    let entry: FileBrowserEntry
+    let displayName: String
+    let children: [FileBrowserTreeNode]
+
+    var id: String {
+        entry.id
+    }
+}
+
+private enum FileBrowserTreeBuilder {
+    static func roots(from entries: [FileBrowserEntry]) -> [FileBrowserTreeNode] {
+        var boxesByPath: [String: FileBrowserTreeNodeBox] = [:]
+        var rootBoxes: [FileBrowserTreeNodeBox] = []
+
+        for entry in entries {
+            let components = entry.relativePath.split(separator: "/").map(String.init)
+            guard !components.isEmpty else { continue }
+            var currentPath = ""
+            var parent: FileBrowserTreeNodeBox?
+
+            for (index, component) in components.enumerated() {
+                currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
+                let isLeaf = index == components.count - 1
+                let isDirectory = isLeaf ? entry.isDirectory : true
+                let box = boxesByPath[currentPath] ?? FileBrowserTreeNodeBox(
+                    entry: FileBrowserEntry(relativePath: currentPath, isDirectory: isDirectory),
+                    name: component
+                )
+                boxesByPath[currentPath] = box
+
+                if let parent {
+                    parent.addChildIfNeeded(box)
+                } else if !rootBoxes.contains(where: { $0.entry.relativePath == box.entry.relativePath }) {
+                    rootBoxes.append(box)
+                }
+                parent = box
+            }
+        }
+
+        return rootBoxes
+            .sorted(by: sortBoxes)
+            .map { node(from: $0) }
+    }
+
+    private static func node(from box: FileBrowserTreeNodeBox) -> FileBrowserTreeNode {
+        let children = box.children.sorted(by: sortBoxes).map { node(from: $0) }
+        return FileBrowserTreeNode(entry: box.entry, displayName: box.name, children: children)
+    }
+
+    private static func sortBoxes(_ left: FileBrowserTreeNodeBox, _ right: FileBrowserTreeNodeBox) -> Bool {
+        if left.entry.isDirectory != right.entry.isDirectory {
+            return left.entry.isDirectory && !right.entry.isDirectory
+        }
+        return left.name.localizedStandardCompare(right.name) == .orderedAscending
+    }
+}
+
+private final class FileBrowserTreeNodeBox {
+    let entry: FileBrowserEntry
+    let name: String
+    private(set) var children: [FileBrowserTreeNodeBox] = []
+
+    init(entry: FileBrowserEntry, name: String) {
+        self.entry = entry
+        self.name = name
+    }
+
+    func addChildIfNeeded(_ child: FileBrowserTreeNodeBox) {
+        guard !children.contains(where: { $0.entry.relativePath == child.entry.relativePath }) else { return }
+        children.append(child)
+    }
+}
+
+private struct FileBrowserTreeRow: View {
+    let node: FileBrowserTreeNode
+    let depth: Int
+    @Binding var expandedFolders: Set<String>
+    let onOpenFile: (FileBrowserEntry) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if node.entry.isDirectory {
+                    toggleExpanded()
+                } else {
+                    onOpenFile(node.entry)
+                }
+            } label: {
+                FileBrowserRowContent(
+                    entry: node.entry,
+                    displayName: node.displayName,
+                    depth: depth,
+                    isExpanded: isExpanded
+                )
+            }
+            .buttonStyle(.plain)
+            .help(node.entry.isDirectory ? node.entry.relativePath : "Open in nvim")
+
+            if node.entry.isDirectory && isExpanded {
+                ForEach(node.children) { child in
+                    FileBrowserTreeRow(
+                        node: child,
+                        depth: depth + 1,
+                        expandedFolders: $expandedFolders,
+                        onOpenFile: onOpenFile
+                    )
+                }
+            }
+        }
+    }
+
+    private var isExpanded: Bool {
+        expandedFolders.contains(node.entry.relativePath)
+    }
+
+    private func toggleExpanded() {
+        if isExpanded {
+            expandedFolders.remove(node.entry.relativePath)
+        } else {
+            expandedFolders.insert(node.entry.relativePath)
+        }
+    }
+}
+
+private struct FileBrowserSearchRow: View {
     let entry: FileBrowserEntry
     let onOpenFile: (FileBrowserEntry) -> Void
 
     var body: some View {
         if entry.isDirectory {
-            rowContent
+            FileBrowserRowContent(
+                entry: entry,
+                displayName: entry.relativePath,
+                depth: 0,
+                isExpanded: false
+            )
         } else {
             Button {
                 onOpenFile(entry)
             } label: {
-                rowContent
+                FileBrowserRowContent(
+                    entry: entry,
+                    displayName: entry.relativePath,
+                    depth: 0,
+                    isExpanded: false
+                )
             }
             .buttonStyle(.plain)
             .help("Open in nvim")
         }
     }
+}
 
-    private var rowContent: some View {
-        HStack(spacing: 8) {
+private struct FileBrowserRowContent: View {
+    let entry: FileBrowserEntry
+    let displayName: String
+    let depth: Int
+    var isExpanded = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(dracula(.comment))
+                .frame(width: 12)
+                .opacity(entry.isDirectory ? 1 : 0)
+
             Image(systemName: entry.isDirectory ? "folder" : "doc.text")
-                .foregroundStyle(dracula(entry.isDirectory ? .cyan : .green))
-                .frame(width: 16)
+                .font(.system(size: 13))
+                .foregroundStyle(dracula(entry.isDirectory ? .cyan : .purple))
+                .frame(width: 15)
 
-            Text(entry.relativePath)
-                .font(.system(.caption, design: .monospaced))
+            Text(displayName)
+                .font(.system(.caption, design: .default).weight(entry.isDirectory ? .semibold : .regular))
                 .foregroundStyle(dracula(.foreground))
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .padding(.vertical, 3)
+        .padding(.leading, CGFloat(depth) * 14)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityLabel("\(entry.isDirectory ? "Folder" : "File") \(entry.relativePath)")
     }
 }
 
 private struct TerminalPlaceholderView: View {
-    let title: String
     let request: TerminalLaunchRequest?
     let unavailableMessage: String
     var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(dracula(.green))
-
+        ZStack(alignment: .topLeading) {
             if let request {
                 GhosttyTerminalSurfaceView(request: request, onTitleChange: onTitleChange)
-                    .accessibilityLabel("\(title) terminal")
+                    .accessibilityLabel("\(request.title) terminal")
             } else {
                 Text(unavailableMessage)
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(dracula(.foreground))
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 180, alignment: .topLeading)
-        .background(dracula(.currentLine))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(dracula(.background))
     }
 }
 
@@ -753,7 +926,6 @@ private struct GlobalTerminalBar: View {
 
             if isExpanded {
                 TerminalPlaceholderView(
-                    title: "Global",
                     request: request,
                     unavailableMessage: "Terminal unavailable for the user home directory"
                 )
@@ -841,6 +1013,26 @@ private struct HorizontalResizeHandle: View {
                     }
             )
             .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct WindowTitleUpdater: NSViewRepresentable {
+    let title: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        updateTitle(from: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        updateTitle(from: nsView)
+    }
+
+    private func updateTitle(from view: NSView) {
+        DispatchQueue.main.async {
+            view.window?.title = title
+        }
     }
 }
 
