@@ -1,10 +1,14 @@
 # Scripts
 
-This directory is reserved for repository automation.
+This directory contains the canonical command-line workflow for the SwiftPM
+scaffold.
 
-Planned scripts:
+## Commands
 
-- `bootstrap.sh`: local setup once the app target exists.
-- `test-e2e.sh`: run behavior-focused E2E tests and collect screenshots.
-- `test-unit.sh`: run high-value input/output unit tests.
-- `format.sh`: format source files once formatting rules exist.
+- `build.sh`: run `swift build`.
+- `run.sh`: run `swift run AgentIDE`.
+- `test.sh`: run `swift test`.
+- `check.sh`: run build and tests together.
+
+Future E2E and formatting scripts should stay script-backed and command-line
+first.

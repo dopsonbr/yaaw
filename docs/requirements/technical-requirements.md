@@ -24,7 +24,8 @@ Requirements use:
 - The app MUST use SQLite for app-owned structured state such as projects, threads, indexes, archives, and layout state.
 - The app MUST use JSON files for user-editable or portable configuration.
 - The app MUST keep project metadata in app-owned storage rather than writing metadata into project directories.
-- The app MUST keep terminal process/session state in memory while running and MUST NOT require restoring terminal processes after restart.
+- The app MUST keep live terminal process state in memory while running and MUST NOT require restoring live PTY processes after restart.
+- The app MUST persist the agent CLI session metadata needed to resume each thread's bound `codex` or `claude` session after the app or thread is reopened.
 
 ## Storage
 
@@ -36,6 +37,9 @@ The SQLite database MUST store:
 - Threads.
 - Thread-to-project relationships.
 - Thread working directories.
+- Thread agent CLI selection.
+- Thread agent CLI session identity.
+- Thread canonical CLI session name.
 - Archive state.
 - Last selected project.
 - Last selected thread.
@@ -68,32 +72,43 @@ JSON configuration SHOULD include:
 ## Threads
 
 - A thread MUST belong to one project.
-- A thread MUST have a stable id, display name, project id, working directory, created timestamp, last opened timestamp, and archive state.
+- A thread MUST be bound to exactly one managed agent CLI session.
+- A thread MUST store `agent_cli` as either `codex` or `claude`.
+- A thread MUST store the CLI session identity needed to resume the exact bound agent CLI session.
+- A thread MUST have a stable id, display name, project id, working directory, `agent_cli`, CLI session identity, created timestamp, last opened timestamp, and archive state.
+- A thread display name MUST be derived from the bound CLI session's reported name, title, or id.
 - A thread working directory MAY be the project root or a separate worktree directory.
-- Each thread MUST own one project terminal while the app is running.
-- Thread terminal sessions MUST NOT be required to persist after app restart.
+- A thread MUST NOT switch from `codex` to `claude`, or from `claude` to `codex`, after it is created.
+- New thread creation MUST ask the user whether to start a `codex` or `claude` session.
+- New thread creation MUST launch the selected agent CLI in the thread working directory.
+- Reopening a thread MUST invoke the matching CLI resume behavior for the stored session identity.
+- Each thread MUST own one agent CLI session terminal while the app is running.
+- Live thread terminal sessions MUST NOT be required to persist after app restart.
 - Thread terminal/session state MUST be preserved while the app process is running.
 - Archived threads MUST move out of the primary active thread list.
+- Archived threads MUST retain the agent CLI selection and CLI session identity required for later resume.
 
 ## Terminal Requirements
 
 - Every embedded terminal surface MUST use `libghostty`.
-- The app MUST provide one project terminal per active thread.
+- The app MUST provide one agent CLI session terminal per active thread.
 - The app MUST provide one global terminal.
 - The app MUST provide a right-panel terminal for `nvim`.
 - The app MUST provide a right-panel terminal for `lazygit`.
-- Project terminals MUST launch in the selected thread's working directory.
+- Agent CLI session terminals MUST launch in the selected thread's working directory.
+- Agent CLI session terminals MUST invoke either `codex` or `claude` according to the selected thread's stored `agent_cli`.
+- Agent CLI session terminals MUST resume the selected thread's stored CLI session identity when reopening an existing thread.
 - The global terminal MUST launch in the user's home directory.
 - The `nvim` terminal MUST launch in the selected thread's working directory.
 - The `lazygit` terminal MUST launch in the selected thread's working directory.
 - Terminal sessions MUST preserve runtime state while the app is open.
-- Terminal sessions MUST NOT be restored after app restart for the first version.
-- SQLite MUST persist terminal metadata and layout state, not live PTY process state.
+- Live PTY processes MUST NOT be restored after app restart for the first version.
+- SQLite MUST persist terminal metadata, agent CLI resume metadata, and layout state, not live PTY process state.
 
 ## App Layout
 
 - The app MUST have a left project/thread sidebar.
-- The app MUST have a central project terminal area.
+- The app MUST have a central agent CLI session terminal area.
 - The app MUST have a right tool panel.
 - The app MUST have a bottom global terminal.
 - The left sidebar MUST be collapsible.
@@ -106,7 +121,7 @@ JSON configuration SHOULD include:
 Resizeable panels:
 
 - Sidebar width.
-- Main project terminal width.
+- Main agent CLI session terminal width.
 - Right tool panel width.
 - Global terminal height when expanded.
 
@@ -179,26 +194,35 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - Terminals, sidebar, right panel, modal sheets, split-view handles, icons, file tree, `nvim`, and `lazygit` surfaces MUST use the Dracula visual system.
 - The implementation SHOULD use shared theme tokens rather than hardcoding colors throughout the app.
 
-## Agent Scope
+## Agent CLI Scope
 
-- The first version MUST be terminal-only.
-- The app MUST NOT manage a specific agent CLI as a first-version requirement.
-- The app MAY allow users to run any agent command manually inside a project terminal.
-- New threads MUST NOT auto-run a specific agent command unless a later implementation plan adds that behavior.
+- The first version MUST manage thread sessions through terminal-backed `codex` and `claude` CLI processes.
+- Each thread MUST be tied to exactly one `codex` or `claude` CLI session.
+- The app MUST ask which agent CLI to invoke when starting a new thread.
+- The app MUST use the selected CLI session's reported name, title, or id as the canonical thread display name.
+- Closing and reopening a thread MUST resume the associated agent CLI session.
+- The app MUST NOT require users to manually run `codex`, `claude`, or resume commands for normal thread creation or reopening.
+- The app MUST NOT orchestrate multiple agent CLI sessions inside one thread for the first version.
 
 ## External Tools
 
 - `nvim` SHOULD be detected from the user's `PATH`.
+- `codex` and `claude` MUST be detected from the user's `PATH` when their corresponding thread type is created or resumed.
 - `lazygit` MUST be detected from the user's `PATH`.
 - External tool failures MUST be visible in the embedded terminal surface.
+- Agent CLI launch or resume failures MUST be visible in the thread's agent CLI session terminal.
 - The first version SHOULD avoid bundling external CLI tools unless packaging later requires it.
 
 ## Acceptance Criteria
 
 - A user can create a project from a local directory.
 - A user can create multiple threads under a project.
+- Creating a thread asks the user whether to invoke `codex` or `claude`.
+- Each thread is bound to exactly one stored `codex` or `claude` CLI session.
+- A thread's visible name matches the bound CLI session's reported name, title, or id.
+- Closing and reopening a thread resumes the stored CLI session identity.
 - A thread can point at a project root or a separate worktree.
-- Each running thread has one project terminal.
+- Each running thread has one agent CLI session terminal.
 - The global terminal is collapsed by default and toggles with `Cmd+J`.
 - The sidebar, right tool panel, and global terminal are resizeable.
 - The right tool panel is scoped to the active thread.
@@ -209,5 +233,5 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - Opening a file launches `nvim` inside the right panel.
 - Opening Git mode launches `lazygit` inside the right panel.
 - `lazygit` is resolved from `PATH`, and launch errors are shown as-is.
-- Project, thread, index, archive, and layout metadata are stored in SQLite.
+- Project, thread, agent CLI session, index, archive, and layout metadata are stored in SQLite.
 - User-editable configuration is stored in JSON.

@@ -1,17 +1,45 @@
 # Quickstart
 
-This repo is currently a documentation and scaffold baseline for a native macOS Agent IDE.
+This repo is a SwiftPM-only native macOS scaffold for Agent IDE. Use the
+repository scripts for build, run, and test workflows.
 
-## Current State
+## Requirements
 
-- Product, technical, non-functional, and testing requirements are under `docs/requirements/`.
-- User workflows are under `docs/user-guide/`.
-- Design notes are under `docs/design/`.
-- Implementation plans are under `docs/plans/`.
-- Source directories are scaffolded under `src/`.
+- Apple Silicon Mac.
+- Latest local macOS and command-line Swift toolchain. `Package.swift` pins the platform to `.macOS(.v26)`; older macOS versions will fail to build by design (see the latest-macOS-only stance in [Technical Requirements](docs/requirements/technical-requirements.md)).
+- No Xcode project is required.
 
-## First Development Step
+## Commands
 
-Create the native macOS app target for Apple Silicon/latest macOS, then wire it to the existing `src/` module layout.
+Build:
 
-No build command exists yet.
+```sh
+scripts/build.sh
+```
+
+Run the Hello World app shell:
+
+```sh
+scripts/run.sh
+```
+
+Run the base test suite:
+
+```sh
+scripts/test.sh
+```
+
+Run build and tests together:
+
+```sh
+scripts/check.sh
+```
+
+## Layout
+
+- `Package.swift` defines the `AgentIDE` executable and `AgentIDEKit` library.
+- `src/App/` contains the thin SwiftUI app entrypoint and root composition.
+- `src/Core/`, `src/Projects/`, `src/Threads/`, `src/RightPanel/`,
+  `src/FileBrowser/`, `src/Persistence/`, `src/Terminal/`, and `src/Theme/`
+  contain compile-ready Hello World placeholders.
+- `src/Tests/AgentIDEKitTests/` contains public behavior tests.

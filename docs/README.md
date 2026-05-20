@@ -9,6 +9,8 @@ Read the documentation in this order:
 5. [Testing Requirements](requirements/testing-requirements.md)
 6. [Design](design/README.md)
 7. [Implementation Plans](plans/)
+   - [Implementation Order](plans/implementation-order.md)
 8. [Standards](standards/)
+9. [Decisions](decisions/) — open product/architecture questions and the defaults plans assume until they are resolved.
 
 Implementation plans should reference the relevant requirements and standards.

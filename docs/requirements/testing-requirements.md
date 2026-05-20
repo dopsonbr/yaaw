@@ -25,9 +25,13 @@ E2E tests MUST cover the primary user workflows:
 
 - Launch the app.
 - Create a project from a local directory.
-- Create a thread under a project.
+- Create a `codex` thread under a project.
+- Create a `claude` thread under a project.
+- Verify new thread creation asks which agent CLI to invoke.
+- Verify the visible thread name matches the selected CLI session's reported name, title, or id.
 - Switch between project threads.
-- Use the project terminal.
+- Use the agent CLI session terminal.
+- Close and reopen a thread and verify the stored agent CLI session identity is resumed.
 - Toggle the global terminal with `Cmd+J`.
 - Resize major panels.
 - Collapse and expand the sidebar.
@@ -52,22 +56,27 @@ This test MUST:
 3. Initialize real files in that directory.
 4. Initialize a real Git repository when Git behavior is tested.
 5. Create a project in the app.
-6. Create a thread.
-7. Use the project terminal.
-8. Open the right panel in Files mode.
-9. Search for a file.
-10. Open that file in `nvim`.
-11. Switch to Git mode.
-12. Launch `lazygit`.
-13. Toggle the global terminal.
-14. Resize or collapse panels.
-15. Archive the thread.
-16. Quit and relaunch the app.
-17. Verify durable app state is restored where required.
+6. Create a thread and choose `codex` when prompted.
+7. Verify the thread name matches the Codex session's reported name, title, or id.
+8. Use the agent CLI session terminal.
+9. Close and reopen the thread.
+10. Verify reopening resumes the stored Codex session identity.
+11. Open the right panel in Files mode.
+12. Search for a file.
+13. Open that file in `nvim`.
+14. Switch to Git mode.
+15. Launch `lazygit`.
+16. Toggle the global terminal.
+17. Resize or collapse panels.
+18. Archive the thread.
+19. Quit and relaunch the app.
+20. Verify durable app state is restored where required.
 
 The full user journey test MUST NOT mock app storage, terminal surfaces, file browser behavior, or right-panel mode switching.
 
 The full user journey test MAY skip `lazygit` assertions when `lazygit` is not installed, but it MUST verify that the app surfaces the raw missing-tool error.
+
+The full user journey test MAY use test-safe `codex` and `claude` command doubles or controlled CLI fixtures so session names and resume identities can be asserted deterministically.
 
 ## Inputs And Outputs
 
@@ -78,6 +87,8 @@ Examples of valid inputs:
 - User clicks.
 - Keyboard shortcuts.
 - Text typed into fields.
+- Agent CLI choice, either `codex` or `claude`.
+- Controlled agent CLI session names and session identities.
 - Directory selections.
 - Files created in a temporary project.
 - Git repository state.
@@ -87,6 +98,9 @@ Examples of valid outputs:
 
 - Visible project names.
 - Visible thread names.
+- Visible selected agent CLI labels.
+- Visible agent CLI session names.
+- Persisted agent CLI session identities.
 - Visible active right-panel mode.
 - Visible terminal output.
 - Visible file search results.
@@ -131,8 +145,12 @@ Recommended tests:
 | Test | Required behavior |
 | --- | --- |
 | Project creation | A selected directory becomes a named project in the sidebar. |
-| Thread creation | A new thread appears under the selected project and gets a terminal. |
-| Thread switching | Switching threads changes the active terminal and right-panel context. |
+| Codex thread creation | A new Codex thread appears under the selected project and gets an agent CLI session terminal. |
+| Claude thread creation | A new Claude thread appears under the selected project and gets an agent CLI session terminal. |
+| CLI choice prompt | Creating a thread asks whether to invoke `codex` or `claude`. |
+| Thread naming | The visible thread name matches the bound CLI session name, title, or id. |
+| Thread resume | Closing and reopening a thread resumes the stored CLI session identity. |
+| Thread switching | Switching threads changes the active agent CLI session terminal and right-panel context. |
 | Right-panel modes | Files, `nvim`, and Git modes can be selected by icon/tab. |
 | Right-panel shortcuts | `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes. |
 | Global navigation | `Cmd+[` and `Cmd+]` move through app navigation history. |
@@ -140,7 +158,7 @@ Recommended tests:
 | File search | Hidden files are visible and fuzzy search returns expected matches. |
 | nvim open | Opening a file launches `nvim` in the right panel. |
 | lazygit open | Git mode launches `lazygit` or shows the raw missing-tool error. |
-| Persistence | Project/thread/layout metadata survive app relaunch. |
+| Persistence | Project/thread/agent CLI session/layout metadata survive app relaunch. |
 
 ## Mocking Policy
 
@@ -172,6 +190,8 @@ Good unit test targets:
 - JSON config parsing and validation.
 - SQLite migration behavior against a real temporary database.
 - Public project/thread storage APIs.
+- Agent CLI session metadata persistence.
+- Agent CLI resume command construction at a public boundary.
 - Keyboard shortcut command routing at the public action level.
 
 Poor unit test targets:
@@ -231,7 +251,8 @@ Artifacts MUST NOT include sensitive terminal output unless explicitly enabled f
 - The E2E harness can interact with the app through clicks, typing, and keyboard shortcuts.
 - The E2E harness can capture screenshots.
 - The suite includes one full no-mock user journey test.
-- The suite includes focused E2E tests for project/thread creation, panel behavior, file search, `nvim`, `lazygit`, shortcuts, and persistence.
+- The suite includes focused E2E tests for project/thread creation, agent CLI selection, session naming, session resume, panel behavior, file search, `nvim`, `lazygit`, shortcuts, and persistence.
+- Persistence tests verify agent kind and CLI session identity survive relaunch.
 - Tests verify visible inputs and outputs instead of private implementation details.
 - Unit tests are limited to high-value public behavior or deterministic input/output logic.
 - Test artifacts are saved for failure review.

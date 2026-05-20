@@ -1,5 +1,9 @@
 # Repo Restructure Proposal
 
+> **Status: Completed.** The restructure described here was executed in the initial scaffold commit (`2e04fce Initial agent IDE scaffold`). This document is retained for historical context and to explain the rationale behind the current layout. New work should reference [Implementation Order](implementation-order.md) instead.
+>
+> Note: the script names in the proposed tree below (`bootstrap.sh`, `test-e2e.sh`, `test-unit.sh`, `format.sh`) were aspirational. The scripts that actually shipped are `build.sh`, `run.sh`, `test.sh`, and `check.sh`. See `scripts/README.md` for the current canonical list. `scripts/test-e2e.sh` is introduced by [Plan 10](10-behavior-e2e-suite.md).
+
 This proposal defines a repo layout for the native macOS Agent IDE. It keeps the root small, moves durable product documentation under `docs/`, and separates app source, scripts, standards, requirements, and agent guidance.
 
 ## Goals

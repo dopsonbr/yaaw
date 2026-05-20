@@ -1,15 +1,15 @@
 # Native macOS Agent IDE
 
-A lightweight native macOS IDE for working with agent threads inside project-scoped terminals.
+A lightweight native macOS IDE for working with Codex and Claude agent threads inside project-scoped terminals.
 
-The first version intentionally stays small: it gives users a project list, one active thread at a time, a real terminal per thread, and a collapsible right tool panel for files, `nvim`, and `lazygit`. The app is not trying to replace a full editor on day one. It is a focused workspace for starting, resuming, and organizing agent-driven development sessions.
+The first version intentionally stays small: it gives users a project list, one active thread at a time, one managed agent CLI session terminal per thread, and a collapsible right tool panel for files, `nvim`, and `lazygit`. The app is not trying to replace a full editor on day one. It is a focused workspace for starting, resuming, and organizing agent-driven development sessions.
 
 ## Goals
 
 - Keep the app native, fast, and minimal.
 - Make projects and threads easy to switch from a single sidebar.
 - Scope every project to a local directory.
-- Provide one project terminal per thread.
+- Provide one `codex` or `claude` CLI session terminal per thread.
 - Provide a global terminal that starts collapsed and can be toggled with `Cmd+J`.
 - Use `libghostty` for embedded terminal rendering and terminal behavior.
 - Use the Dracula theme across every app surface.
@@ -55,8 +55,9 @@ The app has three primary regions:
 2. **Main workspace**
    - Resizeable against the sidebar, right tool panel, and global terminal.
    - Shows the selected project/thread.
-   - Contains the project terminal for the selected thread.
-   - Creates a new terminal session for each new thread.
+   - Contains the agent CLI session terminal for the selected thread.
+   - Asks whether a new thread should start `codex` or `claude`.
+   - Creates or resumes the bound agent CLI session for each selected thread.
 
 3. **Right tool panel**
    - Collapsible.
@@ -79,13 +80,17 @@ The special `global` project is scoped to the user's home directory.
 
 ### Thread
 
-A thread is an agent session inside a project. Each thread has its own project terminal.
+A thread is one agent CLI session inside a project. Each thread is bound to exactly one `codex` or `claude` session, and the thread name matches that CLI session's reported name, title, or id.
 
 Users switch between threads from the left sidebar.
 
-### Project Terminal
+Closing and reopening a thread resumes the same bound agent CLI session. A thread cannot switch from `codex` to `claude`, or from `claude` to `codex`, after it is created.
 
-Each thread owns one project terminal. The terminal starts in the project's directory and is backed by `libghostty`.
+### Agent CLI Session Terminal
+
+Each thread owns one agent CLI session terminal. The terminal starts in the thread's working directory, launches the selected `codex` or `claude` CLI, and is backed by `libghostty`.
+
+Runtime terminal process state is kept while the app is open. Durable thread metadata stores the selected CLI and session identity needed to resume the same CLI session after the thread or app is reopened.
 
 ### Global Terminal
 
@@ -110,7 +115,7 @@ Users can switch right-panel modes by cycling tabs or clicking mode icons:
 Every major panel should be resizeable through native split-view handles:
 
 - Sidebar width.
-- Main project terminal width.
+- Main agent CLI session terminal width.
 - Right tool panel width.
 - Global terminal height when expanded.
 
@@ -121,8 +126,8 @@ Panel sizes should persist per app workspace unless that adds too much implement
 | Area | MVP behavior |
 | --- | --- |
 | Projects | Create a project from a local directory, name it, and list it in the sidebar. |
-| Threads | Create, select, and archive threads under a project. |
-| Terminals | One `libghostty` project terminal per thread. One collapsed global terminal. |
+| Threads | Create, select, resume, and archive `codex` or `claude` sessions under a project. |
+| Terminals | One `libghostty` agent CLI session terminal per thread. One collapsed global terminal. |
 | Theme | Dracula across all panels, terminals, modals, and selection states. |
 | Sidebar | Collapsible and resizeable project/thread navigation. |
 | Right tool panel | Collapsible and resizeable file tree, `nvim`, and `lazygit` modes with fuzzy file matching. |
@@ -149,8 +154,8 @@ Generated Dracula-themed example pages are available under `docs/examples/screen
 - Embed terminals through `libghostty`.
 - Launch `nvim` in the right panel for file editing rather than building a custom editor for the MVP.
 - Launch `lazygit` in the right panel for Git workflows rather than building a custom source control UI for the MVP.
-- Persist project and thread metadata locally.
-- Treat the terminal process and working directory as part of the thread model.
+- Persist project, thread, selected agent CLI, and CLI session identity metadata locally.
+- Treat the selected agent CLI, CLI session identity, terminal process, and working directory as part of the thread model.
 - Treat panel dimensions as first-class layout state.
 - Keep file indexing shallow and responsive for the MVP; add deeper indexing later only if needed.
 
@@ -163,14 +168,16 @@ Generated Dracula-themed example pages are available under `docs/examples/screen
 - Extension marketplace.
 - Rich settings system.
 - Remote development.
-- Multi-agent orchestration.
+- Multi-agent orchestration beyond one bound `codex` or `claude` session per thread.
 - Deep semantic code indexing.
 
 ## Open Design Questions
 
-- Whether archived threads should keep terminal scrollback, command history, or only metadata.
-- How much project metadata should live inside the project directory versus app-level storage.
-- Whether global threads should behave exactly like project threads or remain a separate lightweight list.
+These are tracked as decision records under [`docs/decisions/`](docs/decisions/). Each record names a recommended default the implementation plans assume until the decision is finalized.
+
+- [001 — Archived Thread Scrollback Retention](docs/decisions/001-archived-thread-scrollback.md)
+- [002 — Project Metadata Location](docs/decisions/002-project-metadata-location.md)
+- [003 — Global Project Thread Behavior](docs/decisions/003-global-project-thread-behavior.md)
 
 ## Documentation
 

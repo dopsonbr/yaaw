@@ -2,14 +2,14 @@
 
 This document describes the first implementation shape for the native macOS Agent IDE.
 
-The design favors a small, terminal-first app over a full IDE. The first version should make project/thread context, terminal state, file discovery, lightweight `nvim` editing, and `lazygit` Git workflows feel native and reliable before adding larger editor or automation features.
+The design favors a small, terminal-first app over a full IDE. The first version should make project/thread context, bound `codex` or `claude` session state, file discovery, lightweight `nvim` editing, and `lazygit` Git workflows feel native and reliable before adding larger editor or automation features.
 
 ## Product Principles
 
 - Native macOS shell.
 - Dracula theme everywhere.
 - Terminal-first workflow.
-- One project terminal per thread.
+- One agent CLI session terminal per thread.
 - `nvim` for file editing in the right panel.
 - `lazygit` for Git workflows in the right panel.
 - Resizeable and collapsible panels.
@@ -44,7 +44,7 @@ The app shell is a native macOS window with split-view layout.
 +--------------------------------------------------------------------------------+
 | Sidebar icons | Active project / thread                         | Tool actions |
 +---------------+-----------------------------------------------+----------------+
-| Projects      | Project terminal                              | File tree      |
+| Projects      | Agent CLI session terminal                   | File tree      |
 | Threads       |                                               | nvim / lazygit |
 | Archive       |                                               |                |
 |               |                                               |                |
@@ -56,7 +56,7 @@ The app shell is a native macOS window with split-view layout.
 The shell has four resizeable regions:
 
 - Left project/thread sidebar.
-- Main project terminal.
+- Main agent CLI session terminal.
 - Right tool panel.
 - Bottom global terminal when expanded.
 
@@ -79,7 +79,7 @@ Project metadata should include:
 
 ### Thread
 
-A thread belongs to one project and owns one project terminal.
+A thread belongs to one project and owns one terminal-backed agent CLI session. Each thread is bound to exactly one `codex` or `claude` session.
 
 Thread metadata should include:
 
@@ -87,10 +87,14 @@ Thread metadata should include:
 - Project id.
 - Display name.
 - Working directory.
-- Terminal session identity.
+- Agent CLI kind, either `codex` or `claude`.
+- CLI session identity for resume.
+- Canonical CLI session name.
 - Created timestamp.
 - Last opened timestamp.
 - Archived flag.
+
+The thread display name should mirror the bound CLI session's reported name, title, or id. Closing and reopening a thread should resume the same stored CLI session identity.
 
 The left sidebar is the only required thread switcher for the MVP.
 
@@ -100,14 +104,14 @@ All embedded terminal surfaces should use `libghostty`.
 
 The MVP needs four terminal roles:
 
-- **Project terminal:** one terminal per thread, launched in the project directory.
+- **Agent CLI session terminal:** one terminal per thread, launched in the thread working directory and running the bound `codex` or `claude` session.
 - **Global terminal:** shared terminal, launched in the user's home directory, collapsed by default.
 - **Editor terminal:** right-panel terminal used to run `nvim` for an opened file.
 - **Git terminal:** right-panel terminal used to run `lazygit` for the active project.
 
-Project terminals should remain associated with their thread. Switching threads should restore the matching terminal surface rather than starting a new shell every time.
+Agent CLI session terminals should remain associated with their thread. Switching threads should restore the matching terminal surface rather than starting a new shell every time.
 
-Terminal process state is runtime state. It should be kept while the app process is running, but the first version does not need to restore terminal sessions after app restart.
+Live terminal process state is runtime state. It should be kept while the app process is running, but the first version does not need to restore live PTY processes after app restart. Agent CLI resume metadata is durable state and should be stored so reopening a thread resumes the same `codex` or `claude` session.
 
 ## Right Tool Panel
 
@@ -169,6 +173,9 @@ Persist:
 
 - Projects.
 - Threads.
+- Agent CLI kind per thread.
+- Agent CLI session identity per thread.
+- Canonical CLI session name per thread.
 - Archived thread state.
 - Last selected project and thread.
 - Panel collapsed states.
@@ -194,6 +201,8 @@ Add more shortcuts only after the interaction model stabilizes.
 - SwiftUI is suitable for the high-level app shell, sidebar lists, modal sheets, and simple controls.
 - AppKit is likely needed for split-view control, focus handling, and terminal embedding.
 - `libghostty` should be the terminal rendering path for project, global, editor, and Git terminals.
+- Thread creation should prompt for `codex` or `claude`, then launch the selected CLI in the thread working directory.
+- Thread reopening should use the stored CLI session identity to resume the bound session.
 - The right editor panel should use `nvim` rather than a custom editor.
 - The right Git panel should use `lazygit` rather than a custom source control UI.
 - Keep all MVP state local and simple before adding sync, collaboration, or remote development.
@@ -202,7 +211,10 @@ Add more shortcuts only after the interaction model stabilizes.
 
 - A user can create a project from a local directory and give it a name.
 - A user can create and switch between threads under a project.
-- Each thread gets one project terminal in the project directory.
+- Creating a thread asks whether to invoke `codex` or `claude`.
+- Each thread gets one agent CLI session terminal in the thread working directory.
+- Each thread is named from the bound CLI session name, title, or id.
+- Reopening a thread resumes the bound CLI session identity.
 - The global terminal starts collapsed and toggles with `Cmd+J`.
 - The sidebar, right panel, and global terminal can be resized.
 - The sidebar and right panel can be collapsed.

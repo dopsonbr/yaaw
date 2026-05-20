@@ -11,7 +11,7 @@ Requirements use:
 ## Performance
 
 - The app MUST launch quickly on Apple Silicon hardware.
-- The app MUST keep project/thread switching responsive while terminals are running.
+- The app MUST keep project/thread switching responsive while agent CLI session terminals are running.
 - The app MUST keep panel resizing smooth enough to feel native.
 - File indexing MUST NOT block the main UI thread.
 - File search SHOULD return useful results interactively as the user types.
@@ -27,16 +27,16 @@ Requirements use:
 
 ## Reliability
 
-- The app MUST preserve project, thread, archive, and layout metadata across app restarts.
+- The app MUST preserve project, thread, agent CLI session, archive, and layout metadata across app restarts.
 - The app MUST tolerate missing project directories and show a clear app-level state when a directory no longer exists.
-- The app MUST tolerate missing external tools such as `nvim` or `lazygit`.
+- The app MUST tolerate missing external tools such as `codex`, `claude`, `nvim`, or `lazygit`.
 - External tool errors MUST be visible without crashing the app.
-- Terminal sessions MUST remain isolated by thread while the app is running.
+- Agent CLI sessions and terminal sessions MUST remain isolated by thread while the app is running.
 - The app SHOULD recover cleanly from terminal process exits.
 
 ## Data Integrity
 
-- SQLite writes MUST be transactional for project, thread, archive, index, and layout updates.
+- SQLite writes MUST be transactional for project, thread, agent CLI session, archive, index, and layout updates.
 - The app MUST NOT write metadata into user project directories for the first version.
 - The app MUST NOT modify repository files unless the user does so through a terminal tool such as `nvim`, shell commands, or `lazygit`.
 - File indexing MUST be read-only.
@@ -45,8 +45,9 @@ Requirements use:
 ## Security And Privacy
 
 - The app MUST keep all first-version project and thread metadata local.
-- The app MUST NOT send project paths, file names, terminal output, or repository content to a remote service.
-- The app MUST NOT require network access for core first-version workflows.
+- The app MUST keep thread agent CLI selection and CLI session identity local.
+- The app MUST NOT send project paths, file names, terminal output, agent CLI session metadata, or repository content to a remote service outside of the user's chosen local `codex` or `claude` CLI process.
+- The app itself MUST NOT require network access for core first-version workflows outside of any network behavior performed by the user's chosen local `codex` or `claude` CLI process.
 - The app MUST use the user's local shell and local tools.
 - The app SHOULD avoid storing terminal scrollback unless explicitly added in a later plan.
 
@@ -60,6 +61,7 @@ Requirements use:
 ## Usability
 
 - The app MUST make the active project and thread visible.
+- The app MUST make each thread's selected agent CLI visible when starting or inspecting a thread.
 - The app MUST make the active right-panel mode visible.
 - The app MUST keep Files, `nvim`, and Git mode controls available in the right panel.
 - The app MUST use familiar shortcuts for global back/forward navigation.
@@ -81,21 +83,22 @@ Requirements use:
 - Theme colors SHOULD be centralized as Dracula tokens.
 - SQLite schema changes SHOULD be versioned through migrations.
 - JSON config parsing SHOULD validate unknown or malformed values safely.
-- Terminal integrations SHOULD share common lifecycle management where possible.
+- Agent CLI terminal integrations SHOULD share common lifecycle management where possible.
+- `codex` and `claude` resume behavior SHOULD be isolated behind a small terminal/session boundary rather than mixed into UI layout code.
 
 ## Testability
 
 - The app MUST prioritize E2E tests that validate user-visible behavior.
 - The app MUST support screenshot capture for E2E failures and key UI states.
 - The app SHOULD include one high-level no-mock E2E journey through the full app workflow.
-- The app SHOULD include focused E2E tests for project/thread storage, file indexing, fuzzy matching, right-panel modes, terminal launch, `nvim`, `lazygit`, panel collapse, resize, and shortcut handling.
+- The app SHOULD include focused E2E tests for project/thread storage, agent CLI selection and resume, file indexing, fuzzy matching, right-panel modes, terminal launch, `nvim`, `lazygit`, panel collapse, resize, and shortcut handling.
 - Unit tests MAY be added for high-value input/output behavior, but they MUST NOT test internals or private functions.
 
-Detailed testing expectations are defined in [Testing Requirements](TESTING_REQUIREMENTS.md).
+Detailed testing expectations are defined in [Testing Requirements](testing-requirements.md).
 
 ## Observability
 
-- The app SHOULD provide local diagnostic logs for app lifecycle, project/thread state changes, terminal launch failures, indexing failures, and SQLite errors.
+- The app SHOULD provide local diagnostic logs for app lifecycle, project/thread state changes, agent CLI launch or resume failures, terminal launch failures, indexing failures, and SQLite errors.
 - Logs MUST remain local.
 - Logs MUST avoid capturing sensitive terminal content unless explicitly enabled in a later implementation plan.
 - External tool failures SHOULD preserve the original command and exit status where practical.
@@ -103,9 +106,9 @@ Detailed testing expectations are defined in [Testing Requirements](TESTING_REQU
 ## Packaging
 
 - The app SHOULD package as a standard macOS `.app`.
-- The first version SHOULD assume `nvim` and `lazygit` are user-installed tools resolved from `PATH`.
+- The first version SHOULD assume `codex`, `claude`, `nvim`, and `lazygit` are user-installed tools resolved from `PATH`.
 - The app SHOULD make missing tool failures visible in the relevant terminal panel.
-- The app MUST NOT require network setup or cloud authentication for core workflows.
+- The app itself MUST NOT require network setup or cloud authentication for core workflows outside of any authentication required by the user's chosen local `codex` or `claude` CLI process.
 
 ## Non-Goals
 
@@ -116,5 +119,5 @@ Detailed testing expectations are defined in [Testing Requirements](TESTING_REQU
 - Multi-user collaboration.
 - Built-in source control UI.
 - Built-in text editor.
-- Persistent terminal sessions after app restart.
-- Agent orchestration beyond terminal access.
+- Persistent live PTY sessions after app restart.
+- Agent orchestration beyond one bound `codex` or `claude` CLI session per thread.

@@ -4,7 +4,7 @@ This guide describes the intended first-version workflow for the native macOS Ag
 
 ## What The App Is For
 
-Use the app to organize agent work by project and thread. Each project is tied to a local directory. Each thread gets its own terminal, so work can be resumed without mixing command history or process state across unrelated sessions.
+Use the app to organize agent work by project and thread. Each project is tied to a local directory. Each thread is tied to exactly one `codex` or `claude` CLI session, so work can be resumed without mixing command history, process state, or agent session identity across unrelated sessions.
 
 The app uses the Dracula theme across all panels, terminals, file browsing, and editing surfaces.
 
@@ -13,7 +13,7 @@ The app uses the Dracula theme across all panels, terminals, file browsing, and 
 The main screen has three areas:
 
 - **Projects sidebar:** project and thread navigation.
-- **Project terminal:** the active terminal for the selected thread.
+- **Agent CLI session terminal:** the active `codex` or `claude` terminal for the selected thread.
 - **Right tool panel:** project files, opened files in `nvim`, and Git workflows in `lazygit`.
 
 The sidebar and right tool panel can both be collapsed to keep the terminal-focused view clean. Every major panel can also be resized.
@@ -23,7 +23,7 @@ The sidebar and right tool panel can both be collapsed to keep the terminal-focu
 1. Choose the new project action.
 2. Select a local directory.
 3. Enter a project name when prompted.
-4. The app creates the project and opens a project terminal in that directory.
+4. The app creates the project and prepares it for agent CLI threads in that directory.
 5. The project appears in the sidebar.
 
 Each project is scoped to one directory. The built-in `global` project is scoped to the user's home directory.
@@ -32,10 +32,11 @@ Each project is scoped to one directory. The built-in `global` project is scoped
 
 1. Select a project in the sidebar.
 2. Create a new thread.
-3. The app creates one project terminal for that thread.
-4. Use the terminal to start or resume the agent workflow for that thread.
+3. Choose whether the thread should invoke `codex` or `claude`.
+4. The app launches the selected CLI in the thread working directory.
+5. The thread name updates to match the CLI session's reported name, title, or id.
 
-Each thread has its own project terminal. Switching threads switches the active terminal.
+Each thread has its own agent CLI session terminal. Switching threads switches the active terminal and preserves the thread's selected CLI session identity.
 
 ## Switch Threads
 
@@ -43,18 +44,21 @@ Use the left sidebar to select a different thread.
 
 When a thread is selected:
 
-- The main terminal switches to that thread's project terminal.
+- The main terminal switches to that thread's agent CLI session terminal.
+- If the thread is reopened after being closed, the app resumes the stored `codex` or `claude` session identity.
 - The right tool panel shows files and tools for that thread's project.
 - The top project/thread area reflects the active context.
 
-## Use The Project Terminal
+## Use The Agent CLI Session Terminal
 
-The project terminal is the main working surface. It starts in the selected project's directory and should behave like a native terminal because it is backed by `libghostty`.
+The agent CLI session terminal is the main working surface. It starts in the selected thread's working directory, runs the thread's bound `codex` or `claude` CLI session, and should behave like a native terminal because it is backed by `libghostty`.
 
 The MVP expectation is simple:
 
-- One terminal per thread.
-- Terminal state remains associated with the thread.
+- One agent CLI session terminal per thread.
+- The selected `codex` or `claude` CLI remains associated with the thread.
+- The CLI session name is the source of the visible thread name.
+- Reopening the thread resumes the associated CLI session.
 - Project commands run from the project directory.
 - Terminal surfaces use the Dracula theme.
 
@@ -114,7 +118,7 @@ Drag panel dividers to resize the workspace.
 The MVP panels that must resize are:
 
 - Projects sidebar width.
-- Main project terminal width.
+- Main agent CLI session terminal width.
 - Right tool panel width.
 - Global terminal height when expanded.
 
@@ -124,7 +128,7 @@ Use resize behavior to make the active work surface larger without closing the o
 
 Archive a thread when it is no longer part of the active project list.
 
-Archived threads should move out of the main sidebar view but remain available from the archive area.
+Archived threads should move out of the main sidebar view but remain available from the archive area. Archiving keeps the selected agent CLI and session identity so the thread can be resumed later.
 
 ## Keyboard Shortcuts
 
@@ -143,15 +147,17 @@ Additional shortcuts should be added only when the behavior is stable and clearl
 1. Create a project from a local repo directory.
 2. Name the project.
 3. Start a thread for the task you want the agent to work on.
-4. Use the project terminal for that thread.
-5. Use the file browser to inspect project files.
-6. Open a file in `nvim` inside the right panel when you need to inspect or edit it.
-7. Switch the right panel to Git when you need `lazygit`.
-8. Resize or collapse panels when you want more terminal or editor space.
-9. Archive the thread when the work is complete.
+4. Choose `codex` or `claude` for the new thread.
+5. Use the agent CLI session terminal for that thread.
+6. Let the thread name mirror the CLI session name once the CLI reports it.
+7. Use the file browser to inspect project files.
+8. Open a file in `nvim` inside the right panel when you need to inspect or edit it.
+9. Switch the right panel to Git when you need `lazygit`.
+10. Resize or collapse panels when you want more terminal or editor space.
+11. Archive the thread when the work is complete.
 
 ## MVP Boundaries
 
-The first version should stay focused. Expect terminal-first workflows, simple project/thread management, lightweight file browsing, `nvim` for file editing, and `lazygit` for Git workflows.
+The first version should stay focused. Expect terminal-first `codex` and `claude` workflows, simple project/thread management, lightweight file browsing, `nvim` for file editing, and `lazygit` for Git workflows.
 
 Use a full editor or external tools for advanced editing, source control management, debugging, or deep project analysis until those features are intentionally added.
