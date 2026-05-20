@@ -12,3 +12,14 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - UX findings: Initial layout is readable, but still scaffold-like and fixed-width; deeper polish belongs to Plans 04, 10, and 11.
 - Lesson learned: External review needs a triage policy so critical current-plan issues are fixed immediately while low-priority or later-plan issues are tracked instead of creating a review loop.
 - Follow-up: Plan 02 should persist exactly the Plan 01 state through SQLite and JSON config without adding later-plan schema.
+
+## Plan 02: SQLite Persistence
+
+- Date: 2026-05-20
+- Scope shipped: SQLite store at an app-owned Application Support path, injectable test database paths, migration v1 for Plan 01 state, transactional snapshot saves, JSON configuration defaults with Dracula and ignore rules, and SQLite-backed app startup.
+- Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 21 tests; `./script/build_and_run.sh --verify` passed.
+- External review: `codex review --uncommitted` found current-plan issues for atomic migration, global-terminal expansion persistence, and invalid UUID crash handling; those were fixed. A later-plan CLI metadata persistence finding was recorded as D-001 in `docs/plans/DEFERRED_ISSUES.md`.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-02/sqlite-persistence.png`; Computer Use confirmed the running `AgentIDE` window renders the SQLite-backed Dracula scaffold with project/thread selection, Files mode, and collapsed global terminal.
+- UX findings: No new visual regression from moving startup to SQLite. The UI still needs the real layout shell, resize/collapse behavior, and polished controls in later plans.
+- Lesson learned: A model field existing in Plan 01 does not mean every field belongs in SQLite v1; schema scope should follow the producer plan, with explicit deferrals for reviewer-visible future gaps.
+- Follow-up: Plan 03 must add migration v2 for `agent_cli` and prove `.claude` thread selection survives relaunch.

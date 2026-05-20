@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct AgentIDEApp: App {
-    @StateObject private var model = AppModel()
+    @StateObject private var model = AppModel(store: SQLiteAgentIDEStore.defaultStore())
 
     var body: some Scene {
         WindowGroup("Agent IDE") {

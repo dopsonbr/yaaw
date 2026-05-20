@@ -13,4 +13,10 @@ This file tracks review findings that are real but intentionally belong to a lat
 
 ## Open Items
 
-No deferred issues yet.
+### D-001: Persist Non-Default Thread CLI Metadata
+
+- Source: Plan 02 Codex review on 2026-05-20.
+- Finding: `AgentThread.agentCLI`, `sessionIdentity`, and `canonicalSessionName` are public model fields, but SQLite migration v1 intentionally stores only Plan 02's basic thread columns. A synthetic non-default `.claude` thread reloads as `.codex` with nil session metadata.
+- Triage: Deferred because Plan 02 explicitly must not introduce columns without producers. Plan 03 owns `agent_cli`; Plan 07 owns CLI session identity and canonical session name.
+- Owning plans: Plan 03 for `agent_cli`; Plan 07 for `sessionIdentity` and `canonicalSessionName`.
+- Closure test: A real temporary SQLite reload test verifies a `.claude` thread survives relaunch in Plan 03, and a deterministic CLI session identity/name survives relaunch in Plan 07.

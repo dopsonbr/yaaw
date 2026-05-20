@@ -34,6 +34,9 @@ let package = Package(
                 "Terminal",
                 "Theme",
                 "Threads"
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
             ]
         ),
         .testTarget(
