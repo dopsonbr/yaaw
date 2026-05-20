@@ -9,7 +9,7 @@ public enum SQLiteStoreError: Error, Equatable {
 }
 
 public final class SQLiteAgentIDEStore: AgentIDEStore {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
 
     private let databasePath: URL
     private var database: OpaquePointer?
@@ -28,12 +28,8 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
         sqlite3_close(database)
     }
 
-    public static func defaultStore() -> AgentIDEStore {
-        do {
-            return try SQLiteAgentIDEStore(databasePath: defaultDatabasePath())
-        } catch {
-            return InMemoryAgentIDEStore.helloWorld()
-        }
+    public static func defaultStore() throws -> AgentIDEStore {
+        try SQLiteAgentIDEStore(databasePath: defaultDatabasePath())
     }
 
     public static func defaultDatabasePath() -> URL {
@@ -119,7 +115,13 @@ private extension SQLiteAgentIDEStore {
         if currentVersion == 0 {
             try transaction {
                 try createVersionOneSchema()
-                try execute("PRAGMA user_version = \(Self.schemaVersion)")
+                try execute("PRAGMA user_version = 1")
+            }
+        }
+        if currentVersion < 2 {
+            try transaction {
+                try migrateToVersionTwo()
+                try execute("PRAGMA user_version = 2")
             }
         }
     }
@@ -167,6 +169,33 @@ private extension SQLiteAgentIDEStore {
         )
     }
 
+    func migrateToVersionTwo() throws {
+        let columns = try tableColumns("threads")
+        guard !columns.contains("agent_cli") else { return }
+        let existingThreadCount = try querySingleInt("SELECT COUNT(*) FROM threads") ?? 0
+        guard existingThreadCount == 0 else {
+            throw SQLiteStoreError.executionFailed(
+                "Cannot migrate existing threads without explicit agent_cli choices"
+            )
+        }
+        try execute(
+            """
+            CREATE TABLE threads_v2 (
+                id TEXT PRIMARY KEY NOT NULL,
+                display_name TEXT NOT NULL,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                working_directory TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                last_opened_at REAL NOT NULL,
+                is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1)),
+                agent_cli TEXT NOT NULL CHECK (agent_cli IN ('codex', 'claude'))
+            )
+            """
+        )
+        try execute("DROP TABLE threads")
+        try execute("ALTER TABLE threads_v2 RENAME TO threads")
+    }
+
     func userVersion() throws -> Int {
         try querySingleInt("PRAGMA user_version") ?? 0
     }
@@ -206,6 +235,16 @@ private extension SQLiteAgentIDEStore {
         return Int(sqlite3_column_int(statement, 0))
     }
 
+    func tableColumns(_ table: String) throws -> Set<String> {
+        let statement = try prepare("PRAGMA table_info(\(table))")
+        defer { sqlite3_finalize(statement) }
+        var columns = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            columns.insert(text(at: 1, in: statement))
+        }
+        return columns
+    }
+
     var errorMessage: String {
         guard let database else { return "Missing SQLite database" }
         return String(cString: sqlite3_errmsg(database))
@@ -230,8 +269,8 @@ private extension SQLiteAgentIDEStore {
     func insertThread(_ thread: AgentThread) throws {
         let statement = try prepare(
             """
-            INSERT INTO threads (id, display_name, project_id, working_directory, created_at, last_opened_at, is_archived)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO threads (id, display_name, project_id, working_directory, created_at, last_opened_at, is_archived, agent_cli)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -242,6 +281,7 @@ private extension SQLiteAgentIDEStore {
         sqlite3_bind_double(statement, 5, thread.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(statement, 6, thread.lastOpenedAt.timeIntervalSince1970)
         sqlite3_bind_int(statement, 7, thread.isArchived ? 1 : 0)
+        bind(thread.agentCLI.rawValue, at: 8, in: statement)
         try stepDone(statement)
     }
 
@@ -289,7 +329,7 @@ private extension SQLiteAgentIDEStore {
     func loadThreads() throws -> [AgentThread] {
         let statement = try prepare(
             """
-            SELECT id, display_name, project_id, working_directory, created_at, last_opened_at, is_archived
+            SELECT id, display_name, project_id, working_directory, created_at, last_opened_at, is_archived, agent_cli
             FROM threads
             ORDER BY created_at, display_name
             """
@@ -298,7 +338,8 @@ private extension SQLiteAgentIDEStore {
         var threads: [AgentThread] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = UUID(uuidString: text(at: 0, in: statement)),
-                  let projectID = UUID(uuidString: text(at: 2, in: statement)) else {
+                  let projectID = UUID(uuidString: text(at: 2, in: statement)),
+                  let agentCLI = AgentCLIKind(rawValue: text(at: 7, in: statement)) else {
                 throw SQLiteStoreError.executionFailed("Invalid thread id")
             }
             threads.append(
@@ -307,6 +348,7 @@ private extension SQLiteAgentIDEStore {
                     displayName: text(at: 1, in: statement),
                     projectID: projectID,
                     workingDirectory: URL(fileURLWithPath: text(at: 3, in: statement), isDirectory: true),
+                    agentCLI: agentCLI,
                     createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
                     lastOpenedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
                     isArchived: sqlite3_column_int(statement, 6) == 1

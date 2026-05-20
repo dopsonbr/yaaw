@@ -1,6 +1,15 @@
 import Combine
 import Foundation
 
+public enum AppModelError: Error, Equatable {
+    case emptyProjectName
+    case missingProjectDirectory(String)
+    case selectedProjectMissing
+    case missingAgentCLI
+    case threadNotFound
+    case agentCLIChangeNotAllowed
+}
+
 public final class AppModel: ObservableObject {
     @Published public private(set) var projects: [Project]
     @Published public private(set) var threads: [AgentThread]
@@ -83,6 +92,79 @@ public final class AppModel: ObservableObject {
         persist()
     }
 
+    @discardableResult
+    public func createProject(
+        displayName: String,
+        rootDirectory: URL,
+        now: Date = Date()
+    ) throws -> UUID {
+        let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            throw AppModelError.emptyProjectName
+        }
+        guard rootDirectory.isExistingDirectory else {
+            throw AppModelError.missingProjectDirectory(rootDirectory.path)
+        }
+
+        let project = Project(
+            displayName: trimmedName,
+            rootDirectory: rootDirectory,
+            createdAt: now,
+            lastOpenedAt: now
+        )
+        projects.append(project)
+        selectedProjectID = project.id
+        selectedThreadID = nil
+        pushCurrentSelection()
+        persist()
+        return project.id
+    }
+
+    @discardableResult
+    public func createThread(
+        agentCLI: AgentCLIKind?,
+        displayName: String? = nil,
+        workingDirectory: URL? = nil,
+        now: Date = Date()
+    ) throws -> UUID {
+        guard let agentCLI else {
+            throw AppModelError.missingAgentCLI
+        }
+        guard let project = selectedProject else {
+            throw AppModelError.selectedProjectMissing
+        }
+        let resolvedWorkingDirectory = workingDirectory ?? project.rootDirectory
+        guard resolvedWorkingDirectory.isExistingDirectory else {
+            throw AppModelError.missingProjectDirectory(resolvedWorkingDirectory.path)
+        }
+
+        let trimmedDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedDisplayName = trimmedDisplayName?.isEmpty == false
+            ? trimmedDisplayName ?? ""
+            : "New \(agentCLI.rawValue) thread"
+        let thread = AgentThread(
+            displayName: resolvedDisplayName,
+            projectID: project.id,
+            workingDirectory: resolvedWorkingDirectory,
+            agentCLI: agentCLI,
+            createdAt: now,
+            lastOpenedAt: now
+        )
+        threads.append(thread)
+        selectedThreadID = thread.id
+        rightPanelModesByThreadID[thread.id] = .files
+        pushCurrentSelection()
+        persist()
+        return thread.id
+    }
+
+    public func changeAgentCLI(for threadID: UUID, to agentCLI: AgentCLIKind) throws {
+        guard threads.contains(where: { $0.id == threadID }) else {
+            throw AppModelError.threadNotFound
+        }
+        throw AppModelError.agentCLIChangeNotAllowed
+    }
+
     public func selectProject(id projectID: UUID) {
         guard projects.contains(where: { $0.id == projectID }) else { return }
         guard selectedProjectID != projectID else { return }
@@ -150,5 +232,12 @@ public final class AppModel: ObservableObject {
                 isGlobalTerminalExpanded: isGlobalTerminalExpanded
             )
         )
+    }
+}
+
+private extension URL {
+    var isExistingDirectory: Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 }

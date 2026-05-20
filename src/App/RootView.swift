@@ -32,6 +32,8 @@ struct RootView: View {
 
 private struct SidebarView: View {
     @ObservedObject var model: AppModel
+    @State private var isProjectSheetPresented = false
+    @State private var isThreadSheetPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -40,9 +42,9 @@ private struct SidebarView: View {
                 .foregroundStyle(dracula(.purple))
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Projects")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(dracula(.comment))
+                SectionHeader(title: "Projects", actionTitle: "New") {
+                    isProjectSheetPresented = true
+                }
 
                 ForEach(model.projects) { project in
                     Button {
@@ -66,9 +68,9 @@ private struct SidebarView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Threads")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(dracula(.comment))
+                SectionHeader(title: "Threads", actionTitle: "New") {
+                    isThreadSheetPresented = true
+                }
 
                 ForEach(model.activeThreadsForSelectedProject) { thread in
                     Button {
@@ -89,6 +91,16 @@ private struct SidebarView: View {
                     }
                     .buttonStyle(.plain)
                     .background(model.selectedThreadID == thread.id ? dracula(.currentLine) : dracula(.background))
+                }
+
+                if let selectedThreadID = model.selectedThreadID {
+                    Button("Archive Selected Thread") {
+                        model.archiveThread(id: selectedThreadID)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(dracula(.orange))
+                    .padding(.top, 4)
                 }
             }
 
@@ -116,6 +128,146 @@ private struct SidebarView: View {
         }
         .padding(18)
         .background(dracula(.background))
+        .sheet(isPresented: $isProjectSheetPresented) {
+            ProjectCreationSheet(model: model)
+        }
+        .sheet(isPresented: $isThreadSheetPresented) {
+            ThreadChoiceSheet(model: model)
+        }
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+    let actionTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(dracula(.comment))
+
+            Spacer()
+
+            Button(actionTitle, action: action)
+                .buttonStyle(.plain)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(dracula(.cyan))
+        }
+    }
+}
+
+private struct ProjectCreationSheet: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName = ""
+    @State private var path = NSHomeDirectory()
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New Project")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(dracula(.purple))
+
+            TextField("Display name", text: $displayName)
+                .textFieldStyle(.roundedBorder)
+
+            TextField("Directory path", text: $path)
+                .textFieldStyle(.roundedBorder)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(dracula(.red))
+            }
+
+            HStack {
+                Spacer()
+
+                Button("Cancel") {
+                    dismiss()
+                }
+
+                Button("Create") {
+                    createProject()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+        .background(dracula(.background))
+    }
+
+    private func createProject() {
+        do {
+            try model.createProject(
+                displayName: displayName,
+                rootDirectory: URL(fileURLWithPath: path, isDirectory: true)
+            )
+            dismiss()
+        } catch {
+            errorMessage = message(for: error)
+        }
+    }
+
+    private func message(for error: Error) -> String {
+        switch error {
+        case AppModelError.emptyProjectName:
+            return "Project name is required."
+        case AppModelError.missingProjectDirectory(let path):
+            return "Directory does not exist: \(path)"
+        default:
+            return "Project could not be created."
+        }
+    }
+}
+
+private struct ThreadChoiceSheet: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New Thread")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(dracula(.purple))
+
+            Text(model.selectedProject?.displayName ?? "No project selected")
+                .foregroundStyle(dracula(.comment))
+
+            HStack(spacing: 12) {
+                Button("Codex") {
+                    createThread(agentCLI: .codex)
+                }
+                .keyboardShortcut(.defaultAction)
+
+                Button("Claude") {
+                    createThread(agentCLI: .claude)
+                }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(dracula(.red))
+            }
+        }
+        .padding(24)
+        .frame(width: 360)
+        .background(dracula(.background))
+    }
+
+    private func createThread(agentCLI: AgentCLIKind) {
+        do {
+            try model.createThread(agentCLI: agentCLI)
+            dismiss()
+        } catch {
+            errorMessage = "Thread could not be created."
+        }
     }
 }
 
@@ -253,7 +405,7 @@ private struct GlobalTerminalBar: View {
     }
 }
 
-private func dracula(_ role: DraculaRole) -> Color {
+func dracula(_ role: DraculaRole) -> Color {
     Color(hex: DraculaTheme.hex(for: role))
 }
 

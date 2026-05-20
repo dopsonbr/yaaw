@@ -137,13 +137,82 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.selectedThreadID, fixture.secondThreadID)
         XCTAssertEqual(model.navigationHistory.entries.count, 2)
     }
+
+    func testCreateProjectSelectsExistingDirectory() throws {
+        let model = AppModel()
+        let root = try temporaryDirectory()
+
+        let projectID = try model.createProject(displayName: "  Worktree  ", rootDirectory: root)
+
+        XCTAssertEqual(model.selectedProjectID, projectID)
+        XCTAssertEqual(model.selectedProject?.displayName, "Worktree")
+        XCTAssertEqual(model.selectedProject?.rootDirectory, root)
+        XCTAssertNil(model.selectedThreadID)
+    }
+
+    func testCreateProjectRejectsMissingDirectory() {
+        let model = AppModel()
+        let missing = URL(fileURLWithPath: "/tmp/agent-ide-missing-\(UUID().uuidString)", isDirectory: true)
+
+        XCTAssertThrowsError(try model.createProject(displayName: "Missing", rootDirectory: missing)) { error in
+            XCTAssertEqual(error as? AppModelError, .missingProjectDirectory(missing.path))
+        }
+    }
+
+    func testCreateThreadRequiresExplicitAgentCLIChoice() {
+        let model = AppModel()
+
+        XCTAssertThrowsError(try model.createThread(agentCLI: nil)) { error in
+            XCTAssertEqual(error as? AppModelError, .missingAgentCLI)
+        }
+    }
+
+    func testCreateThreadDefaultsNameAndWorkingDirectory() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        let threadID = try model.createThread(agentCLI: .claude, now: Date(timeIntervalSince1970: 123))
+        let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
+
+        XCTAssertEqual(thread.displayName, "New claude thread")
+        XCTAssertEqual(thread.agentCLI, .claude)
+        XCTAssertEqual(thread.workingDirectory, fixture.root)
+        XCTAssertEqual(model.selectedThreadID, threadID)
+        XCTAssertEqual(model.selectedRightPanelMode, .files)
+    }
+
+    func testAgentCLIChoiceCannotChangeAfterCreate() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        XCTAssertThrowsError(try model.changeAgentCLI(for: fixture.firstThreadID, to: .claude)) { error in
+            XCTAssertEqual(error as? AppModelError, .agentCLIChangeNotAllowed)
+        }
+    }
+
+    func testArchiveKeepsClaudeThreadMetadata() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.archiveThread(id: fixture.secondThreadID)
+
+        let archivedThread = try XCTUnwrap(model.archivedThreadsForSelectedProject.first { $0.id == fixture.secondThreadID })
+        XCTAssertEqual(archivedThread.agentCLI, .claude)
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentIDEKitTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
 }
 
 private struct AppModelFixture {
     let projectID = UUID()
     let firstThreadID = UUID()
     let secondThreadID = UUID()
-    let root = URL(fileURLWithPath: "/tmp/agent-ide", isDirectory: true)
+    let root = FileManager.default.temporaryDirectory
 
     var store: InMemoryAgentIDEStore {
         InMemoryAgentIDEStore(

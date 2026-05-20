@@ -3,7 +3,7 @@ import SQLite3
 @testable import AgentIDEKit
 
 final class PersistenceTests: XCTestCase {
-    func testSQLiteMigrationInitializesVersionOneSchema() throws {
+    func testSQLiteMigrationInitializesCurrentSchema() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         _ = try SQLiteAgentIDEStore(databasePath: path)
 
@@ -35,6 +35,96 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteAgentIDEStore.schemaVersion)
         XCTAssertFalse(loaded.projects.isEmpty)
         XCTAssertFalse(loaded.threads.isEmpty)
+    }
+
+    func testSQLiteMigrationAddsAgentCLIToVersionOneThreads() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        try withSQLiteDatabase(path: path) { database in
+            try executeSQL(
+                """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    root_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL
+                );
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    working_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL,
+                    is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1))
+                );
+                CREATE TABLE app_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE right_panel_modes (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    mode TEXT NOT NULL CHECK (mode IN ('files', 'nvim', 'git'))
+                );
+                PRAGMA user_version = 1;
+                """,
+                database: database
+            )
+        }
+
+        _ = try SQLiteAgentIDEStore(databasePath: path)
+
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteAgentIDEStore.schemaVersion)
+        XCTAssertTrue(try sqliteTableColumns(path: path, table: "threads").contains("agent_cli"))
+    }
+
+    func testSQLiteMigrationRejectsVersionOneThreadsWithoutExplicitAgentCLI() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let projectID = UUID()
+        let threadID = UUID()
+        try withSQLiteDatabase(path: path) { database in
+            try executeSQL(
+                """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    root_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL
+                );
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    working_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL,
+                    is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1))
+                );
+                CREATE TABLE app_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE right_panel_modes (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    mode TEXT NOT NULL CHECK (mode IN ('files', 'nvim', 'git'))
+                );
+                INSERT INTO projects (id, display_name, root_directory, created_at, last_opened_at)
+                VALUES ('\(projectID.uuidString)', 'Legacy', '/tmp', 0, 0);
+                INSERT INTO threads (id, display_name, project_id, working_directory, created_at, last_opened_at, is_archived)
+                VALUES ('\(threadID.uuidString)', 'Legacy Thread', '\(projectID.uuidString)', '/tmp', 0, 0, 0);
+                PRAGMA user_version = 1;
+                """,
+                database: database
+            )
+        }
+
+        XCTAssertThrowsError(try SQLiteAgentIDEStore(databasePath: path)) { error in
+            XCTAssertEqual(
+                error as? SQLiteStoreError,
+                .executionFailed("Cannot migrate existing threads without explicit agent_cli choices")
+            )
+        }
     }
 
     func testSQLiteStorePersistsPlanOneSnapshot() throws {
@@ -70,6 +160,7 @@ final class PersistenceTests: XCTestCase {
                     displayName: "Second",
                     projectID: projectID,
                     workingDirectory: root,
+                    agentCLI: .claude,
                     createdAt: createdAt,
                     lastOpenedAt: createdAt
                 )
@@ -87,6 +178,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.projects, snapshot.projects)
         XCTAssertEqual(reloaded.threads.map(\.id), snapshot.threads.map(\.id))
         XCTAssertEqual(reloaded.threads.map(\.isArchived), [true, false])
+        XCTAssertEqual(reloaded.threads.map(\.agentCLI), [.codex, .claude])
         XCTAssertEqual(reloaded.selectedProjectID, projectID)
         XCTAssertEqual(reloaded.selectedThreadID, secondThreadID)
         XCTAssertEqual(reloaded.rightPanelModesByThreadID[firstThreadID], .git)
@@ -177,6 +269,19 @@ final class PersistenceTests: XCTestCase {
             defer { sqlite3_finalize(statement) }
             XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
             return Int(sqlite3_column_int(statement, 0))
+        }
+    }
+
+    private func sqliteTableColumns(path: URL, table: String) throws -> Set<String> {
+        try withSQLiteDatabase(path: path) { database in
+            var statement: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(database, "PRAGMA table_info(\(table))", -1, &statement, nil), SQLITE_OK)
+            defer { sqlite3_finalize(statement) }
+            var columns = Set<String>()
+            while sqlite3_step(statement) == SQLITE_ROW {
+                columns.insert(String(cString: sqlite3_column_text(statement, 1)))
+            }
+            return columns
         }
     }
 
