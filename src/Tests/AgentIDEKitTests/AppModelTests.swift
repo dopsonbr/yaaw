@@ -340,19 +340,120 @@ final class AppModelTests: XCTestCase {
 
     func testRightPanelTerminalRequestsUseSelectedThreadWorkingDirectory() throws {
         let fixture = AppModelFixture()
-        let model = AppModel(store: fixture.store)
+        let resolver = StaticAppModelExecutableResolver(
+            paths: [
+                "nvim": "/opt/homebrew/bin/nvim",
+                "lazygit": "/opt/homebrew/bin/lazygit"
+            ]
+        )
+        let model = AppModel(store: fixture.store, externalToolResolver: resolver, environment: [:])
 
         model.selectRightPanelMode(.nvim)
         let nvimSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
         XCTAssertEqual(nvimSession.request.role, .nvim(threadID: fixture.firstThreadID))
         XCTAssertEqual(nvimSession.request.workingDirectory, fixture.root)
-        XCTAssertEqual(nvimSession.request.command, ["nvim"])
+        XCTAssertEqual(nvimSession.request.command, ["/opt/homebrew/bin/nvim"])
 
         model.selectRightPanelMode(.git)
         let gitSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
         XCTAssertEqual(gitSession.request.role, .lazygit(threadID: fixture.firstThreadID))
         XCTAssertEqual(gitSession.request.workingDirectory, fixture.root)
-        XCTAssertEqual(gitSession.request.command, ["lazygit"])
+        XCTAssertEqual(gitSession.request.command, ["/opt/homebrew/bin/lazygit"])
+    }
+
+    func testOpeningFileSwitchesToNvimAndUsesRelativePath() throws {
+        let fixture = AppModelFixture()
+        let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
+        let model = AppModel(store: fixture.store, externalToolResolver: resolver, environment: [:])
+
+        model.openFileInNvim(relativePath: "src/App/RootView.swift")
+
+        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        XCTAssertEqual(model.selectedRightPanelMode, .nvim)
+        XCTAssertEqual(request.workingDirectory, fixture.root)
+        XCTAssertEqual(request.command, ["/tools/nvim", "src/App/RootView.swift"])
+    }
+
+    func testMissingRightPanelToolFallsBackToRawCommandName() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(
+            store: fixture.store,
+            externalToolResolver: StaticAppModelExecutableResolver(paths: [:]),
+            environment: [:]
+        )
+
+        model.openFileInNvim(relativePath: "README.md")
+        let nvimRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        model.selectRightPanelMode(.git)
+        let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+
+        XCTAssertEqual(nvimRequest.command, ["nvim", "README.md"])
+        XCTAssertEqual(gitRequest.command, ["lazygit"])
+    }
+
+    func testOpeningDifferentFilesReplacesNvimTerminalSessionRequest() throws {
+        let fixture = AppModelFixture()
+        let manager = PlaceholderTerminalSessionManager()
+        let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
+        let model = AppModel(store: fixture.store, terminalManager: manager, externalToolResolver: resolver, environment: [:])
+
+        model.openFileInNvim(relativePath: "README.md")
+        let firstSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
+        model.selectRightPanelMode(.files)
+        model.openFileInNvim(relativePath: "src/App/RootView.swift")
+        let secondSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
+
+        XCTAssertNotEqual(firstSession.id, secondSession.id)
+        XCTAssertEqual(firstSession.request.command, ["/tools/nvim", "README.md"])
+        XCTAssertEqual(secondSession.request.command, ["/tools/nvim", "src/App/RootView.swift"])
+    }
+
+    func testOpeningSameFileReplacesNvimTerminalSessionRequest() throws {
+        let fixture = AppModelFixture()
+        let manager = PlaceholderTerminalSessionManager()
+        let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
+        let model = AppModel(store: fixture.store, terminalManager: manager, externalToolResolver: resolver, environment: [:])
+
+        model.openFileInNvim(relativePath: "README.md")
+        let firstSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
+        model.selectRightPanelMode(.files)
+        model.openFileInNvim(relativePath: "README.md")
+        let secondSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
+
+        XCTAssertNotEqual(firstSession.id, secondSession.id)
+        XCTAssertNotEqual(firstSession.request, secondSession.request)
+        XCTAssertEqual(firstSession.request.command, ["/tools/nvim", "README.md"])
+        XCTAssertEqual(secondSession.request.command, ["/tools/nvim", "README.md"])
+    }
+
+    func testReplacingActiveTerminalSessionRecordsTerminatedState() throws {
+        let manager = PlaceholderTerminalSessionManager()
+        let workingDirectory = try temporaryDirectory()
+        let firstRequest = TerminalLaunchRequest(
+            role: .nvim(threadID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!),
+            title: "nvim",
+            workingDirectory: workingDirectory,
+            command: ["/tools/nvim", "README.md"]
+        )
+        let secondRequest = TerminalLaunchRequest(
+            role: firstRequest.role,
+            title: "nvim",
+            workingDirectory: workingDirectory,
+            command: ["/tools/nvim", "Package.swift"]
+        )
+
+        let firstSession = manager.activate(firstRequest)
+        _ = manager.activate(secondRequest)
+
+        let terminatedEvent = manager.lifecycleEvents.compactMap { event -> TerminalSessionRecord? in
+            if case .terminated(let record) = event {
+                return record
+            }
+            return nil
+        }.last
+        let terminatedRecord = try XCTUnwrap(terminatedEvent)
+        XCTAssertEqual(terminatedRecord.id, firstSession.id)
+        XCTAssertEqual(terminatedRecord.state, .terminated)
     }
 
     func testTerminalRuntimeStateIsNotPersisted() throws {

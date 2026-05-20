@@ -451,7 +451,10 @@ private struct RightPanelView: View {
                         get: { model.fileBrowserState.searchQuery },
                         set: { model.updateFileSearchQuery($0) }
                     ),
-                    onRefresh: model.refreshSelectedFileBrowser
+                    onRefresh: model.refreshSelectedFileBrowser,
+                    onOpenFile: { entry in
+                        model.openFileInNvim(relativePath: entry.relativePath)
+                    }
                 )
                 .onAppear {
                     model.refreshSelectedFileBrowser()
@@ -506,6 +509,7 @@ private struct FileBrowserPanel: View {
     let state: FileBrowserState
     @Binding var searchQuery: String
     let onRefresh: () -> Void
+    let onOpenFile: (FileBrowserEntry) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -565,7 +569,7 @@ private struct FileBrowserPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
                     ForEach(state.visibleEntries) { entry in
-                        FileBrowserRow(entry: entry)
+                        FileBrowserRow(entry: entry, onOpenFile: onOpenFile)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -584,8 +588,23 @@ private struct FileBrowserPanel: View {
 
 private struct FileBrowserRow: View {
     let entry: FileBrowserEntry
+    let onOpenFile: (FileBrowserEntry) -> Void
 
     var body: some View {
+        if entry.isDirectory {
+            rowContent
+        } else {
+            Button {
+                onOpenFile(entry)
+            } label: {
+                rowContent
+            }
+            .buttonStyle(.plain)
+            .help("Open in nvim")
+        }
+    }
+
+    private var rowContent: some View {
         HStack(spacing: 8) {
             Image(systemName: entry.isDirectory ? "folder" : "doc.text")
                 .foregroundStyle(dracula(entry.isDirectory ? .cyan : .green))

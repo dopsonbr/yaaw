@@ -25,17 +25,20 @@ public struct TerminalLaunchRequest: Equatable, Sendable {
     public var title: String
     public var workingDirectory: URL
     public var command: [String]
+    public var relaunchToken: UUID?
 
     public init(
         role: TerminalRole,
         title: String,
         workingDirectory: URL,
-        command: [String]
+        command: [String],
+        relaunchToken: UUID? = nil
     ) {
         self.role = role
         self.title = title
         self.workingDirectory = workingDirectory
         self.command = command
+        self.relaunchToken = relaunchToken
     }
 }
 
@@ -86,8 +89,14 @@ public final class PlaceholderTerminalSessionManager: TerminalSessionManaging {
     @discardableResult
     public func activate(_ request: TerminalLaunchRequest) -> TerminalSessionRecord {
         if let existing = sessionsByRole[request.role], existing.state == .active {
-            lifecycleEvents.append(.activated(existing))
-            return existing
+            if existing.request == request {
+                lifecycleEvents.append(.activated(existing))
+                return existing
+            }
+            var terminatedSession = existing
+            terminatedSession.state = .terminated
+            sessionsByRole[request.role] = terminatedSession
+            lifecycleEvents.append(.terminated(terminatedSession))
         }
 
         let session = TerminalSessionRecord(request: request)

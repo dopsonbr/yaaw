@@ -25,10 +25,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private let terminalManager: TerminalSessionManaging
     private let agentCLIBindings: AgentCLISessionBindingService
     private let fileIndexer: FileIndexing
+    private let externalToolResolver: any AgentCLIExecutableResolving
     private let configuration: AgentIDEConfiguration
+    private let environment: [String: String]
     private let homeDirectory: URL
     private var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
     private var latestFileBrowserRequestIDByThreadID: [UUID: UUID] = [:]
+    private var nvimRelativePathsByThreadID: [UUID: String] = [:]
+    private var nvimRelaunchTokensByThreadID: [UUID: UUID] = [:]
     private var activeProjectLaunchCommandsByThreadID: [UUID: [String]] = [:]
     private var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
     private var pendingTerminalTitlesByThreadID: [UUID: String] = [:]
@@ -38,14 +42,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         terminalManager: TerminalSessionManaging = PlaceholderTerminalSessionManager(),
         agentCLIBindings: AgentCLISessionBindingService = AgentCLISessionBindingService(),
         fileIndexer: FileIndexing = BackgroundFileIndexer(),
+        externalToolResolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
         configuration: AgentIDEConfiguration = AgentIDEConfiguration(),
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         self.store = store
         self.terminalManager = terminalManager
         self.agentCLIBindings = agentCLIBindings
         self.fileIndexer = fileIndexer
+        self.externalToolResolver = externalToolResolver
         self.configuration = configuration
+        self.environment = environment
         self.homeDirectory = homeDirectory
         let snapshot = store.load()
         self.projects = snapshot.projects
@@ -198,11 +206,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             )
         case .nvim(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
+            let arguments = nvimRelativePathsByThreadID[threadID].map { [$0] } ?? []
             return TerminalLaunchRequest(
                 role: role,
                 title: "nvim",
                 workingDirectory: thread.workingDirectory,
-                command: ["nvim"]
+                command: externalToolCommand(named: "nvim", arguments: arguments),
+                relaunchToken: nvimRelaunchTokensByThreadID[threadID]
             )
         case .lazygit(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
@@ -210,7 +220,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 role: role,
                 title: "Git",
                 workingDirectory: thread.workingDirectory,
-                command: ["lazygit"]
+                command: externalToolCommand(named: "lazygit")
             )
         }
     }
@@ -319,6 +329,16 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             fileBrowserState.entries,
             query: query
         )
+    }
+
+    public func openFileInNvim(relativePath: String) {
+        guard let selectedThreadID else { return }
+        let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
+        guard !normalizedPath.isEmpty else { return }
+        nvimRelativePathsByThreadID[selectedThreadID] = normalizedPath
+        nvimRelaunchTokensByThreadID[selectedThreadID] = UUID()
+        terminateTerminal(role: .nvim(threadID: selectedThreadID))
+        selectRightPanelMode(.nvim)
     }
 
     @discardableResult
@@ -535,6 +555,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func defaultShellPath() -> String {
         ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
+    }
+
+    private func externalToolCommand(named executableName: String, arguments: [String] = []) -> [String] {
+        [
+            externalToolResolver.executablePath(named: executableName, environment: environment) ?? executableName
+        ] + arguments
     }
 
     private func persist() {

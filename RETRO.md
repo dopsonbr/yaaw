@@ -89,3 +89,14 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - UX findings: The first home-directory index exposed that broad roots can take long enough to make a later repo selection feel stuck when indexing is serial. The indexer now runs requests concurrently and ignores stale same-thread results. The right panel is usable, but long paths still depend on truncation and will benefit from Plan 11 polish.
 - Lesson learned: Nonblocking indexing is not only a background-thread concern; request ordering matters once users can switch projects or refresh while older scans are still running.
 - Follow-up: Plan 09 should wire file selection into `nvim <relative-path>` using the selected entry without persisting live terminal state. Plan 11 should consider extra safe defaults or progress detail for very broad home-directory roots.
+
+## Plan 09: Right Panel Tool Flows
+
+- Date: 2026-05-20
+- Scope shipped: file rows now launch `nvim <relative-path>` in the selected thread's right panel, per-thread selected file paths stay runtime-only, `nvim` and `lazygit` resolve through the injected executable resolver with raw-command fallback for missing tools, same-role request changes replace active terminal sessions, and repeated same-file opens force a fresh `nvim` launch.
+- Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 64 tests; `./script/build_and_run.sh --verify` passed.
+- External review: `codex review --uncommitted` found current-plan issues for same-file `nvim` relaunches and replacement lifecycle events reporting an active record as terminated. Both were fixed with a runtime relaunch token and terminated-state lifecycle records, then covered by regression tests.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-09/right-panel-tool-flows.png`; Computer Use verified `RETRO.md` opened in the embedded right-panel `nvim` terminal and Git mode launched `lazygit` against the repo.
+- UX findings: The right-panel tool flow is functional and fast enough for daily use. `lazygit` remains dense in a narrow right panel, so final polish should revisit default widths, truncation, and tool affordances.
+- Lesson learned: Terminal role identity is not enough for tool flows; a command-equivalent user action can still need a fresh surface launch after the prior terminal program exits.
+- Follow-up: Plan 10 should automate Files -> `nvim`, Git -> `lazygit`, global terminal, missing-tool handling, and screenshot capture through deterministic fixtures.
