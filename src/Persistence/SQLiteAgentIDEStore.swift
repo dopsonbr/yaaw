@@ -9,7 +9,7 @@ public enum SQLiteStoreError: Error, Equatable {
 }
 
 public final class SQLiteAgentIDEStore: AgentIDEStore {
-    public static let schemaVersion = 4
+    public static let schemaVersion = 5
 
     private let databasePath: URL
     private var database: OpaquePointer?
@@ -57,6 +57,7 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
             let layoutState = try loadLayoutState(
                 fallbackGlobalTerminalExpanded: fallbackGlobalTerminalExpanded
             )
+            let fileIndexMetadata = try loadFileIndexMetadata()
 
             return AgentIDESnapshot(
                 projects: projects,
@@ -66,7 +67,8 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                 rightPanelModesByThreadID: modes,
                 selectedRightPanelMode: selectedMode,
                 isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
-                layoutState: layoutState
+                layoutState: layoutState,
+                fileIndexMetadataByThreadID: fileIndexMetadata
             )
         } catch {
             return InMemoryAgentIDEStore.helloWorld().load()
@@ -77,6 +79,7 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
         do {
             try transaction {
                 try execute("DELETE FROM right_panel_modes")
+                try execute("DELETE FROM file_index_metadata")
                 try execute("DELETE FROM layout_state")
                 try execute("DELETE FROM app_state")
                 try execute("DELETE FROM threads")
@@ -90,6 +93,9 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                 }
                 for (threadID, mode) in snapshot.rightPanelModesByThreadID {
                     try insertRightPanelMode(threadID: threadID, mode: mode)
+                }
+                for metadata in snapshot.fileIndexMetadataByThreadID.values {
+                    try insertFileIndexMetadata(metadata)
                 }
                 try insertAppState(key: "selected_project_id", value: snapshot.selectedProjectID.uuidString)
                 if let selectedThreadID = snapshot.selectedThreadID {
@@ -141,6 +147,12 @@ private extension SQLiteAgentIDEStore {
             try transaction {
                 try migrateToVersionFour()
                 try execute("PRAGMA user_version = 4")
+            }
+        }
+        if currentVersion < 5 {
+            try transaction {
+                try createFileIndexMetadataSchema()
+                try execute("PRAGMA user_version = 5")
             }
         }
     }
@@ -239,6 +251,20 @@ private extension SQLiteAgentIDEStore {
         if !columns.contains("canonical_session_name") {
             try execute("ALTER TABLE threads ADD COLUMN canonical_session_name TEXT")
         }
+    }
+
+    func createFileIndexMetadataSchema() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS file_index_metadata (
+                thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                root_path TEXT NOT NULL,
+                indexed_at REAL NOT NULL,
+                file_count INTEGER NOT NULL,
+                ignored_directory_count INTEGER NOT NULL
+            )
+            """
+        )
     }
 
     func userVersion() throws -> Int {
@@ -384,6 +410,28 @@ private extension SQLiteAgentIDEStore {
         try stepDone(statement)
     }
 
+    func insertFileIndexMetadata(_ metadata: FileIndexMetadata) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO file_index_metadata (
+                thread_id,
+                root_path,
+                indexed_at,
+                file_count,
+                ignored_directory_count
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(metadata.threadID.uuidString, at: 1, in: statement)
+        bind(metadata.rootPath, at: 2, in: statement)
+        sqlite3_bind_double(statement, 3, metadata.indexedAt.timeIntervalSince1970)
+        sqlite3_bind_int(statement, 4, Int32(metadata.fileCount))
+        sqlite3_bind_int(statement, 5, Int32(metadata.ignoredDirectoryCount))
+        try stepDone(statement)
+    }
+
     func loadProjects() throws -> [Project] {
         let statement = try prepare(
             "SELECT id, display_name, root_directory, created_at, last_opened_at FROM projects ORDER BY created_at, display_name"
@@ -523,6 +571,30 @@ private extension SQLiteAgentIDEStore {
             }
         }
         return modes
+    }
+
+    func loadFileIndexMetadata() throws -> [UUID: FileIndexMetadata] {
+        let statement = try prepare(
+            """
+            SELECT thread_id, root_path, indexed_at, file_count, ignored_directory_count
+            FROM file_index_metadata
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        var metadataByThreadID: [UUID: FileIndexMetadata] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let threadID = UUID(uuidString: text(at: 0, in: statement)) else {
+                throw SQLiteStoreError.executionFailed("Invalid file index thread id")
+            }
+            metadataByThreadID[threadID] = FileIndexMetadata(
+                threadID: threadID,
+                rootPath: text(at: 1, in: statement),
+                indexedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                fileCount: Int(sqlite3_column_int(statement, 3)),
+                ignoredDirectoryCount: Int(sqlite3_column_int(statement, 4))
+            )
+        }
+        return metadataByThreadID
     }
 
     func bind(_ value: String, at index: Int32, in statement: OpaquePointer?) {

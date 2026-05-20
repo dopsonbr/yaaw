@@ -9,7 +9,8 @@ struct AgentIDEApp: App {
     init() {
         do {
             let store = try SQLiteAgentIDEStore.defaultStore()
-            _model = StateObject(wrappedValue: AppModel(store: store))
+            let configuration = JSONConfigurationStore(path: JSONConfigurationStore.defaultPath()).load()
+            _model = StateObject(wrappedValue: AppModel(store: store, configuration: configuration))
             startupError = nil
         } catch {
             _model = StateObject(wrappedValue: AppModel(store: InMemoryAgentIDEStore.helloWorld()))

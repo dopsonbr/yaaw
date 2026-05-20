@@ -10,20 +10,25 @@ public enum AppModelError: Error, Equatable {
     case agentCLIChangeNotAllowed
 }
 
-public final class AppModel: ObservableObject {
+public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var projects: [Project]
     @Published public private(set) var threads: [AgentThread]
     @Published public private(set) var selectedProjectID: UUID
     @Published public private(set) var selectedThreadID: UUID?
     @Published public private(set) var rightPanelModesByThreadID: [UUID: RightPanelMode]
     @Published public private(set) var layoutState: LayoutState
+    @Published public private(set) var fileBrowserState: FileBrowserState
 
     public let projectTerminal: TerminalSurfaceDescriptor
     public private(set) var navigationHistory: NavigationHistory
     private let store: AgentIDEStore
     private let terminalManager: TerminalSessionManaging
     private let agentCLIBindings: AgentCLISessionBindingService
+    private let fileIndexer: FileIndexing
+    private let configuration: AgentIDEConfiguration
     private let homeDirectory: URL
+    private var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
+    private var latestFileBrowserRequestIDByThreadID: [UUID: UUID] = [:]
     private var activeProjectLaunchCommandsByThreadID: [UUID: [String]] = [:]
     private var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
     private var pendingTerminalTitlesByThreadID: [UUID: String] = [:]
@@ -32,15 +37,20 @@ public final class AppModel: ObservableObject {
         store: AgentIDEStore = InMemoryAgentIDEStore.helloWorld(),
         terminalManager: TerminalSessionManaging = PlaceholderTerminalSessionManager(),
         agentCLIBindings: AgentCLISessionBindingService = AgentCLISessionBindingService(),
+        fileIndexer: FileIndexing = BackgroundFileIndexer(),
+        configuration: AgentIDEConfiguration = AgentIDEConfiguration(),
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         self.store = store
         self.terminalManager = terminalManager
         self.agentCLIBindings = agentCLIBindings
+        self.fileIndexer = fileIndexer
+        self.configuration = configuration
         self.homeDirectory = homeDirectory
         let snapshot = store.load()
         self.projects = snapshot.projects
         self.threads = snapshot.threads
+        self.fileIndexMetadataByThreadID = snapshot.fileIndexMetadataByThreadID
         let selectedProjectID = snapshot.projects.contains { $0.id == snapshot.selectedProjectID }
             ? snapshot.selectedProjectID
             : snapshot.projects[0].id
@@ -55,6 +65,12 @@ public final class AppModel: ObservableObject {
         }
         self.rightPanelModesByThreadID = rightPanelModesByThreadID
         self.layoutState = snapshot.layoutState
+        self.fileBrowserState = FileBrowserState(
+            rootPath: selectedThreadID.flatMap { threadID in
+                snapshot.threads.first { $0.id == threadID }?.workingDirectory.path
+            },
+            metadata: selectedThreadID.flatMap { snapshot.fileIndexMetadataByThreadID[$0] }
+        )
         self.navigationHistory = NavigationHistory(
             initial: AppSelection(projectID: selectedProjectID, threadID: selectedThreadID)
         )
@@ -289,6 +305,22 @@ public final class AppModel: ObservableObject {
         recordAgentCLIOutput(threadID: thread.id, output: captured.output)
     }
 
+    public func refreshSelectedFileBrowser() {
+        guard let thread = selectedThread else {
+            fileBrowserState = FileBrowserState()
+            return
+        }
+        refreshFileBrowser(for: thread)
+    }
+
+    public func updateFileSearchQuery(_ query: String) {
+        fileBrowserState.searchQuery = query
+        fileBrowserState.visibleEntries = FuzzyFileMatcher.rankedEntries(
+            fileBrowserState.entries,
+            query: query
+        )
+    }
+
     @discardableResult
     public func createProject(
         displayName: String,
@@ -312,6 +344,7 @@ public final class AppModel: ObservableObject {
         projects.append(project)
         selectedProjectID = project.id
         selectedThreadID = nil
+        resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         persist()
         return project.id
@@ -350,6 +383,7 @@ public final class AppModel: ObservableObject {
         threads.append(thread)
         selectedThreadID = thread.id
         rightPanelModesByThreadID[thread.id] = .files
+        resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         persist()
         return thread.id
@@ -367,6 +401,7 @@ public final class AppModel: ObservableObject {
         guard selectedProjectID != projectID else { return }
         selectedProjectID = projectID
         selectedThreadID = threads.first { $0.projectID == projectID && !$0.isArchived }?.id
+        resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         persist()
     }
@@ -375,6 +410,7 @@ public final class AppModel: ObservableObject {
         guard let thread = threads.first(where: { $0.id == threadID }) else { return }
         selectedProjectID = thread.projectID
         selectedThreadID = thread.id
+        resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         persist()
     }
@@ -384,6 +420,7 @@ public final class AppModel: ObservableObject {
         threads[index].isArchived = true
         if selectedThreadID == threadID {
             selectedThreadID = threads.first { $0.projectID == threads[index].projectID && !$0.isArchived }?.id
+            resetFileBrowserForSelectedThread()
         }
         pushCurrentSelection()
         persist()
@@ -415,6 +452,7 @@ public final class AppModel: ObservableObject {
         guard projects.contains(where: { $0.id == selection.projectID }) else { return }
         selectedProjectID = selection.projectID
         selectedThreadID = selection.threadID
+        resetFileBrowserForSelectedThread()
     }
 
     private func activeThread(id threadID: UUID) -> AgentThread? {
@@ -427,6 +465,72 @@ public final class AppModel: ObservableObject {
         threads[index].displayName = metadata.canonicalName
         pendingTerminalTitlesByThreadID.removeValue(forKey: threads[index].id)
         persist()
+    }
+
+    private func refreshFileBrowser(for thread: AgentThread) {
+        let requestID = UUID()
+        latestFileBrowserRequestIDByThreadID[thread.id] = requestID
+        let metadata = fileIndexMetadataByThreadID[thread.id]
+        fileBrowserState = FileBrowserState(
+            rootPath: thread.workingDirectory.path,
+            searchQuery: fileBrowserState.searchQuery,
+            entries: fileBrowserState.entries,
+            visibleEntries: fileBrowserState.visibleEntries,
+            isIndexing: true,
+            metadata: metadata,
+            errorMessage: nil
+        )
+        fileIndexer.indexFiles(
+            threadID: thread.id,
+            root: thread.workingDirectory,
+            ignoreRules: configuration.ignoreRules
+        ) { [weak self] result in
+            self?.finishFileBrowserRefresh(threadID: thread.id, requestID: requestID, result: result)
+        }
+    }
+
+    private func finishFileBrowserRefresh(
+        threadID: UUID,
+        requestID: UUID,
+        result: Result<FileIndexResult, Error>
+    ) {
+        guard latestFileBrowserRequestIDByThreadID[threadID] == requestID else { return }
+        switch result {
+        case .success(let result):
+            fileIndexMetadataByThreadID[threadID] = result.metadata
+            if selectedThreadID == threadID {
+                fileBrowserState = FileBrowserState(
+                    rootPath: result.metadata.rootPath,
+                    searchQuery: fileBrowserState.searchQuery,
+                    entries: result.entries,
+                    visibleEntries: FuzzyFileMatcher.rankedEntries(
+                        result.entries,
+                        query: fileBrowserState.searchQuery
+                    ),
+                    isIndexing: false,
+                    metadata: result.metadata,
+                    errorMessage: nil
+                )
+            }
+            persist()
+        case .failure(let error):
+            if selectedThreadID == threadID {
+                fileBrowserState.isIndexing = false
+                fileBrowserState.errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    private func resetFileBrowserForSelectedThread() {
+        guard let selectedThread else {
+            fileBrowserState = FileBrowserState()
+            return
+        }
+        fileBrowserState = FileBrowserState(
+            rootPath: selectedThread.workingDirectory.path,
+            searchQuery: "",
+            metadata: fileIndexMetadataByThreadID[selectedThread.id]
+        )
     }
 
     private func defaultShellPath() -> String {
@@ -443,7 +547,8 @@ public final class AppModel: ObservableObject {
                 rightPanelModesByThreadID: rightPanelModesByThreadID,
                 selectedRightPanelMode: selectedRightPanelMode,
                 isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
-                layoutState: layoutState
+                layoutState: layoutState,
+                fileIndexMetadataByThreadID: fileIndexMetadataByThreadID
             )
         )
     }

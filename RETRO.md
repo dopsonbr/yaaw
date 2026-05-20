@@ -78,3 +78,14 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - UX findings: Real CLI trust prompts are raw terminal UX and may block until the user chooses, which is acceptable for the terminal-backed session model. The local persisted smoke state had duplicate manually-created Claude thread names, but that is fixture state rather than a code regression.
 - Lesson learned: CLI session metadata needs a TTY-preserving capture path; metadata persistence must not mutate the command backing an already-running terminal. Current CLI resume syntax should be verified from installed tool help, not inferred.
 - Follow-up: Plan 08 should add file indexing and fuzzy search without blocking terminal responsiveness. Plan 10 should use deterministic CLI fixture binaries for screenshot-producing behavior tests.
+
+## Plan 08: File Browser And Fuzzy Search
+
+- Date: 2026-05-20
+- Scope shipped: read-only background file indexing, hidden-file visibility, JSON-config ignore rules, deterministic fuzzy ranking, selected-thread Files state, refresh/search UI, SQLite migration v5 for per-thread file-index metadata, and metadata reload/persistence.
+- Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 59 tests; `./script/build_and_run.sh --verify` passed.
+- External review: `codex review --uncommitted` found same-plan issues for stale overlapping refresh results and directory-only ignore semantics. Both were fixed with request IDs and directory-only ignore matching, then covered by tests.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-08/file-browser-fuzzy-search.png`; Computer Use verified the repo project Files panel indexed 151 items, skipped 3 ignored directories, showed hidden folders, and returned `RETRO.md` first for the `retro` query.
+- UX findings: The first home-directory index exposed that broad roots can take long enough to make a later repo selection feel stuck when indexing is serial. The indexer now runs requests concurrently and ignores stale same-thread results. The right panel is usable, but long paths still depend on truncation and will benefit from Plan 11 polish.
+- Lesson learned: Nonblocking indexing is not only a background-thread concern; request ordering matters once users can switch projects or refresh while older scans are still running.
+- Follow-up: Plan 09 should wire file selection into `nvim <relative-path>` using the selected entry without persisting live terminal state. Plan 11 should consider extra safe defaults or progress detail for very broad home-directory roots.

@@ -255,6 +255,96 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(columns.contains("canonical_session_name"))
     }
 
+    func testSQLiteMigrationAddsFileIndexMetadataTableToVersionFourDatabase() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        try withSQLiteDatabase(path: path) { database in
+            try executeSQL(
+                """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    root_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL
+                );
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    working_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL,
+                    is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1)),
+                    agent_cli TEXT NOT NULL CHECK (agent_cli IN ('codex', 'claude')),
+                    session_identity TEXT,
+                    canonical_session_name TEXT
+                );
+                CREATE TABLE app_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE right_panel_modes (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    mode TEXT NOT NULL CHECK (mode IN ('files', 'nvim', 'git'))
+                );
+                CREATE TABLE layout_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                PRAGMA user_version = 4;
+                """,
+                database: database
+            )
+        }
+
+        _ = try SQLiteAgentIDEStore(databasePath: path)
+        let columns = try sqliteTableColumns(path: path, table: "file_index_metadata")
+
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteAgentIDEStore.schemaVersion)
+        XCTAssertTrue(columns.contains("thread_id"))
+        XCTAssertTrue(columns.contains("root_path"))
+        XCTAssertTrue(columns.contains("indexed_at"))
+        XCTAssertTrue(columns.contains("file_count"))
+        XCTAssertTrue(columns.contains("ignored_directory_count"))
+    }
+
+    func testSQLiteFileIndexMetadataPersistsThroughReload() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteAgentIDEStore(databasePath: path)
+        let projectID = UUID()
+        let threadID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/agent-ide", isDirectory: true)
+        let metadata = FileIndexMetadata(
+            threadID: threadID,
+            rootPath: root.path,
+            indexedAt: Date(timeIntervalSince1970: 456),
+            fileCount: 12,
+            ignoredDirectoryCount: 3
+        )
+        let snapshot = AgentIDESnapshot(
+            projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+            threads: [
+                AgentThread(
+                    id: threadID,
+                    displayName: "Thread",
+                    projectID: projectID,
+                    workingDirectory: root
+                )
+            ],
+            selectedProjectID: projectID,
+            selectedThreadID: threadID,
+            rightPanelModesByThreadID: [threadID: .files],
+            selectedRightPanelMode: .files,
+            isGlobalTerminalExpanded: false,
+            fileIndexMetadataByThreadID: [threadID: metadata]
+        )
+
+        store.save(snapshot)
+        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+
+        XCTAssertEqual(reloaded.fileIndexMetadataByThreadID[threadID], metadata)
+    }
+
     func testSQLiteLayoutStateMissingRowsUseDefaults() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         let store = try SQLiteAgentIDEStore(databasePath: path)

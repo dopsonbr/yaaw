@@ -8,6 +8,7 @@ public struct AgentIDESnapshot: Equatable, Sendable {
     public var rightPanelModesByThreadID: [UUID: RightPanelMode]
     public var selectedRightPanelMode: RightPanelMode
     public var layoutState: LayoutState
+    public var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
 
     public var isGlobalTerminalExpanded: Bool {
         get { layoutState.isGlobalTerminalExpanded }
@@ -22,7 +23,8 @@ public struct AgentIDESnapshot: Equatable, Sendable {
         rightPanelModesByThreadID: [UUID: RightPanelMode] = [:],
         selectedRightPanelMode: RightPanelMode,
         isGlobalTerminalExpanded: Bool,
-        layoutState: LayoutState? = nil
+        layoutState: LayoutState? = nil,
+        fileIndexMetadataByThreadID: [UUID: FileIndexMetadata] = [:]
     ) {
         self.projects = projects
         self.threads = threads
@@ -32,6 +34,7 @@ public struct AgentIDESnapshot: Equatable, Sendable {
         self.selectedRightPanelMode = selectedRightPanelMode
         self.layoutState = layoutState ?? LayoutState(isGlobalTerminalExpanded: isGlobalTerminalExpanded)
         self.layoutState.isGlobalTerminalExpanded = isGlobalTerminalExpanded
+        self.fileIndexMetadataByThreadID = fileIndexMetadataByThreadID
     }
 }
 

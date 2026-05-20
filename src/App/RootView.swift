@@ -445,21 +445,19 @@ private struct RightPanelView: View {
 
             switch model.selectedRightPanelMode {
             case .files:
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Files")
-                        .font(.headline)
-
-                    ForEach(SampleFileBrowser.sampleEntries) { entry in
-                        HStack(spacing: 8) {
-                            Text(entry.isDirectory ? "Folder" : "File")
-                                .font(.caption)
-                                .foregroundStyle(dracula(entry.isDirectory ? .cyan : .green))
-                                .frame(width: 46, alignment: .leading)
-
-                            Text(entry.relativePath)
-                                .lineLimit(1)
-                        }
-                    }
+                FileBrowserPanel(
+                    state: model.fileBrowserState,
+                    searchQuery: Binding(
+                        get: { model.fileBrowserState.searchQuery },
+                        set: { model.updateFileSearchQuery($0) }
+                    ),
+                    onRefresh: model.refreshSelectedFileBrowser
+                )
+                .onAppear {
+                    model.refreshSelectedFileBrowser()
+                }
+                .onChange(of: model.selectedThreadID) {
+                    model.refreshSelectedFileBrowser()
                 }
 
             case .nvim:
@@ -501,6 +499,106 @@ private struct RightPanelView: View {
         case .git:
             return model.terminalLaunchRequest(for: .lazygit(threadID: selectedThreadID))
         }
+    }
+}
+
+private struct FileBrowserPanel: View {
+    let state: FileBrowserState
+    @Binding var searchQuery: String
+    let onRefresh: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text("Files")
+                    .font(.headline)
+
+                Spacer()
+
+                Button(action: onRefresh) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(dracula(.cyan))
+                .help("Refresh files")
+                .accessibilityLabel("Refresh files")
+            }
+
+            if let rootPath = state.rootPath {
+                Text(rootPath)
+                    .font(.caption)
+                    .foregroundStyle(dracula(.comment))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityLabel("Working directory \(rootPath)")
+            }
+
+            TextField("Search files", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(dracula(.currentLine))
+                .foregroundStyle(dracula(.foreground))
+                .accessibilityLabel("Search files")
+
+            HStack(spacing: 6) {
+                if state.isIndexing {
+                    ProgressView()
+                        .scaleEffect(0.55)
+                        .controlSize(.small)
+                        .accessibilityLabel("Indexing files")
+                }
+
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(dracula(.comment))
+                    .lineLimit(1)
+            }
+
+            if let errorMessage = state.errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(dracula(.orange))
+                    .lineLimit(3)
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(state.visibleEntries) { entry in
+                        FileBrowserRow(entry: entry)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+    }
+
+    private var statusText: String {
+        guard let metadata = state.metadata else {
+            return state.isIndexing ? "Indexing..." : "No index yet"
+        }
+        let ignored = metadata.ignoredDirectoryCount == 1 ? "1 ignored directory" : "\(metadata.ignoredDirectoryCount) ignored directories"
+        return "\(state.visibleEntries.count) of \(metadata.fileCount) items, \(ignored)"
+    }
+}
+
+private struct FileBrowserRow: View {
+    let entry: FileBrowserEntry
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: entry.isDirectory ? "folder" : "doc.text")
+                .foregroundStyle(dracula(entry.isDirectory ? .cyan : .green))
+                .frame(width: 16)
+
+            Text(entry.relativePath)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(dracula(.foreground))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.vertical, 3)
+        .accessibilityLabel("\(entry.isDirectory ? "Folder" : "File") \(entry.relativePath)")
     }
 }
 
