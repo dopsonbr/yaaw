@@ -21,9 +21,17 @@ public final class AppModel: ObservableObject {
     public let projectTerminal: TerminalSurfaceDescriptor
     public private(set) var navigationHistory: NavigationHistory
     private let store: AgentIDEStore
+    private let terminalManager: TerminalSessionManaging
+    private let homeDirectory: URL
 
-    public init(store: AgentIDEStore = InMemoryAgentIDEStore.helloWorld()) {
+    public init(
+        store: AgentIDEStore = InMemoryAgentIDEStore.helloWorld(),
+        terminalManager: TerminalSessionManaging = PlaceholderTerminalSessionManager(),
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) {
         self.store = store
+        self.terminalManager = terminalManager
+        self.homeDirectory = homeDirectory
         let snapshot = store.load()
         self.projects = snapshot.projects
         self.threads = snapshot.threads
@@ -81,6 +89,10 @@ public final class AppModel: ObservableObject {
         !archivedThreadsForSelectedProject.isEmpty
     }
 
+    public var terminalLifecycleEvents: [TerminalLifecycleEvent] {
+        terminalManager.lifecycleEvents
+    }
+
     public func selectRightPanelMode(_ mode: RightPanelMode) {
         guard let selectedThreadID else { return }
         rightPanelModesByThreadID[selectedThreadID] = mode
@@ -135,6 +147,80 @@ public final class AppModel: ObservableObject {
             maximum: LayoutState.maximumGlobalTerminalHeight
         )
         persist()
+    }
+
+    public func terminalLaunchRequest(for role: TerminalRole) -> TerminalLaunchRequest? {
+        switch role {
+        case .global:
+            return TerminalLaunchRequest(
+                role: .global,
+                title: "Global Terminal",
+                workingDirectory: homeDirectory,
+                command: [defaultShellPath()]
+            )
+        case .project(let threadID):
+            guard let thread = activeThread(id: threadID) else { return nil }
+            return TerminalLaunchRequest(
+                role: role,
+                title: "Project Terminal",
+                workingDirectory: thread.workingDirectory,
+                command: [defaultShellPath()]
+            )
+        case .nvim(let threadID):
+            guard let thread = activeThread(id: threadID) else { return nil }
+            return TerminalLaunchRequest(
+                role: role,
+                title: "nvim",
+                workingDirectory: thread.workingDirectory,
+                command: ["nvim"]
+            )
+        case .lazygit(let threadID):
+            guard let thread = activeThread(id: threadID) else { return nil }
+            return TerminalLaunchRequest(
+                role: role,
+                title: "Git",
+                workingDirectory: thread.workingDirectory,
+                command: ["lazygit"]
+            )
+        }
+    }
+
+    @discardableResult
+    public func activateTerminal(role: TerminalRole) -> TerminalSessionRecord? {
+        guard let request = terminalLaunchRequest(for: role) else { return nil }
+        return terminalManager.activate(request)
+    }
+
+    @discardableResult
+    public func activateSelectedProjectTerminal() -> TerminalSessionRecord? {
+        guard let selectedThreadID else { return nil }
+        return activateTerminal(role: .project(threadID: selectedThreadID))
+    }
+
+    @discardableResult
+    public func activateGlobalTerminal() -> TerminalSessionRecord? {
+        activateTerminal(role: .global)
+    }
+
+    @discardableResult
+    public func activateSelectedRightPanelTerminal() -> TerminalSessionRecord? {
+        guard let selectedThreadID else { return nil }
+        switch selectedRightPanelMode {
+        case .files:
+            return nil
+        case .nvim:
+            return activateTerminal(role: .nvim(threadID: selectedThreadID))
+        case .git:
+            return activateTerminal(role: .lazygit(threadID: selectedThreadID))
+        }
+    }
+
+    public func terminateTerminal(role: TerminalRole) {
+        terminalManager.terminate(role: role)
+    }
+
+    public func terminalSession(for role: TerminalRole) -> TerminalSessionRecord? {
+        terminalManager.session(for: role)
     }
 
     @discardableResult
@@ -263,6 +349,14 @@ public final class AppModel: ObservableObject {
         guard projects.contains(where: { $0.id == selection.projectID }) else { return }
         selectedProjectID = selection.projectID
         selectedThreadID = selection.threadID
+    }
+
+    private func activeThread(id threadID: UUID) -> AgentThread? {
+        threads.first { $0.id == threadID && !$0.isArchived }
+    }
+
+    private func defaultShellPath() -> String {
+        ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
     }
 
     private func persist() {

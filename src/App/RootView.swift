@@ -60,6 +60,9 @@ struct RootView: View {
                 height: model.layoutState.globalTerminalHeight,
                 onResize: { delta in
                     model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
+                },
+                onAppearExpanded: {
+                    model.activateGlobalTerminal()
                 }
             )
         }
@@ -374,6 +377,10 @@ private struct MainWorkspaceView: View {
                 title: model.projectTerminal.title,
                 message: model.projectTerminal.placeholderText
             )
+            .id(model.selectedThreadID)
+            .onAppear {
+                model.activateSelectedProjectTerminal()
+            }
 
             Spacer()
         }
@@ -436,9 +443,17 @@ private struct RightPanelView: View {
 
             case .nvim:
                 TerminalPlaceholderView(title: "nvim", message: "Terminal placeholder for nvim")
+                    .id(model.selectedThreadID)
+                    .onAppear {
+                        model.activateSelectedRightPanelTerminal()
+                    }
 
             case .git:
                 TerminalPlaceholderView(title: "Git", message: "Terminal placeholder for lazygit")
+                    .id(model.selectedThreadID)
+                    .onAppear {
+                        model.activateSelectedRightPanelTerminal()
+                    }
             }
 
             Spacer()
@@ -476,6 +491,7 @@ private struct GlobalTerminalBar: View {
     let isExpanded: Bool
     let height: Double
     let onResize: (Double) -> Void
+    let onAppearExpanded: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -501,6 +517,7 @@ private struct GlobalTerminalBar: View {
             if isExpanded {
                 TerminalPlaceholderView(title: "Global", message: "Terminal placeholder for the user home directory")
                     .frame(height: height)
+                    .onAppear(perform: onAppearExpanded)
             }
         }
         .padding(.horizontal, 18)

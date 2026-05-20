@@ -45,3 +45,14 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - UX findings: The shell is now usable for the next terminal lifecycle work. It remains visually dense and scaffold-like in places, so final toolbar, spacing, and tool affordance polish should stay in Plans 10 and 11.
 - Lesson learned: Progress screenshots must be captured or cropped to the app window before committing; full-desktop captures are a privacy risk and should be treated as critical artifact hygiene.
 - Follow-up: Plan 05 should add terminal lifecycle protocols while keeping terminal contents placeholder-backed until libghostty integration.
+
+## Plan 05: Terminal Abstraction
+
+- Date: 2026-05-20
+- Scope shipped: runtime-only terminal roles, launch requests, session records, lifecycle events, placeholder session manager, and app-model request resolution for project, global, `nvim`, and `lazygit` terminals.
+- Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 37 tests; `./script/build_and_run.sh --verify` passed.
+- External review: The first `codex review --uncommitted` pass found current-plan lifecycle bugs where view-only `onAppear` could miss thread changes. Those were fixed with thread-scoped terminal placeholder identities. The follow-up review found no discrete correctness issues.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-05/terminal-abstraction.png`; Computer Use verified the running app switches the right panel into `nvim` and Git terminal placeholder modes without layout regression.
+- UX findings: Placeholder-backed terminal cards make the future terminal slots clear, but the app still needs real embedded terminal focus, input, and scroll behavior in Plan 06 before it feels like a daily-use IDE.
+- Lesson learned: Runtime abstractions still need UI lifecycle ownership; the app must react to selected-thread changes, not only initial surface appearance.
+- Follow-up: Plan 06 should put libghostty behind this boundary without changing the public app-state API.

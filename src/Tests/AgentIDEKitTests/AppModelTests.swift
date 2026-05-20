@@ -225,6 +225,70 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(archivedThread.agentCLI, .claude)
     }
 
+    func testProjectTerminalSessionIsScopedToSelectedActiveThread() throws {
+        let fixture = AppModelFixture()
+        let manager = PlaceholderTerminalSessionManager()
+        let model = AppModel(store: fixture.store, terminalManager: manager)
+
+        let firstActivation = try XCTUnwrap(model.activateSelectedProjectTerminal())
+        let secondActivation = try XCTUnwrap(model.activateSelectedProjectTerminal())
+
+        XCTAssertEqual(firstActivation.id, secondActivation.id)
+        XCTAssertEqual(firstActivation.request.role, .project(threadID: fixture.firstThreadID))
+
+        model.selectThread(id: fixture.secondThreadID)
+        let thirdActivation = try XCTUnwrap(model.activateSelectedProjectTerminal())
+
+        XCTAssertNotEqual(firstActivation.id, thirdActivation.id)
+        XCTAssertEqual(thirdActivation.request.role, .project(threadID: fixture.secondThreadID))
+        XCTAssertEqual(manager.lifecycleEvents.count, 5)
+    }
+
+    func testGlobalTerminalSessionIsSharedAppWide() throws {
+        let fixture = AppModelFixture()
+        let homeDirectory = URL(fileURLWithPath: "/tmp/agent-ide-home", isDirectory: true)
+        let model = AppModel(store: fixture.store, homeDirectory: homeDirectory)
+
+        let firstActivation = try XCTUnwrap(model.activateGlobalTerminal())
+        model.selectThread(id: fixture.secondThreadID)
+        let secondActivation = try XCTUnwrap(model.activateGlobalTerminal())
+
+        XCTAssertEqual(firstActivation.id, secondActivation.id)
+        XCTAssertEqual(firstActivation.request.role, .global)
+        XCTAssertEqual(firstActivation.request.workingDirectory, homeDirectory)
+    }
+
+    func testRightPanelTerminalRequestsUseSelectedThreadWorkingDirectory() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.selectRightPanelMode(.nvim)
+        let nvimSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
+        XCTAssertEqual(nvimSession.request.role, .nvim(threadID: fixture.firstThreadID))
+        XCTAssertEqual(nvimSession.request.workingDirectory, fixture.root)
+        XCTAssertEqual(nvimSession.request.command, ["nvim"])
+
+        model.selectRightPanelMode(.git)
+        let gitSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
+        XCTAssertEqual(gitSession.request.role, .lazygit(threadID: fixture.firstThreadID))
+        XCTAssertEqual(gitSession.request.workingDirectory, fixture.root)
+        XCTAssertEqual(gitSession.request.command, ["lazygit"])
+    }
+
+    func testTerminalRuntimeStateIsNotPersisted() throws {
+        let fixture = AppModelFixture()
+        let store = fixture.store
+        let model = AppModel(store: store)
+
+        let session = try XCTUnwrap(model.activateSelectedProjectTerminal())
+        XCTAssertEqual(model.terminalSession(for: .project(threadID: fixture.firstThreadID))?.id, session.id)
+
+        let reloadedModel = AppModel(store: store)
+
+        XCTAssertNil(reloadedModel.terminalSession(for: .project(threadID: fixture.firstThreadID)))
+        XCTAssertTrue(reloadedModel.terminalLifecycleEvents.isEmpty)
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentIDEKitTests-\(UUID().uuidString)", isDirectory: true)
