@@ -16,6 +16,28 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.isGlobalTerminalExpanded)
     }
 
+    func testPanelCollapseActionsUpdateLayoutState() {
+        let model = AppModel()
+
+        model.toggleSidebarCollapsed()
+        model.toggleRightPanelCollapsed()
+
+        XCTAssertTrue(model.layoutState.isSidebarCollapsed)
+        XCTAssertTrue(model.layoutState.isRightPanelCollapsed)
+    }
+
+    func testPanelResizeActionsClampLayoutState() {
+        let model = AppModel()
+
+        model.setSidebarWidth(10)
+        model.setRightPanelWidth(10)
+        model.setGlobalTerminalHeight(1_000)
+
+        XCTAssertEqual(model.layoutState.sidebarWidth, LayoutState.minimumSidebarWidth)
+        XCTAssertEqual(model.layoutState.rightPanelWidth, LayoutState.minimumRightPanelWidth)
+        XCTAssertEqual(model.layoutState.globalTerminalHeight, LayoutState.maximumGlobalTerminalHeight)
+    }
+
     func testRightPanelModeSelectionIsPublicBehavior() {
         let model = AppModel()
 
@@ -56,11 +78,14 @@ final class AppModelTests: XCTestCase {
         let fixture = AppModelFixture()
         let model = AppModel(store: fixture.store)
 
+        XCTAssertFalse(model.hasArchivedThreadsForSelectedProject)
+
         model.archiveThread(id: fixture.firstThreadID)
 
         XCTAssertEqual(model.selectedThreadID, fixture.secondThreadID)
         XCTAssertEqual(model.threads.first { $0.id == fixture.firstThreadID }?.agentCLI, .codex)
         XCTAssertEqual(model.threads.first { $0.id == fixture.firstThreadID }?.isArchived, true)
+        XCTAssertTrue(model.hasArchivedThreadsForSelectedProject)
     }
 
     func testSnapshotSelectedModeSeedsSelectedThreadMode() {

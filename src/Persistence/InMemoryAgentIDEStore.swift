@@ -7,7 +7,12 @@ public struct AgentIDESnapshot: Equatable, Sendable {
     public var selectedThreadID: UUID?
     public var rightPanelModesByThreadID: [UUID: RightPanelMode]
     public var selectedRightPanelMode: RightPanelMode
-    public var isGlobalTerminalExpanded: Bool
+    public var layoutState: LayoutState
+
+    public var isGlobalTerminalExpanded: Bool {
+        get { layoutState.isGlobalTerminalExpanded }
+        set { layoutState.isGlobalTerminalExpanded = newValue }
+    }
 
     public init(
         projects: [Project],
@@ -16,7 +21,8 @@ public struct AgentIDESnapshot: Equatable, Sendable {
         selectedThreadID: UUID?,
         rightPanelModesByThreadID: [UUID: RightPanelMode] = [:],
         selectedRightPanelMode: RightPanelMode,
-        isGlobalTerminalExpanded: Bool
+        isGlobalTerminalExpanded: Bool,
+        layoutState: LayoutState? = nil
     ) {
         self.projects = projects
         self.threads = threads
@@ -24,7 +30,8 @@ public struct AgentIDESnapshot: Equatable, Sendable {
         self.selectedThreadID = selectedThreadID
         self.rightPanelModesByThreadID = rightPanelModesByThreadID
         self.selectedRightPanelMode = selectedRightPanelMode
-        self.isGlobalTerminalExpanded = isGlobalTerminalExpanded
+        self.layoutState = layoutState ?? LayoutState(isGlobalTerminalExpanded: isGlobalTerminalExpanded)
+        self.layoutState.isGlobalTerminalExpanded = isGlobalTerminalExpanded
     }
 }
 

@@ -186,6 +186,50 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(reloaded.isGlobalTerminalExpanded)
     }
 
+    func testSQLiteLayoutStatePersistsThroughReload() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteAgentIDEStore(databasePath: path)
+        var snapshot = store.load()
+        let layoutState = LayoutState(
+            sidebarWidth: 312,
+            rightPanelWidth: 366,
+            globalTerminalHeight: 188,
+            isSidebarCollapsed: true,
+            isRightPanelCollapsed: true,
+            isGlobalTerminalExpanded: true
+        )
+        snapshot.layoutState = layoutState
+
+        store.save(snapshot)
+        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+
+        XCTAssertEqual(reloaded.layoutState, layoutState)
+    }
+
+    func testSQLiteLayoutStateMissingRowsUseDefaults() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteAgentIDEStore(databasePath: path)
+        _ = store.load()
+        try withSQLiteDatabase(path: path) { database in
+            try executeSQL(
+                """
+                DELETE FROM layout_state;
+                INSERT INTO layout_state (key, value) VALUES ('sidebar_width', '333');
+                """,
+                database: database
+            )
+        }
+
+        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+
+        XCTAssertEqual(reloaded.layoutState.sidebarWidth, 333)
+        XCTAssertEqual(reloaded.layoutState.rightPanelWidth, LayoutState.defaultRightPanelWidth)
+        XCTAssertEqual(reloaded.layoutState.globalTerminalHeight, LayoutState.defaultGlobalTerminalHeight)
+        XCTAssertFalse(reloaded.layoutState.isSidebarCollapsed)
+        XCTAssertFalse(reloaded.layoutState.isRightPanelCollapsed)
+        XCTAssertFalse(reloaded.layoutState.isGlobalTerminalExpanded)
+    }
+
     func testSQLiteTransactionRejectsPartialInvalidThreadWrite() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         let store = try SQLiteAgentIDEStore(databasePath: path)

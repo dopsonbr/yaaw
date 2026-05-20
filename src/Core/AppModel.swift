@@ -16,7 +16,7 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var selectedProjectID: UUID
     @Published public private(set) var selectedThreadID: UUID?
     @Published public private(set) var rightPanelModesByThreadID: [UUID: RightPanelMode]
-    @Published public private(set) var isGlobalTerminalExpanded: Bool
+    @Published public private(set) var layoutState: LayoutState
 
     public let projectTerminal: TerminalSurfaceDescriptor
     public private(set) var navigationHistory: NavigationHistory
@@ -40,7 +40,7 @@ public final class AppModel: ObservableObject {
             rightPanelModesByThreadID[selectedThreadID] = snapshot.selectedRightPanelMode
         }
         self.rightPanelModesByThreadID = rightPanelModesByThreadID
-        self.isGlobalTerminalExpanded = snapshot.isGlobalTerminalExpanded
+        self.layoutState = snapshot.layoutState
         self.navigationHistory = NavigationHistory(
             initial: AppSelection(projectID: selectedProjectID, threadID: selectedThreadID)
         )
@@ -65,12 +65,20 @@ public final class AppModel: ObservableObject {
         return rightPanelModesByThreadID[selectedThreadID] ?? .files
     }
 
+    public var isGlobalTerminalExpanded: Bool {
+        layoutState.isGlobalTerminalExpanded
+    }
+
     public var activeThreadsForSelectedProject: [AgentThread] {
         threads.filter { $0.projectID == selectedProjectID && !$0.isArchived }
     }
 
     public var archivedThreadsForSelectedProject: [AgentThread] {
         threads.filter { $0.projectID == selectedProjectID && $0.isArchived }
+    }
+
+    public var hasArchivedThreadsForSelectedProject: Bool {
+        !archivedThreadsForSelectedProject.isEmpty
     }
 
     public func selectRightPanelMode(_ mode: RightPanelMode) {
@@ -88,7 +96,44 @@ public final class AppModel: ObservableObject {
     }
 
     public func toggleGlobalTerminal() {
-        isGlobalTerminalExpanded.toggle()
+        layoutState.isGlobalTerminalExpanded.toggle()
+        persist()
+    }
+
+    public func toggleSidebarCollapsed() {
+        layoutState.isSidebarCollapsed.toggle()
+        persist()
+    }
+
+    public func toggleRightPanelCollapsed() {
+        layoutState.isRightPanelCollapsed.toggle()
+        persist()
+    }
+
+    public func setSidebarWidth(_ width: Double) {
+        layoutState.sidebarWidth = LayoutState.clamp(
+            width,
+            minimum: LayoutState.minimumSidebarWidth,
+            maximum: LayoutState.maximumSidebarWidth
+        )
+        persist()
+    }
+
+    public func setRightPanelWidth(_ width: Double) {
+        layoutState.rightPanelWidth = LayoutState.clamp(
+            width,
+            minimum: LayoutState.minimumRightPanelWidth,
+            maximum: LayoutState.maximumRightPanelWidth
+        )
+        persist()
+    }
+
+    public func setGlobalTerminalHeight(_ height: Double) {
+        layoutState.globalTerminalHeight = LayoutState.clamp(
+            height,
+            minimum: LayoutState.minimumGlobalTerminalHeight,
+            maximum: LayoutState.maximumGlobalTerminalHeight
+        )
         persist()
     }
 
@@ -229,7 +274,8 @@ public final class AppModel: ObservableObject {
                 selectedThreadID: selectedThreadID,
                 rightPanelModesByThreadID: rightPanelModesByThreadID,
                 selectedRightPanelMode: selectedRightPanelMode,
-                isGlobalTerminalExpanded: isGlobalTerminalExpanded
+                isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
+                layoutState: layoutState
             )
         )
     }

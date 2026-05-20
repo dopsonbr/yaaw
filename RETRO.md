@@ -34,3 +34,14 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - UX findings: The workflow is usable and visible, but project creation still uses a raw path field and archive is a plain sidebar text action. Those are polish items for the native shell and final UX passes.
 - Lesson learned: Explicit user choice is a data invariant; migration and startup behavior must protect it even when that means stopping the app with a clear error.
 - Follow-up: Plan 04 should replace the fixed scaffold with the native Dracula layout shell and start moving these controls into their long-term locations.
+
+## Plan 04: Layout Shell
+
+- Date: 2026-05-20
+- Scope shipped: layout state model, SQLite migration v3 for persisted panel geometry, collapsible/resizable sidebar and right panel, persisted global terminal height/expanded state, visible archive disclosure, and layout menu commands.
+- Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 33 tests; `./script/build_and_run.sh --verify` passed.
+- External review: `codex review --uncommitted` found no blocking correctness, persistence, or UI-state regression. The reviewer's SwiftPM command hit its own sandbox cache issue, but local gates passed in the normal user-cache environment.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-04/layout-shell.png`; Computer Use verified the archive disclosure, resize handles, collapse/expand controls, Files/nvim/Git mode controls, and collapsed global terminal in the running app.
+- UX findings: The shell is now usable for the next terminal lifecycle work. It remains visually dense and scaffold-like in places, so final toolbar, spacing, and tool affordance polish should stay in Plans 10 and 11.
+- Lesson learned: Progress screenshots must be captured or cropped to the app window before committing; full-desktop captures are a privacy risk and should be treated as critical artifact hygiene.
+- Follow-up: Plan 05 should add terminal lifecycle protocols while keeping terminal contents placeholder-backed until libghostty integration.

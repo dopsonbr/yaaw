@@ -61,6 +61,18 @@ struct AgentIDEApp: App {
                     }
                     .keyboardShortcut("]", modifiers: [.command, .shift])
                 }
+
+                CommandMenu("Layout") {
+                    Button("Toggle Sidebar") {
+                        model.toggleSidebarCollapsed()
+                    }
+                    .keyboardShortcut("s", modifiers: [.command, .option])
+
+                    Button("Toggle Right Panel") {
+                        model.toggleRightPanelCollapsed()
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .option])
+                }
             }
         }
     }

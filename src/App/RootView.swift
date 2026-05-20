@@ -7,8 +7,24 @@ struct RootView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                SidebarView(model: model)
-                    .frame(width: 250)
+                if model.layoutState.isSidebarCollapsed {
+                    CollapsedPanelRail(
+                        systemImage: "sidebar.left",
+                        accessibilityLabel: "Expand sidebar",
+                        action: model.toggleSidebarCollapsed
+                    )
+                    .frame(width: 44)
+                } else {
+                    SidebarView(model: model)
+                        .frame(width: model.layoutState.sidebarWidth)
+
+                    VerticalResizeHandle(
+                        accessibilityLabel: "Resize sidebar",
+                        onDrag: { delta in
+                            model.setSidebarWidth(model.layoutState.sidebarWidth + delta)
+                        }
+                    )
+                }
 
                 Divider()
                     .overlay(dracula(.currentLine))
@@ -19,11 +35,33 @@ struct RootView: View {
                 Divider()
                     .overlay(dracula(.currentLine))
 
-                RightPanelView(model: model)
-                    .frame(width: 300)
+                if model.layoutState.isRightPanelCollapsed {
+                    CollapsedPanelRail(
+                        systemImage: "sidebar.right",
+                        accessibilityLabel: "Expand right panel",
+                        action: model.toggleRightPanelCollapsed
+                    )
+                    .frame(width: 44)
+                } else {
+                    VerticalResizeHandle(
+                        accessibilityLabel: "Resize right panel",
+                        onDrag: { delta in
+                            model.setRightPanelWidth(model.layoutState.rightPanelWidth - delta)
+                        }
+                    )
+
+                    RightPanelView(model: model)
+                        .frame(width: model.layoutState.rightPanelWidth)
+                }
             }
 
-            GlobalTerminalBar(isExpanded: model.isGlobalTerminalExpanded)
+            GlobalTerminalBar(
+                isExpanded: model.isGlobalTerminalExpanded,
+                height: model.layoutState.globalTerminalHeight,
+                onResize: { delta in
+                    model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
+                }
+            )
         }
         .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
@@ -42,7 +80,11 @@ private struct SidebarView: View {
                 .foregroundStyle(dracula(.purple))
 
             VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: "Projects", actionTitle: "New") {
+                SectionHeader(
+                    title: "Projects",
+                    actionTitle: "New",
+                    systemImage: "folder.badge.plus"
+                ) {
                     isProjectSheetPresented = true
                 }
 
@@ -68,7 +110,11 @@ private struct SidebarView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: "Threads", actionTitle: "New") {
+                SectionHeader(
+                    title: "Threads",
+                    actionTitle: "New",
+                    systemImage: "plus.message"
+                ) {
                     isThreadSheetPresented = true
                 }
 
@@ -104,27 +150,37 @@ private struct SidebarView: View {
                 }
             }
 
-            if !model.archivedThreadsForSelectedProject.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Archived")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(dracula(.orange))
-
+            DisclosureGroup {
+                if model.archivedThreadsForSelectedProject.isEmpty {
+                    Text("No archived threads")
+                        .font(.caption)
+                        .foregroundStyle(dracula(.comment))
+                        .padding(.vertical, 4)
+                } else {
                     ForEach(model.archivedThreadsForSelectedProject) { thread in
-                        Button {
+                        ArchivedThreadRow(thread: thread) {
                             model.selectThread(id: thread.id)
-                        } label: {
-                            Text(thread.displayName)
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 6)
+                        } onUnarchive: {
+                            model.unarchiveThread(id: thread.id)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+            } label: {
+                Label("Archived", systemImage: "archivebox")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(dracula(.orange))
             }
 
             Spacer()
+
+            Button {
+                model.toggleSidebarCollapsed()
+            } label: {
+                Label("Collapse Sidebar", systemImage: "sidebar.left")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.comment))
         }
         .padding(18)
         .background(dracula(.background))
@@ -140,6 +196,7 @@ private struct SidebarView: View {
 private struct SectionHeader: View {
     let title: String
     let actionTitle: String
+    let systemImage: String
     let action: () -> Void
 
     var body: some View {
@@ -150,11 +207,40 @@ private struct SectionHeader: View {
 
             Spacer()
 
-            Button(actionTitle, action: action)
+            Button(action: action) {
+                Label(actionTitle, systemImage: systemImage)
+                    .labelStyle(.iconOnly)
+            }
                 .buttonStyle(.plain)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(dracula(.cyan))
+                .help(actionTitle)
         }
+    }
+}
+
+private struct ArchivedThreadRow: View {
+    let thread: AgentThread
+    let onSelect: () -> Void
+    let onUnarchive: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onSelect) {
+                Text(thread.displayName)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onUnarchive) {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.cyan))
+            .help("Unarchive")
+        }
+        .padding(.vertical, 6)
     }
 }
 
@@ -302,6 +388,15 @@ private struct RightPanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
+                Button {
+                    model.toggleRightPanelCollapsed()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(dracula(.comment))
+                .help("Collapse right panel")
+
                 ForEach(RightPanelMode.allCases) { mode in
                     Button {
                         model.selectRightPanelMode(mode)
@@ -379,9 +474,18 @@ private struct TerminalPlaceholderView: View {
 
 private struct GlobalTerminalBar: View {
     let isExpanded: Bool
+    let height: Double
+    let onResize: (Double) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if isExpanded {
+                HorizontalResizeHandle(
+                    accessibilityLabel: "Resize global terminal",
+                    onDrag: onResize
+                )
+            }
+
             HStack {
                 Text("Global Terminal")
                     .font(.caption.weight(.semibold))
@@ -396,12 +500,89 @@ private struct GlobalTerminalBar: View {
 
             if isExpanded {
                 TerminalPlaceholderView(title: "Global", message: "Terminal placeholder for the user home directory")
-                    .frame(height: 120)
+                    .frame(height: height)
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 10)
+        .padding(.top, isExpanded ? 0 : 10)
+        .padding(.bottom, 10)
         .background(dracula(.currentLine))
+    }
+}
+
+private struct CollapsedPanelRail: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        VStack {
+            Button(action: action) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.cyan))
+            .help(accessibilityLabel)
+            .accessibilityLabel(accessibilityLabel)
+
+            Spacer()
+        }
+        .padding(.vertical, 14)
+        .background(dracula(.background))
+    }
+}
+
+private struct VerticalResizeHandle: View {
+    let accessibilityLabel: String
+    let onDrag: (Double) -> Void
+    @State private var previousTranslation = 0.0
+
+    var body: some View {
+        Rectangle()
+            .fill(dracula(.currentLine))
+            .frame(width: 6)
+            .overlay(Rectangle().fill(dracula(.comment)).frame(width: 1))
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let current = value.translation.width
+                        onDrag(current - previousTranslation)
+                        previousTranslation = current
+                    }
+                    .onEnded { _ in
+                        previousTranslation = 0
+                    }
+            )
+            .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct HorizontalResizeHandle: View {
+    let accessibilityLabel: String
+    let onDrag: (Double) -> Void
+    @State private var previousTranslation = 0.0
+
+    var body: some View {
+        Rectangle()
+            .fill(dracula(.currentLine))
+            .frame(height: 6)
+            .overlay(Rectangle().fill(dracula(.comment)).frame(height: 1))
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let current = value.translation.height
+                        onDrag(current - previousTranslation)
+                        previousTranslation = current
+                    }
+                    .onEnded { _ in
+                        previousTranslation = 0
+                    }
+            )
+            .accessibilityLabel(accessibilityLabel)
     }
 }
 

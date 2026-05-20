@@ -9,7 +9,7 @@ public enum SQLiteStoreError: Error, Equatable {
 }
 
 public final class SQLiteAgentIDEStore: AgentIDEStore {
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
 
     private let databasePath: URL
     private var database: OpaquePointer?
@@ -53,7 +53,10 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                 ?? threads.first { $0.projectID == selectedProjectID && !$0.isArchived }?.id
             let modes = try loadRightPanelModes()
             let selectedMode = selectedThreadID.flatMap { modes[$0] } ?? .files
-            let isGlobalTerminalExpanded = try loadBool(key: "is_global_terminal_expanded") ?? false
+            let fallbackGlobalTerminalExpanded = try loadBool(key: "is_global_terminal_expanded") ?? false
+            let layoutState = try loadLayoutState(
+                fallbackGlobalTerminalExpanded: fallbackGlobalTerminalExpanded
+            )
 
             return AgentIDESnapshot(
                 projects: projects,
@@ -62,7 +65,8 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                 selectedThreadID: selectedThreadID,
                 rightPanelModesByThreadID: modes,
                 selectedRightPanelMode: selectedMode,
-                isGlobalTerminalExpanded: isGlobalTerminalExpanded
+                isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
+                layoutState: layoutState
             )
         } catch {
             return InMemoryAgentIDEStore.helloWorld().load()
@@ -73,6 +77,7 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
         do {
             try transaction {
                 try execute("DELETE FROM right_panel_modes")
+                try execute("DELETE FROM layout_state")
                 try execute("DELETE FROM app_state")
                 try execute("DELETE FROM threads")
                 try execute("DELETE FROM projects")
@@ -94,6 +99,7 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                     key: "is_global_terminal_expanded",
                     value: snapshot.isGlobalTerminalExpanded ? "true" : "false"
                 )
+                try insertLayoutState(snapshot.layoutState)
             }
         } catch {}
     }
@@ -122,6 +128,13 @@ private extension SQLiteAgentIDEStore {
             try transaction {
                 try migrateToVersionTwo()
                 try execute("PRAGMA user_version = 2")
+            }
+        }
+        if currentVersion < 3 {
+            try transaction {
+                try createLayoutStateSchema()
+                try seedLayoutStateFromLegacyAppState()
+                try execute("PRAGMA user_version = 3")
             }
         }
     }
@@ -194,6 +207,22 @@ private extension SQLiteAgentIDEStore {
         )
         try execute("DROP TABLE threads")
         try execute("ALTER TABLE threads_v2 RENAME TO threads")
+    }
+
+    func createLayoutStateSchema() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS layout_state (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            )
+            """
+        )
+    }
+
+    func seedLayoutStateFromLegacyAppState() throws {
+        let isExpanded = try loadBool(key: "is_global_terminal_expanded") ?? false
+        try insertLayoutState(LayoutState(isGlobalTerminalExpanded: isExpanded))
     }
 
     func userVersion() throws -> Int {
@@ -303,6 +332,29 @@ private extension SQLiteAgentIDEStore {
         try stepDone(statement)
     }
 
+    func insertLayoutState(_ layoutState: LayoutState) throws {
+        try insertLayoutStateValue(key: "sidebar_width", value: "\(layoutState.sidebarWidth)")
+        try insertLayoutStateValue(key: "right_panel_width", value: "\(layoutState.rightPanelWidth)")
+        try insertLayoutStateValue(key: "global_terminal_height", value: "\(layoutState.globalTerminalHeight)")
+        try insertLayoutStateValue(key: "sidebar_collapsed", value: layoutState.isSidebarCollapsed ? "true" : "false")
+        try insertLayoutStateValue(
+            key: "right_panel_collapsed",
+            value: layoutState.isRightPanelCollapsed ? "true" : "false"
+        )
+        try insertLayoutStateValue(
+            key: "global_terminal_expanded",
+            value: layoutState.isGlobalTerminalExpanded ? "true" : "false"
+        )
+    }
+
+    func insertLayoutStateValue(key: String, value: String) throws {
+        let statement = try prepare("INSERT INTO layout_state (key, value) VALUES (?, ?)")
+        defer { sqlite3_finalize(statement) }
+        bind(key, at: 1, in: statement)
+        bind(value, at: 2, in: statement)
+        try stepDone(statement)
+    }
+
     func loadProjects() throws -> [Project] {
         let statement = try prepare(
             "SELECT id, display_name, root_directory, created_at, last_opened_at FROM projects ORDER BY created_at, display_name"
@@ -379,6 +431,44 @@ private extension SQLiteAgentIDEStore {
         default:
             return nil
         }
+    }
+
+    func loadLayoutState(fallbackGlobalTerminalExpanded: Bool) throws -> LayoutState {
+        LayoutState(
+            sidebarWidth: try loadLayoutDouble(key: "sidebar_width") ?? LayoutState.defaultSidebarWidth,
+            rightPanelWidth: try loadLayoutDouble(key: "right_panel_width") ?? LayoutState.defaultRightPanelWidth,
+            globalTerminalHeight: try loadLayoutDouble(key: "global_terminal_height")
+                ?? LayoutState.defaultGlobalTerminalHeight,
+            isSidebarCollapsed: try loadLayoutBool(key: "sidebar_collapsed") ?? false,
+            isRightPanelCollapsed: try loadLayoutBool(key: "right_panel_collapsed") ?? false,
+            isGlobalTerminalExpanded: try loadLayoutBool(key: "global_terminal_expanded")
+                ?? fallbackGlobalTerminalExpanded
+        )
+    }
+
+    func loadLayoutDouble(key: String) throws -> Double? {
+        guard let value = try loadLayoutValue(key: key) else { return nil }
+        return Double(value)
+    }
+
+    func loadLayoutBool(key: String) throws -> Bool? {
+        guard let value = try loadLayoutValue(key: key) else { return nil }
+        switch value {
+        case "true":
+            return true
+        case "false":
+            return false
+        default:
+            return nil
+        }
+    }
+
+    func loadLayoutValue(key: String) throws -> String? {
+        let statement = try prepare("SELECT value FROM layout_state WHERE key = ?")
+        defer { sqlite3_finalize(statement) }
+        bind(key, at: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return text(at: 0, in: statement)
     }
 
     func loadRightPanelModes() throws -> [UUID: RightPanelMode] {

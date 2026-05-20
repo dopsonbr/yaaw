@@ -28,6 +28,7 @@ let package = Package(
             sources: [
                 "Core",
                 "FileBrowser",
+                "Layout",
                 "Persistence",
                 "Projects",
                 "RightPanel",
