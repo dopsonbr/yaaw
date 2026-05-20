@@ -1,4 +1,5 @@
 import AgentIDEKit
+import AppKit
 import SwiftUI
 
 struct RootView: View {
@@ -58,6 +59,8 @@ struct RootView: View {
             GlobalTerminalBar(
                 isExpanded: model.isGlobalTerminalExpanded,
                 height: model.layoutState.globalTerminalHeight,
+                request: model.terminalLaunchRequest(for: .global),
+                onToggle: model.toggleGlobalTerminal,
                 onResize: { delta in
                     model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
                 },
@@ -68,6 +71,9 @@ struct RootView: View {
         }
         .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            GhosttyTerminalRuntime.closeAll()
+        }
     }
 }
 
@@ -375,7 +381,8 @@ private struct MainWorkspaceView: View {
 
             TerminalPlaceholderView(
                 title: model.projectTerminal.title,
-                message: model.projectTerminal.placeholderText
+                request: selectedProjectTerminalRequest,
+                unavailableMessage: model.projectTerminal.placeholderText
             )
             .id(model.selectedThreadID)
             .onAppear {
@@ -386,6 +393,11 @@ private struct MainWorkspaceView: View {
         }
         .padding(24)
         .background(dracula(.background))
+    }
+
+    private var selectedProjectTerminalRequest: TerminalLaunchRequest? {
+        guard let selectedThreadID = model.selectedThreadID else { return nil }
+        return model.terminalLaunchRequest(for: .project(threadID: selectedThreadID))
     }
 }
 
@@ -442,14 +454,22 @@ private struct RightPanelView: View {
                 }
 
             case .nvim:
-                TerminalPlaceholderView(title: "nvim", message: "Terminal placeholder for nvim")
+                TerminalPlaceholderView(
+                    title: "nvim",
+                    request: selectedRightPanelRequest,
+                    unavailableMessage: "Terminal unavailable for nvim"
+                )
                     .id(model.selectedThreadID)
                     .onAppear {
                         model.activateSelectedRightPanelTerminal()
                     }
 
             case .git:
-                TerminalPlaceholderView(title: "Git", message: "Terminal placeholder for lazygit")
+                TerminalPlaceholderView(
+                    title: "Git",
+                    request: selectedRightPanelRequest,
+                    unavailableMessage: "Terminal unavailable for lazygit"
+                )
                     .id(model.selectedThreadID)
                     .onAppear {
                         model.activateSelectedRightPanelTerminal()
@@ -461,11 +481,24 @@ private struct RightPanelView: View {
         .padding(18)
         .background(dracula(.background))
     }
+
+    private var selectedRightPanelRequest: TerminalLaunchRequest? {
+        guard let selectedThreadID = model.selectedThreadID else { return nil }
+        switch model.selectedRightPanelMode {
+        case .files:
+            return nil
+        case .nvim:
+            return model.terminalLaunchRequest(for: .nvim(threadID: selectedThreadID))
+        case .git:
+            return model.terminalLaunchRequest(for: .lazygit(threadID: selectedThreadID))
+        }
+    }
 }
 
 private struct TerminalPlaceholderView: View {
     let title: String
-    let message: String
+    let request: TerminalLaunchRequest?
+    let unavailableMessage: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -473,13 +506,14 @@ private struct TerminalPlaceholderView: View {
                 .font(.headline)
                 .foregroundStyle(dracula(.green))
 
-            Text(message)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(dracula(.foreground))
-
-            Text("Hello World")
-                .font(.system(.title3, design: .monospaced).weight(.semibold))
-                .foregroundStyle(dracula(.yellow))
+            if let request {
+                GhosttyTerminalSurfaceView(request: request)
+                    .accessibilityLabel("\(title) terminal")
+            } else {
+                Text(unavailableMessage)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(dracula(.foreground))
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 180, alignment: .topLeading)
@@ -490,6 +524,8 @@ private struct TerminalPlaceholderView: View {
 private struct GlobalTerminalBar: View {
     let isExpanded: Bool
     let height: Double
+    let request: TerminalLaunchRequest?
+    let onToggle: () -> Void
     let onResize: (Double) -> Void
     let onAppearExpanded: () -> Void
 
@@ -502,20 +538,28 @@ private struct GlobalTerminalBar: View {
                 )
             }
 
-            HStack {
-                Text("Global Terminal")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(dracula(.purple))
+            Button(action: onToggle) {
+                HStack {
+                    Text("Global Terminal")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(dracula(.purple))
 
-                Spacer()
+                    Spacer()
 
-                Text(isExpanded ? "Expanded" : "Collapsed")
-                    .font(.caption)
-                    .foregroundStyle(dracula(.comment))
+                    Text(isExpanded ? "Expanded" : "Collapsed")
+                        .font(.caption)
+                        .foregroundStyle(dracula(.comment))
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Collapse global terminal" : "Expand global terminal")
 
             if isExpanded {
-                TerminalPlaceholderView(title: "Global", message: "Terminal placeholder for the user home directory")
+                TerminalPlaceholderView(
+                    title: "Global",
+                    request: request,
+                    unavailableMessage: "Terminal unavailable for the user home directory"
+                )
                     .frame(height: height)
                     .onAppear(perform: onAppearExpanded)
             }

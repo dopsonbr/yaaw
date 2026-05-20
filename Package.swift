@@ -11,10 +11,16 @@ let package = Package(
         .executable(name: "AgentIDE", targets: ["AgentIDE"]),
         .library(name: "AgentIDEKit", targets: ["AgentIDEKit"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/Lakr233/libghostty-spm.git", from: "1.1.4")
+    ],
     targets: [
         .executableTarget(
             name: "AgentIDE",
-            dependencies: ["AgentIDEKit"],
+            dependencies: [
+                "AgentIDEKit",
+                .product(name: "GhosttyTerminal", package: "libghostty-spm")
+            ],
             path: "src/App"
         ),
         .target(

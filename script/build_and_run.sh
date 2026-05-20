@@ -11,6 +11,7 @@ DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
+APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 
@@ -21,9 +22,22 @@ swift build
 BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS"
+mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+
+VENDORED_GHOSTTY="$ROOT_DIR/Vendor/Ghostty"
+if [[ -d "$VENDORED_GHOSTTY" ]]; then
+  GHOSTTY_FRAMEWORK="$(find "$VENDORED_GHOSTTY" -path '*/Ghostty.framework' -type d | head -1 || true)"
+  if [[ -n "$GHOSTTY_FRAMEWORK" ]]; then
+    cp -R "$GHOSTTY_FRAMEWORK" "$APP_FRAMEWORKS/"
+  fi
+
+  GHOSTTY_DYLIB="$(find "$VENDORED_GHOSTTY" -name 'libghostty.dylib' -type f | head -1 || true)"
+  if [[ -n "$GHOSTTY_DYLIB" ]]; then
+    cp "$GHOSTTY_DYLIB" "$APP_FRAMEWORKS/"
+  fi
+fi
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

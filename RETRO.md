@@ -56,3 +56,14 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - UX findings: Placeholder-backed terminal cards make the future terminal slots clear, but the app still needs real embedded terminal focus, input, and scroll behavior in Plan 06 before it feels like a daily-use IDE.
 - Lesson learned: Runtime abstractions still need UI lifecycle ownership; the app must react to selected-thread changes, not only initial surface appearance.
 - Follow-up: Plan 06 should put libghostty behind this boundary without changing the public app-state API.
+
+## Plan 06: libghostty Integration
+
+- Date: 2026-05-20
+- Scope shipped: Ghostty-backed SwiftUI/AppKit terminal bridge through `libghostty-spm`, retained per-role terminal views for project/global/`nvim`/`lazygit`, initial right-panel tool command delivery, Dracula terminal colors, clickable global terminal expansion, wider right panel defaults, optional upstream bootstrap script, and libghostty consumption documentation.
+- Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 37 tests; `./script/build_and_run.sh --verify` passed; `bash -n scripts/bootstrap-libghostty.sh` passed.
+- External review: `codex review --uncommitted` found retained-surface, Bash portability, and attach-delay command-delivery issues; all were fixed before commit. Later upstream distribution hardening is tracked as D-002 in `docs/plans/DEFERRED_ISSUES.md`.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-06/libghostty-terminal-surface.png`; Computer Use verified the running app shows project, right-panel, and global Ghostty surfaces, that the global terminal expands from a real button, and that the Git terminal remains alive when switching Files -> Git.
+- UX findings: The global terminal control initially looked clickable but was inert, so it now uses an accessible button. The original right panel width clipped terminal content, so Plan 06 widened its default and minimum sizes. The sample project is not always a Git repo, so `lazygit` may prompt to initialize one; that is expected fixture behavior, not a terminal bug.
+- Lesson learned: Loading symbols directly from `/Applications/Ghostty.app` is not a safe embedding strategy even when exports exist; use a narrow package/framework boundary, and retain the AppKit terminal view itself rather than only weak surface state.
+- Follow-up: Plan 07 should bind Codex/Claude agent sessions through the terminal adapter without persisting live PTY state. Plan 11 should revisit the libghostty distribution path if upstream publishes a stable full-surface package or distribution requires a first-party vendored artifact.

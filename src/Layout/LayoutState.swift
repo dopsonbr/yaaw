@@ -2,12 +2,12 @@ import Foundation
 
 public struct LayoutState: Equatable, Sendable {
     public static let defaultSidebarWidth = 250.0
-    public static let defaultRightPanelWidth = 300.0
+    public static let defaultRightPanelWidth = 380.0
     public static let defaultGlobalTerminalHeight = 140.0
     public static let minimumSidebarWidth = 180.0
     public static let maximumSidebarWidth = 420.0
-    public static let minimumRightPanelWidth = 220.0
-    public static let maximumRightPanelWidth = 520.0
+    public static let minimumRightPanelWidth = 340.0
+    public static let maximumRightPanelWidth = 680.0
     public static let minimumGlobalTerminalHeight = 96.0
     public static let maximumGlobalTerminalHeight = 320.0
 
