@@ -47,6 +47,7 @@ private final class E2ERunner {
             try fileManager.removeItem(at: artifactsDirectory)
         }
         try fileManager.createDirectory(at: paths.binDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: paths.missingToolBinDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.projectDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.captureDirectory, withIntermediateDirectories: true)
@@ -131,6 +132,14 @@ private final class E2ERunner {
             sleep 1
             """
         )
+        for tool in ["codex", "claude", "nvim"] {
+            let source = paths.binDirectory.appendingPathComponent(tool)
+            let target = paths.missingToolBinDirectory.appendingPathComponent(tool)
+            if fileManager.fileExists(atPath: target.path) {
+                try fileManager.removeItem(at: target)
+            }
+            try fileManager.copyItem(at: source, to: target)
+        }
     }
 
     private func writeExecutable(named name: String, contents: String) throws {
@@ -191,6 +200,7 @@ private final class E2ERunner {
         )
         try assert(gitRequest.command.last?.hasSuffix("/lazygit") == true, "git mode launched lazygit")
         try assertMissingLazygitFallsBackToRawCommand()
+        try assertMissingDirectoryRecovery()
 
         model.toggleGlobalTerminal()
         model.setRightPanelWidth(420)
@@ -251,8 +261,16 @@ private final class E2ERunner {
                 threadID: threadID,
                 output: "AGENT_IDE_SESSION_ID=codex-e2e-001\nAGENT_IDE_SESSION_NAME=Codex E2E Session\n"
             )
+            if state == .missingDirectory {
+                let missingRoot = paths.missingDirectory
+                try fileManager.createDirectory(at: missingRoot, withIntermediateDirectories: true)
+                try model.createProject(displayName: "Missing Directory Project", rootDirectory: missingRoot)
+                _ = try model.createThread(agentCLI: .codex)
+                try fileManager.removeItem(at: missingRoot)
+                continue
+            }
             switch state {
-            case .launch, .projectCreation:
+            case .launch, .projectCreation, .missingDirectory:
                 break
             case .files:
                 model.refreshSelectedFileBrowser()
@@ -262,6 +280,8 @@ private final class E2ERunner {
             case .nvim:
                 model.openFileInNvim(relativePath: "README.md")
             case .git:
+                model.selectRightPanelMode(.git)
+            case .missingTool:
                 model.selectRightPanelMode(.git)
             case .globalTerminal:
                 model.toggleGlobalTerminal()
@@ -294,6 +314,37 @@ private final class E2ERunner {
         model.selectRightPanelMode(.git)
         let request = try unwrap(model.terminalLaunchRequest(for: .lazygit(threadID: threadID)), "missing lazygit request")
         try assert(request.command == ["lazygit"], "missing lazygit fell back to the raw command name")
+    }
+
+    private func assertMissingDirectoryRecovery() throws {
+        let databasePath = paths.stateDirectory.appendingPathComponent("missing-directory-recovery.sqlite")
+        let recoverableRoot = paths.root.appendingPathComponent("recoverable-project", isDirectory: true)
+        try fileManager.createDirectory(at: recoverableRoot, withIntermediateDirectories: true)
+        let model = try makeModel(databasePath: databasePath)
+        try model.createProject(displayName: "Recoverable Project", rootDirectory: recoverableRoot)
+        let threadID = try model.createThread(agentCLI: .codex)
+        try fileManager.removeItem(at: recoverableRoot)
+
+        try assert(model.selectedThreadWorkingDirectoryState == .missing(path: recoverableRoot.path), "deleted directory reported missing")
+        try assert(model.terminalLaunchRequest(for: .project(threadID: threadID)) == nil, "missing directory blocked terminal launch")
+        model.refreshSelectedFileBrowser()
+        try assert(model.fileBrowserState.errorMessage == "Missing working directory: \(recoverableRoot.path)", "missing directory surfaced in file browser")
+
+        try fileManager.createDirectory(at: recoverableRoot, withIntermediateDirectories: true)
+        try "restored\n".write(
+            to: recoverableRoot.appendingPathComponent("RESTORED.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let reloadedModel = try makeModel(databasePath: databasePath)
+        try assert(
+            reloadedModel.selectedThreadWorkingDirectoryState == .available(path: recoverableRoot.path),
+            "restored directory reported available after reload"
+        )
+        try assert(
+            reloadedModel.terminalLaunchRequest(for: .project(threadID: threadID)) != nil,
+            "restored directory allowed terminal launch after reload"
+        )
     }
 
     private func writeManifest(focusedBehavior: FocusedBehaviorResult) throws {
@@ -368,9 +419,11 @@ private struct E2EPaths {
     let root: URL
 
     var binDirectory: URL { root.appendingPathComponent("bin", isDirectory: true) }
+    var missingToolBinDirectory: URL { root.appendingPathComponent("bin-missing-lazygit", isDirectory: true) }
     var captureDirectory: URL { root.appendingPathComponent("captures", isDirectory: true) }
     var configPath: URL { root.appendingPathComponent("config/config.json") }
     var projectDirectory: URL { root.appendingPathComponent("fixture-project", isDirectory: true) }
+    var missingDirectory: URL { root.appendingPathComponent("missing-directory-project", isDirectory: true) }
     var screenshotDirectory: URL { root.appendingPathComponent("screenshots", isDirectory: true) }
     var stateDirectory: URL { root.appendingPathComponent("states", isDirectory: true) }
 }
@@ -387,6 +440,8 @@ private enum VisualState: String, CaseIterable {
     case files
     case nvim
     case git
+    case missingDirectory = "missing-directory"
+    case missingTool = "missing-tool"
     case globalTerminal = "global-terminal"
     case panelCollapse = "panel-collapse"
 }

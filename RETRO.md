@@ -111,3 +111,14 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - UX findings: Window-only screenshot capture works when the app is launched through `open` with launch environment overrides. The UI journey is still coordinate-based because SwiftUI's nested accessibility tree is not yet stable enough for named element targeting; Plan 11 should replace that with stronger accessibility labels and less fragile selectors.
 - Lesson learned: A model-level behavior harness is useful, but it must not be labeled as E2E full journey unless the running app UI is actually driven and checked.
 - Follow-up: Plan 11 should harden accessibility labels, missing-directory/tool diagnostics, shortcut coverage, and final visual polish now that the E2E harness can capture repeatable artifacts.
+
+## Plan 11: Polish And Hardening
+
+- Date: 2026-05-20
+- Scope shipped: missing project/thread directory states, app-level missing-directory UI, terminal launch blocking for vanished working directories, raw-command fallback preservation for missing `nvim`/`lazygit`, accessibility labels across sidebar/thread/right-panel controls, local diagnostic event boundary, SQLite/indexing/terminal/lifecycle logging, E2E missing-directory and missing-tool states, and libghostty distribution hardening.
+- Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 67 tests; `./scripts/test-e2e.sh` passed and wrote screenshots under `.build/e2e-artifacts/latest/screenshots`; `./script/build_and_run.sh --verify` passed with ad-hoc signature verification and `/Applications/Ghostty.app` link rejection.
+- External review: The first `codex review --uncommitted` pass found a current-plan E2E environment bug where `ZDOTDIR` was unset instead of restored. That was fixed by preserving the original launchd value. A follow-up `codex review --uncommitted` found no actionable regressions.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-11/missing-directory.png` and `docs/examples/screenshots/plan-11/missing-tool.png`; visual review confirmed the missing-directory banner and file-browser error are clear and not clipped.
+- UX findings: Missing directories now fail visibly without crashing or launching broken terminals. The right-panel missing-tool fixture shows the raw `lazygit` command in the embedded shell under a restricted test shell path; installed developer tools can still affect manual screenshots outside that fixture.
+- Lesson learned: E2E launch environment overrides are global enough to deserve the same cleanup rigor as filesystem state. Preserve and restore host settings, even for short-lived test helpers.
+- Follow-up: Future distribution work should replace `Lakr233/libghostty-spm` only if upstream publishes a stable full-surface official package or the project chooses a directly vendored framework path.

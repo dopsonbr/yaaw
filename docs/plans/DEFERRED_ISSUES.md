@@ -14,15 +14,14 @@ This file tracks review findings that are real but intentionally belong to a lat
 
 ## Open Items
 
+## Resolved Items
+
 ### D-002: Replace Interim libghostty Swift Package If Upstream Publishes A Stable Full-Surface Package
 
 - Source: Plan 06 upstream research on 2026-05-20.
-- Finding: Official Ghostty sources expose the full macOS embedding API in `include/ghostty.h`, but the official SwiftPM example currently targets `libghostty-vt` terminal state rather than the full AppKit surface. Plan 06 therefore uses `Lakr233/libghostty-spm` 1.1.4, which ships a `GhosttyKit.xcframework` binary target and AppKit/SwiftUI surface wrappers.
-- Triage: Low-priority dependency hardening. Current app surfaces are backed by `libghostty` and build/test/verify pass, but the final release should prefer an official upstream package or directly vendored full Ghostty XCFramework if available.
-- Owning plan: Plan 11.
-- Closure test: Plan 11 verifies the selected Ghostty artifact is signed/packaged correctly, release verification does not depend on `/Applications/Ghostty.app`, and the documented distribution path matches `Package.swift`.
-
-## Resolved Items
+- Finding: Official Ghostty sources expose the full macOS embedding API in `include/ghostty.h`, but current official public docs still emphasize `libghostty-vt` as the available split and do not publish a stable official full-surface SwiftUI/AppKit package.
+- Resolution: Plan 11 keeps `Lakr233/libghostty-spm` 1.1.4 behind the narrow `src/App/GhosttyTerminalSurfaceView.swift` bridge, documents the current distribution path in `docs/standards/dependency/libghostty.md`, and hardens `script/build_and_run.sh --verify` to ad-hoc sign and verify the staged `.app`.
+- Closure test: `./script/build_and_run.sh --verify` verifies the app bundle signature and rejects `/Applications/Ghostty.app` binary links; `otool -L dist/AgentIDE.app/Contents/MacOS/AgentIDE` showed no dependency on `/Applications/Ghostty.app`.
 
 ### D-001: Persist Non-Default Thread CLI Metadata
 

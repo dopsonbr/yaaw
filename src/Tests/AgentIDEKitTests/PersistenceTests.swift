@@ -127,6 +127,60 @@ final class PersistenceTests: XCTestCase {
         }
     }
 
+    func testSQLiteMigrationFailureRecordsDiagnosticEvent() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let projectID = UUID()
+        let threadID = UUID()
+        let recorder = RecordingDiagnosticEventRecorder()
+        try withSQLiteDatabase(path: path) { database in
+            try executeSQL(
+                """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    root_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL
+                );
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    working_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL,
+                    is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1))
+                );
+                CREATE TABLE app_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE right_panel_modes (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    mode TEXT NOT NULL CHECK (mode IN ('files', 'nvim', 'git'))
+                );
+                INSERT INTO projects (id, display_name, root_directory, created_at, last_opened_at)
+                VALUES ('\(projectID.uuidString)', 'Legacy', '/tmp', 0, 0);
+                INSERT INTO threads (id, display_name, project_id, working_directory, created_at, last_opened_at, is_archived)
+                VALUES ('\(threadID.uuidString)', 'Legacy Thread', '\(projectID.uuidString)', '/tmp', 0, 0, 0);
+                PRAGMA user_version = 1;
+                """,
+                database: database
+            )
+        }
+
+        XCTAssertThrowsError(try SQLiteAgentIDEStore(databasePath: path, diagnosticRecorder: recorder))
+
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "SQLite"
+                    && $0.name == "sqlite_open_or_migrate_failed"
+                    && $0.metadata["database"] == path.path
+                    && $0.metadata["error"]?.contains("Cannot migrate existing threads") == true
+            }
+        )
+    }
+
     func testSQLiteStorePersistsPlanOneSnapshot() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         let store = try SQLiteAgentIDEStore(databasePath: path)
@@ -445,7 +499,7 @@ final class PersistenceTests: XCTestCase {
         return url
     }
 
-    private func sqliteUserVersion(path: URL) throws -> Int {
+private func sqliteUserVersion(path: URL) throws -> Int {
         try withSQLiteDatabase(path: path) { database in
             var statement: OpaquePointer?
             XCTAssertEqual(sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil), SQLITE_OK)
@@ -480,5 +534,13 @@ final class PersistenceTests: XCTestCase {
         let result = sqlite3_exec(database, sql, nil, nil, &message)
         defer { sqlite3_free(message) }
         XCTAssertEqual(result, SQLITE_OK, message.map { String(cString: $0) } ?? "SQLite error")
+    }
+}
+
+private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable {
+    private(set) var events: [DiagnosticEvent] = []
+
+    func record(_ event: DiagnosticEvent) {
+        events.append(event)
     }
 }

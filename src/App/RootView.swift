@@ -115,6 +115,7 @@ private struct SidebarView: View {
                     }
                     .buttonStyle(.plain)
                     .background(model.selectedProjectID == project.id ? dracula(.currentLine) : dracula(.background))
+                    .accessibilityLabel("Project \(project.displayName)")
                 }
             }
 
@@ -146,6 +147,7 @@ private struct SidebarView: View {
                     }
                     .buttonStyle(.plain)
                     .background(model.selectedThreadID == thread.id ? dracula(.currentLine) : dracula(.background))
+                    .accessibilityLabel("Thread \(thread.displayName), \(thread.agentCLI.displayName)")
                 }
 
                 if let selectedThreadID = model.selectedThreadID {
@@ -156,6 +158,7 @@ private struct SidebarView: View {
                     .font(.caption)
                     .foregroundStyle(dracula(.orange))
                     .padding(.top, 4)
+                    .accessibilityLabel("Archive selected thread")
                 }
             }
 
@@ -242,6 +245,7 @@ private struct ArchivedThreadRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Archived thread \(thread.displayName)")
 
             Button(action: onUnarchive) {
                 Image(systemName: "arrow.uturn.backward")
@@ -249,6 +253,7 @@ private struct ArchivedThreadRow: View {
             .buttonStyle(.plain)
             .foregroundStyle(dracula(.cyan))
             .help("Unarchive")
+            .accessibilityLabel("Unarchive \(thread.displayName)")
         }
         .padding(.vertical, 6)
     }
@@ -385,10 +390,24 @@ private struct MainWorkspaceView: View {
                     .foregroundStyle(dracula(.comment))
             }
 
+            if case .missing(let path) = model.selectedThreadWorkingDirectoryState {
+                MissingDirectoryBanner(
+                    title: "Working directory is missing",
+                    path: path,
+                    message: "Project tools are paused until this directory exists again or a new thread uses another path."
+                )
+            } else if case .missing(let path) = model.selectedProjectDirectoryState {
+                MissingDirectoryBanner(
+                    title: "Project directory is missing",
+                    path: path,
+                    message: "Create a new project or restore the directory before creating more threads here."
+                )
+            }
+
             TerminalPlaceholderView(
                 title: model.projectTerminal.title,
                 request: selectedProjectTerminalRequest,
-                unavailableMessage: model.projectTerminal.placeholderText,
+                unavailableMessage: selectedProjectTerminalUnavailableMessage,
                 onTitleChange: { role, title in
                     if case .project(let threadID) = role {
                         model.recordAgentCLITerminalTitle(threadID: threadID, title: title)
@@ -413,6 +432,13 @@ private struct MainWorkspaceView: View {
         guard let selectedThreadID = model.selectedThreadID else { return nil }
         return model.terminalLaunchRequest(for: .project(threadID: selectedThreadID))
     }
+
+    private var selectedProjectTerminalUnavailableMessage: String {
+        if case .missing(let path) = model.selectedThreadWorkingDirectoryState {
+            return "Missing working directory: \(path)"
+        }
+        return model.projectTerminal.placeholderText
+    }
 }
 
 private struct RightPanelView: View {
@@ -429,6 +455,7 @@ private struct RightPanelView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(dracula(.comment))
                 .help("Collapse right panel")
+                .accessibilityLabel("Collapse right panel")
 
                 ForEach(RightPanelMode.allCases) { mode in
                     Button {
@@ -473,7 +500,7 @@ private struct RightPanelView: View {
                 TerminalPlaceholderView(
                     title: "nvim",
                     request: selectedRightPanelRequest,
-                    unavailableMessage: "Terminal unavailable for nvim"
+                    unavailableMessage: selectedRightPanelUnavailableMessage(tool: "nvim")
                 )
                     .id(model.selectedThreadID)
                     .onAppear {
@@ -484,7 +511,7 @@ private struct RightPanelView: View {
                 TerminalPlaceholderView(
                     title: "Git",
                     request: selectedRightPanelRequest,
-                    unavailableMessage: "Terminal unavailable for lazygit"
+                    unavailableMessage: selectedRightPanelUnavailableMessage(tool: "lazygit")
                 )
                     .id(model.selectedThreadID)
                     .onAppear {
@@ -508,6 +535,43 @@ private struct RightPanelView: View {
         case .git:
             return model.terminalLaunchRequest(for: .lazygit(threadID: selectedThreadID))
         }
+    }
+
+    private func selectedRightPanelUnavailableMessage(tool: String) -> String {
+        if case .missing(let path) = model.selectedThreadWorkingDirectoryState {
+            return "Missing working directory for \(tool): \(path)"
+        }
+        return "Terminal unavailable for \(tool)"
+    }
+}
+
+private struct MissingDirectoryBanner: View {
+    let title: String
+    let path: String
+    let message: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: "exclamationmark.triangle")
+                .font(.headline)
+                .foregroundStyle(dracula(.orange))
+
+            Text(path)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(dracula(.cyan))
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(dracula(.foreground))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(dracula(.currentLine))
+        .accessibilityLabel("\(title): \(path)")
     }
 }
 

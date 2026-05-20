@@ -36,6 +36,7 @@ let package = Package(
             sources: [
                 "AgentCLI",
                 "Core",
+                "Diagnostics",
                 "FileBrowser",
                 "Layout",
                 "Persistence",

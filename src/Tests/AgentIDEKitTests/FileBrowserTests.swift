@@ -168,7 +168,9 @@ private struct AppModelFixtureForFiles {
         .appendingPathComponent("AgentIDEKitTests-second-\(UUID().uuidString)", isDirectory: true)
 
     var store: InMemoryAgentIDEStore {
-        InMemoryAgentIDEStore(
+        try? FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: secondRoot, withIntermediateDirectories: true)
+        return InMemoryAgentIDEStore(
             snapshot: AgentIDESnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: firstRoot)],
                 threads: [

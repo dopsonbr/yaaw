@@ -12,10 +12,12 @@ struct AgentIDEApp: App {
         if let pathOverride = environment["AGENT_IDE_PATH"] {
             environment["PATH"] = pathOverride
         }
+        let diagnostics = LoggerDiagnosticEventRecorder.shared
         let databasePath = Self.databasePath(environment: environment)
         self.databasePath = databasePath
         do {
-            let store = try SQLiteAgentIDEStore(databasePath: databasePath)
+            diagnostics.record(DiagnosticEvent(category: "Lifecycle", name: "app_starting"))
+            let store = try SQLiteAgentIDEStore(databasePath: databasePath, diagnosticRecorder: diagnostics)
             let configuration = JSONConfigurationStore(path: Self.configurationPath(environment: environment)).load()
             let agentCLIBindings = AgentCLISessionBindingService(
                 environment: environment,
@@ -26,11 +28,20 @@ struct AgentIDEApp: App {
                     store: store,
                     agentCLIBindings: agentCLIBindings,
                     configuration: configuration,
+                    diagnosticRecorder: diagnostics,
                     environment: environment
                 )
             )
+            diagnostics.record(DiagnosticEvent(category: "Lifecycle", name: "app_ready"))
             startupError = nil
         } catch {
+            diagnostics.record(
+                DiagnosticEvent(
+                    category: "Lifecycle",
+                    name: "app_startup_failed",
+                    metadata: ["error": String(describing: error)]
+                )
+            )
             _model = StateObject(wrappedValue: AppModel(store: InMemoryAgentIDEStore.helloWorld()))
             startupError = error
         }

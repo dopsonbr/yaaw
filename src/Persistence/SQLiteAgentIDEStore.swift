@@ -12,16 +12,26 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
     public static let schemaVersion = 5
 
     private let databasePath: URL
+    private let diagnosticRecorder: DiagnosticEventRecording
     private var database: OpaquePointer?
 
-    public init(databasePath: URL) throws {
+    public init(
+        databasePath: URL,
+        diagnosticRecorder: DiagnosticEventRecording = LoggerDiagnosticEventRecorder.shared
+    ) throws {
         self.databasePath = databasePath
-        try FileManager.default.createDirectory(
-            at: databasePath.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try open()
-        try migrate()
+        self.diagnosticRecorder = diagnosticRecorder
+        do {
+            try FileManager.default.createDirectory(
+                at: databasePath.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try open()
+            try migrate()
+        } catch {
+            recordSQLiteError(name: "sqlite_open_or_migrate_failed", error: error)
+            throw error
+        }
     }
 
     deinit {
@@ -71,6 +81,7 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                 fileIndexMetadataByThreadID: fileIndexMetadata
             )
         } catch {
+            recordSQLiteError(name: "sqlite_load_failed", error: error)
             return InMemoryAgentIDEStore.helloWorld().load()
         }
     }
@@ -107,11 +118,28 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                 )
                 try insertLayoutState(snapshot.layoutState)
             }
-        } catch {}
+        } catch {
+            recordSQLiteError(name: "sqlite_save_failed", error: error)
+        }
     }
 }
 
 private extension SQLiteAgentIDEStore {
+    func recordSQLiteError(name: String, error: Error) {
+        diagnosticRecorder.record(
+            DiagnosticEvent(
+                category: "SQLite",
+                name: name,
+                metadata: [
+                    "database": databasePath.path,
+                    "error": String(describing: error)
+                        .replacingOccurrences(of: "\n", with: " ")
+                        .replacingOccurrences(of: "\r", with: " ")
+                ]
+            )
+        )
+    }
+
     func open() throws {
         guard sqlite3_open(databasePath.path, &database) == SQLITE_OK else {
             throw SQLiteStoreError.openFailed(errorMessage)

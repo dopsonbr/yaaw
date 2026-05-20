@@ -184,6 +184,58 @@ final class AppModelTests: XCTestCase {
         }
     }
 
+    func testMissingSelectedThreadDirectoryReportsStateAndBlocksTerminals() throws {
+        let recorder = RecordingDiagnosticEventRecorder()
+        let root = try temporaryDirectory()
+        try FileManager.default.removeItem(at: root)
+        let projectID = UUID()
+        let threadID = UUID()
+        let model = AppModel(
+            store: InMemoryAgentIDEStore(
+                snapshot: AgentIDESnapshot(
+                    projects: [Project(id: projectID, displayName: "Missing", rootDirectory: root)],
+                    threads: [
+                        AgentThread(
+                            id: threadID,
+                            displayName: "Missing Thread",
+                            projectID: projectID,
+                            workingDirectory: root
+                        )
+                    ],
+                    selectedProjectID: projectID,
+                    selectedThreadID: threadID,
+                    rightPanelModesByThreadID: [threadID: .files],
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            ),
+            diagnosticRecorder: recorder
+        )
+
+        XCTAssertEqual(model.selectedProjectDirectoryState, .missing(path: root.path))
+        XCTAssertEqual(model.selectedThreadWorkingDirectoryState, .missing(path: root.path))
+        XCTAssertNil(model.terminalLaunchRequest(for: .project(threadID: threadID)))
+
+        model.refreshSelectedFileBrowser()
+
+        XCTAssertEqual(model.fileBrowserState.rootPath, root.path)
+        XCTAssertEqual(model.fileBrowserState.errorMessage, "Missing working directory: \(root.path)")
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "Terminal"
+                    && $0.name == "terminal_launch_failed"
+                    && $0.metadata["reason"] == "missing_working_directory"
+            }
+        )
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "Indexing"
+                    && $0.name == "file_index_failed"
+                    && $0.metadata["reason"] == "missing_root"
+            }
+        )
+    }
+
     func testCreateThreadRequiresExplicitAgentCLIChoice() {
         let model = AppModel()
 
@@ -322,6 +374,22 @@ final class AppModelTests: XCTestCase {
         model.pollSelectedAgentCLICaptureLog()
 
         XCTAssertEqual(model.selectedThread?.sessionIdentity, "second-session")
+    }
+
+    func testDiagnosticEventsDoNotRecordTerminalOutput() throws {
+        let fixture = AppModelFixture()
+        let recorder = RecordingDiagnosticEventRecorder()
+        let secretOutput = "session id: codex-secret\nSESSION_TOKEN=do-not-log\n"
+        let model = AppModel(store: fixture.store, diagnosticRecorder: recorder)
+
+        model.recordAgentCLIOutput(threadID: fixture.firstThreadID, output: secretOutput)
+        _ = model.activateSelectedProjectTerminal()
+
+        let renderedDiagnostics = recorder.events
+            .flatMap { event in [event.category, event.name] + event.metadata.flatMap { [$0.key, $0.value] } }
+            .joined(separator: "\n")
+        XCTAssertFalse(renderedDiagnostics.contains("SESSION_TOKEN=do-not-log"))
+        XCTAssertFalse(renderedDiagnostics.contains(secretOutput))
     }
 
     func testGlobalTerminalSessionIsSharedAppWide() throws {
@@ -483,6 +551,14 @@ private struct StaticAppModelExecutableResolver: AgentCLIExecutableResolving {
 
     func executablePath(named executableName: String, environment: [String: String]) -> String? {
         paths[executableName]
+    }
+}
+
+private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable {
+    private(set) var events: [DiagnosticEvent] = []
+
+    func record(_ event: DiagnosticEvent) {
+        events.append(event)
     }
 }
 

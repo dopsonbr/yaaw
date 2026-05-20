@@ -27,6 +27,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private let fileIndexer: FileIndexing
     private let externalToolResolver: any AgentCLIExecutableResolving
     private let configuration: AgentIDEConfiguration
+    private let diagnosticRecorder: DiagnosticEventRecording
     private let environment: [String: String]
     private let homeDirectory: URL
     private var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
@@ -44,6 +45,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         fileIndexer: FileIndexing = BackgroundFileIndexer(),
         externalToolResolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
         configuration: AgentIDEConfiguration = AgentIDEConfiguration(),
+        diagnosticRecorder: DiagnosticEventRecording = LoggerDiagnosticEventRecorder.shared,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
@@ -53,6 +55,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.fileIndexer = fileIndexer
         self.externalToolResolver = externalToolResolver
         self.configuration = configuration
+        self.diagnosticRecorder = diagnosticRecorder
         self.environment = environment
         self.homeDirectory = homeDirectory
         let snapshot = store.load()
@@ -87,6 +90,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             title: "Project Terminal",
             placeholderText: "Terminal placeholder for the selected thread"
         )
+        recordDiagnostic(
+            category: "Lifecycle",
+            name: "app_model_loaded",
+            metadata: [
+                "project_count": "\(projects.count)",
+                "thread_count": "\(threads.count)"
+            ]
+        )
     }
 
     public var selectedThread: AgentThread? {
@@ -96,6 +107,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public var selectedProject: Project? {
         projects.first { $0.id == selectedProjectID }
+    }
+
+    public var selectedProjectDirectoryState: ProjectDirectoryState? {
+        selectedProject.map { directoryState(for: $0.rootDirectory) }
+    }
+
+    public var selectedThreadWorkingDirectoryState: ProjectDirectoryState? {
+        selectedThread.map { directoryState(for: $0.workingDirectory) }
     }
 
     public var selectedRightPanelMode: RightPanelMode {
@@ -139,6 +158,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func toggleGlobalTerminal() {
         layoutState.isGlobalTerminalExpanded.toggle()
+        recordDiagnostic(
+            category: "Layout",
+            name: "global_terminal_toggled",
+            metadata: ["expanded": "\(layoutState.isGlobalTerminalExpanded)"]
+        )
         persist()
     }
 
@@ -190,6 +214,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             )
         case .project(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
+            guard isExistingDirectory(thread.workingDirectory) else {
+                recordTerminalLaunchFailure(
+                    role: role,
+                    path: thread.workingDirectory.path,
+                    reason: "missing_working_directory"
+                )
+                return nil
+            }
             let command: [String]
             if let activeCommand = activeProjectLaunchCommandsByThreadID[threadID] {
                 command = activeCommand
@@ -206,6 +238,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             )
         case .nvim(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
+            guard isExistingDirectory(thread.workingDirectory) else {
+                recordTerminalLaunchFailure(
+                    role: role,
+                    path: thread.workingDirectory.path,
+                    reason: "missing_working_directory"
+                )
+                return nil
+            }
             let arguments = nvimRelativePathsByThreadID[threadID].map { [$0] } ?? []
             return TerminalLaunchRequest(
                 role: role,
@@ -216,6 +256,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             )
         case .lazygit(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
+            guard isExistingDirectory(thread.workingDirectory) else {
+                recordTerminalLaunchFailure(
+                    role: role,
+                    path: thread.workingDirectory.path,
+                    reason: "missing_working_directory"
+                )
+                return nil
+            }
             return TerminalLaunchRequest(
                 role: role,
                 title: "Git",
@@ -228,6 +276,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @discardableResult
     public func activateTerminal(role: TerminalRole) -> TerminalSessionRecord? {
         guard let request = terminalLaunchRequest(for: role) else { return nil }
+        recordDiagnostic(
+            category: "Terminal",
+            name: "terminal_launch_requested",
+            metadata: [
+                "role": role.diagnosticName,
+                "surface": role.surfaceKind.rawValue
+            ]
+        )
         return terminalManager.activate(request)
     }
 
@@ -351,7 +407,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard !trimmedName.isEmpty else {
             throw AppModelError.emptyProjectName
         }
-        guard rootDirectory.isExistingDirectory else {
+        guard isExistingDirectory(rootDirectory) else {
             throw AppModelError.missingProjectDirectory(rootDirectory.path)
         }
 
@@ -366,6 +422,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectedThreadID = nil
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
+        recordDiagnostic(
+            category: "Projects",
+            name: "project_created",
+            metadata: ["project_id": project.id.uuidString]
+        )
         persist()
         return project.id
     }
@@ -384,7 +445,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             throw AppModelError.selectedProjectMissing
         }
         let resolvedWorkingDirectory = workingDirectory ?? project.rootDirectory
-        guard resolvedWorkingDirectory.isExistingDirectory else {
+        guard isExistingDirectory(resolvedWorkingDirectory) else {
             throw AppModelError.missingProjectDirectory(resolvedWorkingDirectory.path)
         }
 
@@ -405,6 +466,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         rightPanelModesByThreadID[thread.id] = .files
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
+        recordDiagnostic(
+            category: "Threads",
+            name: "thread_created",
+            metadata: [
+                "thread_id": thread.id.uuidString,
+                "agent_cli": thread.agentCLI.rawValue
+            ]
+        )
         persist()
         return thread.id
     }
@@ -423,6 +492,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectedThreadID = threads.first { $0.projectID == projectID && !$0.isArchived }?.id
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
+        recordDiagnostic(
+            category: "Projects",
+            name: "project_selected",
+            metadata: ["project_id": projectID.uuidString]
+        )
         persist()
     }
 
@@ -432,6 +506,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectedThreadID = thread.id
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
+        recordDiagnostic(
+            category: "Threads",
+            name: "thread_selected",
+            metadata: [
+                "thread_id": thread.id.uuidString,
+                "agent_cli": thread.agentCLI.rawValue
+            ]
+        )
         persist()
     }
 
@@ -491,6 +573,23 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let requestID = UUID()
         latestFileBrowserRequestIDByThreadID[thread.id] = requestID
         let metadata = fileIndexMetadataByThreadID[thread.id]
+        guard isExistingDirectory(thread.workingDirectory) else {
+            fileBrowserState = FileBrowserState(
+                rootPath: thread.workingDirectory.path,
+                searchQuery: fileBrowserState.searchQuery,
+                metadata: metadata,
+                errorMessage: "Missing working directory: \(thread.workingDirectory.path)"
+            )
+            recordDiagnostic(
+                category: "Indexing",
+                name: "file_index_failed",
+                metadata: [
+                    "thread_id": thread.id.uuidString,
+                    "reason": "missing_root"
+                ]
+            )
+            return
+        }
         fileBrowserState = FileBrowserState(
             rootPath: thread.workingDirectory.path,
             searchQuery: fileBrowserState.searchQuery,
@@ -538,6 +637,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 fileBrowserState.isIndexing = false
                 fileBrowserState.errorMessage = String(describing: error)
             }
+            recordDiagnostic(
+                category: "Indexing",
+                name: "file_index_failed",
+                metadata: [
+                    "thread_id": threadID.uuidString,
+                    "error": sanitizedDiagnosticValue(String(describing: error))
+                ]
+            )
         }
     }
 
@@ -551,6 +658,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             searchQuery: "",
             metadata: fileIndexMetadataByThreadID[selectedThread.id]
         )
+    }
+
+    private func directoryState(for url: URL) -> ProjectDirectoryState {
+        isExistingDirectory(url)
+            ? .available(path: url.path)
+            : .missing(path: url.path)
+    }
+
+    private func isExistingDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
     private func defaultShellPath() -> String {
@@ -578,11 +696,42 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             )
         )
     }
+
+    private func recordTerminalLaunchFailure(role: TerminalRole, path: String, reason: String) {
+        recordDiagnostic(
+            category: "Terminal",
+            name: "terminal_launch_failed",
+            metadata: [
+                "role": role.diagnosticName,
+                "surface": role.surfaceKind.rawValue,
+                "reason": reason,
+                "path": sanitizedDiagnosticValue(path)
+            ]
+        )
+    }
+
+    private func recordDiagnostic(category: String, name: String, metadata: [String: String] = [:]) {
+        diagnosticRecorder.record(DiagnosticEvent(category: category, name: name, metadata: metadata))
+    }
+
+    private func sanitizedDiagnosticValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+    }
 }
 
-private extension URL {
-    var isExistingDirectory: Bool {
-        var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+private extension TerminalRole {
+    var diagnosticName: String {
+        switch self {
+        case .project:
+            return "project"
+        case .global:
+            return "global"
+        case .nvim:
+            return "nvim"
+        case .lazygit:
+            return "lazygit"
+        }
     }
 }

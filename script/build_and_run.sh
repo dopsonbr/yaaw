@@ -60,6 +60,10 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+if command -v codesign >/dev/null 2>&1; then
+  /usr/bin/codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+fi
+
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }
@@ -80,6 +84,11 @@ case "$MODE" in
     /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
     ;;
   --verify|verify)
+    /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+    if otool -L "$APP_BINARY" | grep -q '/Applications/Ghostty.app'; then
+      echo "$APP_NAME links against /Applications/Ghostty.app; the app bundle must be self-contained" >&2
+      exit 1
+    fi
     open_app
     sleep 1
     pgrep -x "$APP_NAME" >/dev/null
