@@ -24,6 +24,16 @@ The initial commit established a SwiftPM scaffold with placeholder models for pr
 
 Implement plans in order unless a later plan is explicitly split into a research-only spike. Each plan MUST leave `scripts/build.sh` and `scripts/test.sh` passing before the next plan starts.
 
+## Review Triage Rule
+
+External review findings MUST be handled as follows to avoid review loops:
+
+- Fix critical issues before committing the current plan. Critical includes data loss, crashes, broken build/test gates, security/privacy risk, or a user-visible regression in behavior owned by the current plan.
+- Fix correctness bugs that belong to the current plan unless they are explicitly low priority and do not block the current plan's acceptance criteria.
+- If a finding is valid but low priority or belongs to a later numbered plan, record it in [Deferred Issues](DEFERRED_ISSUES.md) instead of repeatedly re-reviewing the same incomplete future behavior.
+- The deferred entry MUST name the owning plan, the current evidence, and the acceptance test or smoke check that will close it.
+- Do not advance past a plan with untriaged review findings.
+
 ## Persistence Strategy
 
 Plan 02 establishes the SQLite store and migrates only what Plan 01 produces (projects, threads, archive state, last selection, right-panel mode per thread) plus the JSON configuration boundary. Later plans extend the schema through additive migrations as they produce new durable state:
