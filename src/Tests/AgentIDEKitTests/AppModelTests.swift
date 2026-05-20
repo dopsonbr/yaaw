@@ -228,7 +228,16 @@ final class AppModelTests: XCTestCase {
     func testProjectTerminalSessionIsScopedToSelectedActiveThread() throws {
         let fixture = AppModelFixture()
         let manager = PlaceholderTerminalSessionManager()
-        let model = AppModel(store: fixture.store, terminalManager: manager)
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(
+                paths: [
+                    "codex": "/tmp/bin/codex",
+                    "claude": "/tmp/bin/claude"
+                ]
+            ),
+            captureDirectory: nil
+        )
+        let model = AppModel(store: fixture.store, terminalManager: manager, agentCLIBindings: service)
 
         let firstActivation = try XCTUnwrap(model.activateSelectedProjectTerminal())
         let secondActivation = try XCTUnwrap(model.activateSelectedProjectTerminal())
@@ -241,7 +250,78 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertNotEqual(firstActivation.id, thirdActivation.id)
         XCTAssertEqual(thirdActivation.request.role, .project(threadID: fixture.secondThreadID))
+        XCTAssertEqual(firstActivation.request.command, ["/tmp/bin/codex"])
+        XCTAssertEqual(thirdActivation.request.command, ["/tmp/bin/claude"])
         XCTAssertEqual(manager.lifecycleEvents.count, 5)
+    }
+
+    func testAgentCLIMetadataDoesNotRebuildActiveProjectTerminalCommand() throws {
+        let fixture = AppModelFixture()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["codex": "/tmp/bin/codex"]),
+            captureDirectory: nil
+        )
+        let model = AppModel(store: fixture.store, agentCLIBindings: service)
+
+        let initial = try XCTUnwrap(model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output: """
+            session id: codex-session-789
+            session name: Captured Session
+            """
+        )
+        let active = try XCTUnwrap(model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+
+        XCTAssertEqual(initial.command, ["/tmp/bin/codex"])
+        XCTAssertEqual(active.command, initial.command)
+        XCTAssertEqual(model.selectedThread?.sessionIdentity, "codex-session-789")
+    }
+
+    func testTransientTerminalTitleDoesNotOverwriteCapturedCanonicalName() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output: """
+            session id: codex-session-789
+            session name: Captured Session
+            """
+        )
+        model.recordAgentCLITerminalTitle(threadID: fixture.firstThreadID, title: "~/project")
+
+        XCTAssertEqual(model.selectedThread?.canonicalSessionName, "Captured Session")
+        XCTAssertEqual(model.selectedThread?.displayName, "Captured Session")
+    }
+
+    func testEarlyTerminalTitleBecomesFallbackWhenOutputOnlyReportsIdentity() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCLITerminalTitle(threadID: fixture.firstThreadID, title: "CLI Title")
+        model.recordAgentCLIOutput(threadID: fixture.firstThreadID, output: "session id: codex-session-789")
+
+        XCTAssertEqual(model.selectedThread?.sessionIdentity, "codex-session-789")
+        XCTAssertEqual(model.selectedThread?.canonicalSessionName, "CLI Title")
+        XCTAssertEqual(model.selectedThread?.displayName, "CLI Title")
+    }
+
+    func testProjectTerminalRelaunchResetsCaptureOffset() throws {
+        let fixture = AppModelFixture()
+        let captureDirectory = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: captureDirectory)
+        let model = AppModel(store: fixture.store, agentCLIBindings: service)
+        let thread = try XCTUnwrap(model.selectedThread)
+        let captureLogURL = try XCTUnwrap(service.captureLogURL(for: thread))
+        try "session id: first-session\n".write(to: captureLogURL, atomically: true, encoding: .utf8)
+        model.pollSelectedAgentCLICaptureLog()
+
+        model.terminateTerminal(role: .project(threadID: fixture.firstThreadID))
+        try "session id: second-session\n".write(to: captureLogURL, atomically: true, encoding: .utf8)
+        model.pollSelectedAgentCLICaptureLog()
+
+        XCTAssertEqual(model.selectedThread?.sessionIdentity, "second-session")
     }
 
     func testGlobalTerminalSessionIsSharedAppWide() throws {
@@ -294,6 +374,14 @@ final class AppModelTests: XCTestCase {
             .appendingPathComponent("AgentIDEKitTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+}
+
+private struct StaticAppModelExecutableResolver: AgentCLIExecutableResolving {
+    let paths: [String: String]
+
+    func executablePath(named executableName: String, environment: [String: String]) -> String? {
+        paths[executableName]
     }
 }
 

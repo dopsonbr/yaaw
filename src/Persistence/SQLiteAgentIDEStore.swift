@@ -9,7 +9,7 @@ public enum SQLiteStoreError: Error, Equatable {
 }
 
 public final class SQLiteAgentIDEStore: AgentIDEStore {
-    public static let schemaVersion = 3
+    public static let schemaVersion = 4
 
     private let databasePath: URL
     private var database: OpaquePointer?
@@ -137,6 +137,12 @@ private extension SQLiteAgentIDEStore {
                 try execute("PRAGMA user_version = 3")
             }
         }
+        if currentVersion < 4 {
+            try transaction {
+                try migrateToVersionFour()
+                try execute("PRAGMA user_version = 4")
+            }
+        }
     }
 
     func createVersionOneSchema() throws {
@@ -225,6 +231,16 @@ private extension SQLiteAgentIDEStore {
         try insertLayoutState(LayoutState(isGlobalTerminalExpanded: isExpanded))
     }
 
+    func migrateToVersionFour() throws {
+        let columns = try tableColumns("threads")
+        if !columns.contains("session_identity") {
+            try execute("ALTER TABLE threads ADD COLUMN session_identity TEXT")
+        }
+        if !columns.contains("canonical_session_name") {
+            try execute("ALTER TABLE threads ADD COLUMN canonical_session_name TEXT")
+        }
+    }
+
     func userVersion() throws -> Int {
         try querySingleInt("PRAGMA user_version") ?? 0
     }
@@ -298,8 +314,19 @@ private extension SQLiteAgentIDEStore {
     func insertThread(_ thread: AgentThread) throws {
         let statement = try prepare(
             """
-            INSERT INTO threads (id, display_name, project_id, working_directory, created_at, last_opened_at, is_archived, agent_cli)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO threads (
+                id,
+                display_name,
+                project_id,
+                working_directory,
+                created_at,
+                last_opened_at,
+                is_archived,
+                agent_cli,
+                session_identity,
+                canonical_session_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -311,6 +338,8 @@ private extension SQLiteAgentIDEStore {
         sqlite3_bind_double(statement, 6, thread.lastOpenedAt.timeIntervalSince1970)
         sqlite3_bind_int(statement, 7, thread.isArchived ? 1 : 0)
         bind(thread.agentCLI.rawValue, at: 8, in: statement)
+        bindOptional(thread.sessionIdentity, at: 9, in: statement)
+        bindOptional(thread.canonicalSessionName, at: 10, in: statement)
         try stepDone(statement)
     }
 
@@ -381,7 +410,17 @@ private extension SQLiteAgentIDEStore {
     func loadThreads() throws -> [AgentThread] {
         let statement = try prepare(
             """
-            SELECT id, display_name, project_id, working_directory, created_at, last_opened_at, is_archived, agent_cli
+            SELECT
+                id,
+                display_name,
+                project_id,
+                working_directory,
+                created_at,
+                last_opened_at,
+                is_archived,
+                agent_cli,
+                session_identity,
+                canonical_session_name
             FROM threads
             ORDER BY created_at, display_name
             """
@@ -401,6 +440,8 @@ private extension SQLiteAgentIDEStore {
                     projectID: projectID,
                     workingDirectory: URL(fileURLWithPath: text(at: 3, in: statement), isDirectory: true),
                     agentCLI: agentCLI,
+                    sessionIdentity: optionalText(at: 8, in: statement),
+                    canonicalSessionName: optionalText(at: 9, in: statement),
                     createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
                     lastOpenedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
                     isArchived: sqlite3_column_int(statement, 6) == 1
@@ -488,8 +529,21 @@ private extension SQLiteAgentIDEStore {
         sqlite3_bind_text(statement, index, value, -1, SQLITE_TRANSIENT)
     }
 
+    func bindOptional(_ value: String?, at index: Int32, in statement: OpaquePointer?) {
+        if let value {
+            bind(value, at: index, in: statement)
+        } else {
+            sqlite3_bind_null(statement, index)
+        }
+    }
+
     func text(at index: Int32, in statement: OpaquePointer?) -> String {
         String(cString: sqlite3_column_text(statement, index))
+    }
+
+    func optionalText(at index: Int32, in statement: OpaquePointer?) -> String? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return text(at: index, in: statement)
     }
 
     func stepDone(_ statement: OpaquePointer?) throws {

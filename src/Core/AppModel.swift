@@ -22,15 +22,21 @@ public final class AppModel: ObservableObject {
     public private(set) var navigationHistory: NavigationHistory
     private let store: AgentIDEStore
     private let terminalManager: TerminalSessionManaging
+    private let agentCLIBindings: AgentCLISessionBindingService
     private let homeDirectory: URL
+    private var activeProjectLaunchCommandsByThreadID: [UUID: [String]] = [:]
+    private var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
+    private var pendingTerminalTitlesByThreadID: [UUID: String] = [:]
 
     public init(
         store: AgentIDEStore = InMemoryAgentIDEStore.helloWorld(),
         terminalManager: TerminalSessionManaging = PlaceholderTerminalSessionManager(),
+        agentCLIBindings: AgentCLISessionBindingService = AgentCLISessionBindingService(),
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         self.store = store
         self.terminalManager = terminalManager
+        self.agentCLIBindings = agentCLIBindings
         self.homeDirectory = homeDirectory
         let snapshot = store.load()
         self.projects = snapshot.projects
@@ -160,11 +166,19 @@ public final class AppModel: ObservableObject {
             )
         case .project(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
+            let command: [String]
+            if let activeCommand = activeProjectLaunchCommandsByThreadID[threadID] {
+                command = activeCommand
+            } else {
+                captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+                command = agentCLIBindings.terminalCommand(for: thread)
+            }
+            activeProjectLaunchCommandsByThreadID[threadID] = command
             return TerminalLaunchRequest(
                 role: role,
-                title: "Project Terminal",
+                title: "\(thread.agentCLI.displayName) Terminal",
                 workingDirectory: thread.workingDirectory,
-                command: [defaultShellPath()]
+                command: command
             )
         case .nvim(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
@@ -217,10 +231,62 @@ public final class AppModel: ObservableObject {
 
     public func terminateTerminal(role: TerminalRole) {
         terminalManager.terminate(role: role)
+        if case .project(let threadID) = role {
+            activeProjectLaunchCommandsByThreadID.removeValue(forKey: threadID)
+            captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+        }
     }
 
     public func terminalSession(for role: TerminalRole) -> TerminalSessionRecord? {
         terminalManager.session(for: role)
+    }
+
+    public func recordAgentCLIOutput(
+        threadID: UUID,
+        output: String,
+        terminalTitle: String? = nil
+    ) {
+        guard let index = threads.firstIndex(where: { $0.id == threadID }),
+              var metadata = agentCLIBindings.metadata(
+                for: threads[index].agentCLI,
+                output: output,
+                terminalTitle: terminalTitle
+              ) else {
+            return
+        }
+        if metadata.reportedName == nil,
+           metadata.title == nil,
+           let pendingTitle = pendingTerminalTitlesByThreadID[threadID] {
+            metadata.title = pendingTitle
+        }
+        applyAgentCLIMetadata(metadata, toThreadAt: index)
+    }
+
+    public func recordAgentCLITerminalTitle(threadID: UUID, title: String) {
+        guard let index = threads.firstIndex(where: { $0.id == threadID }) else {
+            return
+        }
+        pendingTerminalTitlesByThreadID[threadID] = title
+        guard let identity = threads[index].sessionIdentity,
+              threads[index].canonicalSessionName == nil
+                || threads[index].canonicalSessionName == identity else { return }
+        let metadata = agentCLIBindings.metadata(
+            fromExistingIdentity: identity,
+            terminalTitle: title
+        )
+        applyAgentCLIMetadata(metadata, toThreadAt: index)
+    }
+
+    public func pollSelectedAgentCLICaptureLog() {
+        guard let thread = selectedThread,
+              let captured = agentCLIBindings.capturedOutput(
+                for: thread,
+                after: captureReadOffsetsByThreadID[thread.id] ?? 0
+              ) else {
+            return
+        }
+        captureReadOffsetsByThreadID[thread.id] = captured.nextOffset
+        recordAgentCLIOutput(threadID: thread.id, output: captured.output)
     }
 
     @discardableResult
@@ -353,6 +419,14 @@ public final class AppModel: ObservableObject {
 
     private func activeThread(id threadID: UUID) -> AgentThread? {
         threads.first { $0.id == threadID && !$0.isArchived }
+    }
+
+    private func applyAgentCLIMetadata(_ metadata: AgentCLISessionMetadata, toThreadAt index: Int) {
+        threads[index].sessionIdentity = metadata.identity
+        threads[index].canonicalSessionName = metadata.canonicalName
+        threads[index].displayName = metadata.canonicalName
+        pendingTerminalTitlesByThreadID.removeValue(forKey: threads[index].id)
+        persist()
     }
 
     private func defaultShellPath() -> String {

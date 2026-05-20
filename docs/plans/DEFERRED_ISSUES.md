@@ -22,10 +22,11 @@ This file tracks review findings that are real but intentionally belong to a lat
 - Owning plan: Plan 11.
 - Closure test: Plan 11 verifies the selected Ghostty artifact is signed/packaged correctly, release verification does not depend on `/Applications/Ghostty.app`, and the documented distribution path matches `Package.swift`.
 
+## Resolved Items
+
 ### D-001: Persist Non-Default Thread CLI Metadata
 
 - Source: Plan 02 Codex review on 2026-05-20.
 - Finding: `AgentThread.agentCLI`, `sessionIdentity`, and `canonicalSessionName` are public model fields, but SQLite migration v1 intentionally stores only Plan 02's basic thread columns. A synthetic non-default `.claude` thread reloaded as `.codex` with nil session metadata.
-- Triage: Partially resolved in Plan 03 by adding SQLite migration v2 for explicit `agent_cli`; remaining session fields are deferred because Plan 07 owns deterministic CLI session identity capture and resume.
-- Owning plan: Plan 07 for `sessionIdentity` and `canonicalSessionName`.
-- Closure test: A deterministic CLI session identity/name survives relaunch in Plan 07.
+- Resolution: Plan 03 added SQLite migration v2 for explicit `agent_cli`. Plan 07 added SQLite migration v4 for `session_identity` and `canonical_session_name`, deterministic CLI session capture, and resume command generation.
+- Closure test: `testAgentCLIMetadataPersistsThroughSQLiteReload`, `testLaunchCaptureAndResumeCommandUsesDeterministicCLIDouble`, and the normal Plan 07 build/test/verify gate passed.

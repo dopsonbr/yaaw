@@ -368,6 +368,7 @@ private struct ThreadChoiceSheet: View {
 
 private struct MainWorkspaceView: View {
     @ObservedObject var model: AppModel
+    private let capturePoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -382,11 +383,19 @@ private struct MainWorkspaceView: View {
             TerminalPlaceholderView(
                 title: model.projectTerminal.title,
                 request: selectedProjectTerminalRequest,
-                unavailableMessage: model.projectTerminal.placeholderText
+                unavailableMessage: model.projectTerminal.placeholderText,
+                onTitleChange: { role, title in
+                    if case .project(let threadID) = role {
+                        model.recordAgentCLITerminalTitle(threadID: threadID, title: title)
+                    }
+                }
             )
             .id(model.selectedThreadID)
             .onAppear {
                 model.activateSelectedProjectTerminal()
+            }
+            .onReceive(capturePoll) { _ in
+                model.pollSelectedAgentCLICaptureLog()
             }
 
             Spacer()
@@ -499,6 +508,7 @@ private struct TerminalPlaceholderView: View {
     let title: String
     let request: TerminalLaunchRequest?
     let unavailableMessage: String
+    var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -507,7 +517,7 @@ private struct TerminalPlaceholderView: View {
                 .foregroundStyle(dracula(.green))
 
             if let request {
-                GhosttyTerminalSurfaceView(request: request)
+                GhosttyTerminalSurfaceView(request: request, onTitleChange: onTitleChange)
                     .accessibilityLabel("\(title) terminal")
             } else {
                 Text(unavailableMessage)

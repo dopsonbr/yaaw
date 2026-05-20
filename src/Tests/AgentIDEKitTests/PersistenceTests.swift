@@ -179,6 +179,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.threads.map(\.id), snapshot.threads.map(\.id))
         XCTAssertEqual(reloaded.threads.map(\.isArchived), [true, false])
         XCTAssertEqual(reloaded.threads.map(\.agentCLI), [.codex, .claude])
+        XCTAssertEqual(reloaded.threads.map(\.sessionIdentity), [nil, nil])
         XCTAssertEqual(reloaded.selectedProjectID, projectID)
         XCTAssertEqual(reloaded.selectedThreadID, secondThreadID)
         XCTAssertEqual(reloaded.rightPanelModesByThreadID[firstThreadID], .git)
@@ -204,6 +205,54 @@ final class PersistenceTests: XCTestCase {
         let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
 
         XCTAssertEqual(reloaded.layoutState, layoutState)
+    }
+
+    func testSQLiteMigrationAddsAgentCLISessionColumnsToVersionThreeThreads() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        try withSQLiteDatabase(path: path) { database in
+            try executeSQL(
+                """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    root_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL
+                );
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    working_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL,
+                    is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1)),
+                    agent_cli TEXT NOT NULL CHECK (agent_cli IN ('codex', 'claude'))
+                );
+                CREATE TABLE app_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE right_panel_modes (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    mode TEXT NOT NULL CHECK (mode IN ('files', 'nvim', 'git'))
+                );
+                CREATE TABLE layout_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                PRAGMA user_version = 3;
+                """,
+                database: database
+            )
+        }
+
+        _ = try SQLiteAgentIDEStore(databasePath: path)
+        let columns = try sqliteTableColumns(path: path, table: "threads")
+
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteAgentIDEStore.schemaVersion)
+        XCTAssertTrue(columns.contains("session_identity"))
+        XCTAssertTrue(columns.contains("canonical_session_name"))
     }
 
     func testSQLiteLayoutStateMissingRowsUseDefaults() throws {

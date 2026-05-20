@@ -6,6 +6,7 @@ import SwiftUI
 @available(macOS 14.0, *)
 struct GhosttyTerminalSurfaceView: NSViewRepresentable {
     let request: TerminalLaunchRequest
+    var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -46,7 +47,11 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
         terminal.frame = container.bounds
         terminal.autoresizingMask = [.width, .height]
         terminal.setSurfaceVisible(true)
-        GhosttyTerminalStateRegistry.shared.configure(entry, for: request)
+        GhosttyTerminalStateRegistry.shared.configure(
+            entry,
+            for: request,
+            onTitleChange: onTitleChange
+        )
     }
 }
 
@@ -81,11 +86,15 @@ private final class GhosttyTerminalStateRegistry {
         let entry = Entry(request: request, state: state, view: view)
         entriesByRole[request.role] = entry
         sentInitialCommands.remove(request.role)
-        configure(entry, for: request)
+        configure(entry, for: request, onTitleChange: { _, _ in })
         return entry
     }
 
-    func configure(_ entry: Entry, for request: TerminalLaunchRequest) {
+    func configure(
+        _ entry: Entry,
+        for request: TerminalLaunchRequest,
+        onTitleChange: @escaping (TerminalRole, String) -> Void
+    ) {
         let options = TerminalSurfaceOptions(
             backend: .exec,
             fontSize: 13,
@@ -93,7 +102,10 @@ private final class GhosttyTerminalStateRegistry {
             context: .split
         )
         entry.state.configuration = options
-        entry.view.delegate = entry.state
+        entry.delegate.onTitleChange = { title in
+            onTitleChange(request.role, title)
+        }
+        entry.view.delegate = entry.delegate
         entry.view.controller = entry.state.controller
         entry.view.configuration = options
         scheduleInitialCommandIfNeeded(for: request, state: entry.state)
@@ -111,9 +123,9 @@ private final class GhosttyTerminalStateRegistry {
 
     private func scheduleInitialCommandIfNeeded(for request: TerminalLaunchRequest, state: TerminalViewState) {
         switch request.role {
-        case .nvim, .lazygit:
+        case .project, .nvim, .lazygit:
             break
-        case .project, .global:
+        case .global:
             return
         }
 
@@ -148,16 +160,81 @@ private final class GhosttyTerminalStateRegistry {
         }.joined(separator: " ")
     }
 
+    @MainActor
     final class Entry {
         let request: TerminalLaunchRequest
         let state: TerminalViewState
         let view: TerminalView
+        let delegate: AgentIDETerminalDelegate
 
         init(request: TerminalLaunchRequest, state: TerminalViewState, view: TerminalView) {
             self.request = request
             self.state = state
             self.view = view
+            self.delegate = AgentIDETerminalDelegate(state: state)
         }
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class AgentIDETerminalDelegate:
+    TerminalSurfaceTitleDelegate,
+    TerminalSurfaceGridResizeDelegate,
+    TerminalSurfaceFocusDelegate,
+    TerminalSurfaceCloseDelegate,
+    TerminalSurfaceBellDelegate,
+    TerminalSurfaceDesktopNotificationDelegate,
+    TerminalSurfacePwdDelegate,
+    TerminalSurfaceCommandFinishedDelegate,
+    TerminalSurfaceLifecycleDelegate
+{
+    private let state: TerminalViewState
+    var onTitleChange: (String) -> Void = { _ in }
+
+    init(state: TerminalViewState) {
+        self.state = state
+    }
+
+    func terminalDidChangeTitle(_ title: String) {
+        state.terminalDidChangeTitle(title)
+        onTitleChange(title)
+    }
+
+    func terminalDidResize(_ size: TerminalGridMetrics) {
+        state.terminalDidResize(size)
+    }
+
+    func terminalDidChangeFocus(_ focused: Bool) {
+        state.terminalDidChangeFocus(focused)
+    }
+
+    func terminalDidClose(processAlive: Bool) {
+        state.terminalDidClose(processAlive: processAlive)
+    }
+
+    func terminalDidRingBell() {
+        state.terminalDidRingBell()
+    }
+
+    func terminalDidRequestDesktopNotification(title: String, body: String) {
+        state.terminalDidRequestDesktopNotification(title: title, body: body)
+    }
+
+    func terminalDidChangeWorkingDirectory(_ path: String) {
+        state.terminalDidChangeWorkingDirectory(path)
+    }
+
+    func terminalDidFinishCommand(exitCode: Int?, durationNanos: UInt64) {
+        state.terminalDidFinishCommand(exitCode: exitCode, durationNanos: durationNanos)
+    }
+
+    func terminalDidAttachSurface(_ surface: TerminalSurface) {
+        state.terminalDidAttachSurface(surface)
+    }
+
+    func terminalDidDetachSurface() {
+        state.terminalDidDetachSurface()
     }
 }
 

@@ -32,6 +32,7 @@ let package = Package(
                 "Tests"
             ],
             sources: [
+                "AgentCLI",
                 "Core",
                 "FileBrowser",
                 "Layout",
