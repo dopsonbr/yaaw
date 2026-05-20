@@ -45,16 +45,23 @@ private struct SidebarView: View {
                     .foregroundStyle(dracula(.comment))
 
                 ForEach(model.projects) { project in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(project.displayName)
-                            .lineLimit(1)
+                    Button {
+                        model.selectProject(id: project.id)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(project.displayName)
+                                .lineLimit(1)
 
-                        Text(project.rootDirectory.path)
-                            .font(.caption)
-                            .foregroundStyle(dracula(.comment))
-                            .lineLimit(1)
+                            Text(project.rootDirectory.path)
+                                .font(.caption)
+                                .foregroundStyle(dracula(.comment))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
                     }
-                    .padding(.vertical, 6)
+                    .buttonStyle(.plain)
+                    .background(model.selectedProjectID == project.id ? dracula(.currentLine) : dracula(.background))
                 }
             }
 
@@ -63,20 +70,45 @@ private struct SidebarView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(dracula(.comment))
 
-                ForEach(model.threads) { thread in
-                    HStack {
-                        Text(thread.displayName)
-                            .lineLimit(1)
+                ForEach(model.activeThreadsForSelectedProject) { thread in
+                    Button {
+                        model.selectThread(id: thread.id)
+                    } label: {
+                        HStack {
+                            Text(thread.displayName)
+                                .lineLimit(1)
 
-                        Spacer()
+                            Spacer()
 
-                        if thread.isArchived {
-                            Text("Archived")
+                            Text(thread.agentCLI.displayName)
                                 .font(.caption)
-                                .foregroundStyle(dracula(.orange))
+                                .foregroundStyle(dracula(.cyan))
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
                     }
-                    .padding(.vertical, 6)
+                    .buttonStyle(.plain)
+                    .background(model.selectedThreadID == thread.id ? dracula(.currentLine) : dracula(.background))
+                }
+            }
+
+            if !model.archivedThreadsForSelectedProject.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Archived")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(dracula(.orange))
+
+                    ForEach(model.archivedThreadsForSelectedProject) { thread in
+                        Button {
+                            model.selectThread(id: thread.id)
+                        } label: {
+                            Text(thread.displayName)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
 

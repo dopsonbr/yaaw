@@ -17,6 +17,28 @@ struct AgentIDEApp: App {
                 }
                 .keyboardShortcut("j", modifiers: [.command])
             }
+
+            CommandMenu("Navigation") {
+                Button("Back") {
+                    model.navigateBack()
+                }
+                .keyboardShortcut("[", modifiers: [.command])
+
+                Button("Forward") {
+                    model.navigateForward()
+                }
+                .keyboardShortcut("]", modifiers: [.command])
+
+                Button("Previous Right Panel Mode") {
+                    model.cycleRightPanelModeBackward()
+                }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+
+                Button("Next Right Panel Mode") {
+                    model.cycleRightPanelModeForward()
+                }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+            }
         }
     }
 }

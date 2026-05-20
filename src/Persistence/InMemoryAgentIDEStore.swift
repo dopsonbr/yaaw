@@ -3,23 +3,37 @@ import Foundation
 public struct AgentIDESnapshot: Equatable, Sendable {
     public var projects: [Project]
     public var threads: [AgentThread]
+    public var selectedProjectID: UUID
+    public var selectedThreadID: UUID?
+    public var rightPanelModesByThreadID: [UUID: RightPanelMode]
     public var selectedRightPanelMode: RightPanelMode
     public var isGlobalTerminalExpanded: Bool
 
     public init(
         projects: [Project],
         threads: [AgentThread],
+        selectedProjectID: UUID,
+        selectedThreadID: UUID?,
+        rightPanelModesByThreadID: [UUID: RightPanelMode] = [:],
         selectedRightPanelMode: RightPanelMode,
         isGlobalTerminalExpanded: Bool
     ) {
         self.projects = projects
         self.threads = threads
+        self.selectedProjectID = selectedProjectID
+        self.selectedThreadID = selectedThreadID
+        self.rightPanelModesByThreadID = rightPanelModesByThreadID
         self.selectedRightPanelMode = selectedRightPanelMode
         self.isGlobalTerminalExpanded = isGlobalTerminalExpanded
     }
 }
 
-public final class InMemoryAgentIDEStore {
+public protocol AgentIDEStore: AnyObject {
+    func load() -> AgentIDESnapshot
+    func save(_ snapshot: AgentIDESnapshot)
+}
+
+public final class InMemoryAgentIDEStore: AgentIDEStore {
     private var snapshot: AgentIDESnapshot
 
     public init(snapshot: AgentIDESnapshot) {
@@ -62,6 +76,9 @@ public final class InMemoryAgentIDEStore {
             snapshot: AgentIDESnapshot(
                 projects: [project],
                 threads: [thread],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .files],
                 selectedRightPanelMode: .files,
                 isGlobalTerminalExpanded: false
             )
