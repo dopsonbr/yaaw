@@ -100,3 +100,14 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - UX findings: The right-panel tool flow is functional and fast enough for daily use. `lazygit` remains dense in a narrow right panel, so final polish should revisit default widths, truncation, and tool affordances.
 - Lesson learned: Terminal role identity is not enough for tool flows; a command-equivalent user action can still need a fresh surface launch after the prior terminal program exits.
 - Follow-up: Plan 10 should automate Files -> `nvim`, Git -> `lazygit`, global terminal, missing-tool handling, and screenshot capture through deterministic fixtures.
+
+## Plan 10: Behavior E2E Suite
+
+- Date: 2026-05-20
+- Scope shipped: `scripts/test-e2e.sh`, `AgentIDEE2E` fixture/assertion runner, deterministic `codex`/`claude`/`nvim`/`lazygit` command doubles, isolated SQLite/config/capture paths, real app-process visual screenshot states, UI-driven project/thread/tool/archive smoke journey, E2E launch environment overrides, and script documentation.
+- Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 64 tests; `./scripts/test-e2e.sh` passed and wrote screenshots under `.build/e2e-artifacts/latest/screenshots`; `./script/build_and_run.sh --verify` passed.
+- External review: Two `codex review --uncommitted` passes found current-plan gaps for failure screenshots and over-claiming model-driven checks as the full E2E journey. The script now captures a launch screenshot on runner failure, drives a real app-process UI journey, and the Swift runner is scoped as focused behavior assertions rather than full-journey UI coverage.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-10/e2e-files-mode.png`; generated E2E artifacts included launch, project creation, Files, `nvim`, Git, global terminal, panel collapse, and UI journey screenshots.
+- UX findings: Window-only screenshot capture works when the app is launched through `open` with launch environment overrides. The UI journey is still coordinate-based because SwiftUI's nested accessibility tree is not yet stable enough for named element targeting; Plan 11 should replace that with stronger accessibility labels and less fragile selectors.
+- Lesson learned: A model-level behavior harness is useful, but it must not be labeled as E2E full journey unless the running app UI is actually driven and checked.
+- Follow-up: Plan 11 should harden accessibility labels, missing-directory/tool diagnostics, shortcut coverage, and final visual polish now that the E2E harness can capture repeatable artifacts.

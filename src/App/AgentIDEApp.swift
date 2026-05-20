@@ -5,12 +5,30 @@ import SwiftUI
 struct AgentIDEApp: App {
     @StateObject private var model: AppModel
     private let startupError: Error?
+    private let databasePath: URL
 
     init() {
+        var environment = ProcessInfo.processInfo.environment
+        if let pathOverride = environment["AGENT_IDE_PATH"] {
+            environment["PATH"] = pathOverride
+        }
+        let databasePath = Self.databasePath(environment: environment)
+        self.databasePath = databasePath
         do {
-            let store = try SQLiteAgentIDEStore.defaultStore()
-            let configuration = JSONConfigurationStore(path: JSONConfigurationStore.defaultPath()).load()
-            _model = StateObject(wrappedValue: AppModel(store: store, configuration: configuration))
+            let store = try SQLiteAgentIDEStore(databasePath: databasePath)
+            let configuration = JSONConfigurationStore(path: Self.configurationPath(environment: environment)).load()
+            let agentCLIBindings = AgentCLISessionBindingService(
+                environment: environment,
+                captureDirectory: Self.captureDirectory(environment: environment)
+            )
+            _model = StateObject(
+                wrappedValue: AppModel(
+                    store: store,
+                    agentCLIBindings: agentCLIBindings,
+                    configuration: configuration,
+                    environment: environment
+                )
+            )
             startupError = nil
         } catch {
             _model = StateObject(wrappedValue: AppModel(store: InMemoryAgentIDEStore.helloWorld()))
@@ -24,7 +42,7 @@ struct AgentIDEApp: App {
                 if let startupError {
                     PersistenceStartupFailureView(
                         error: startupError,
-                        databasePath: SQLiteAgentIDEStore.defaultDatabasePath()
+                        databasePath: databasePath
                     )
                 } else {
                     RootView(model: model)
@@ -76,6 +94,24 @@ struct AgentIDEApp: App {
                 }
             }
         }
+    }
+
+    private static func databasePath(environment: [String: String]) -> URL {
+        environment["AGENT_IDE_DATABASE_PATH"]
+            .map { URL(fileURLWithPath: $0) }
+            ?? SQLiteAgentIDEStore.defaultDatabasePath()
+    }
+
+    private static func configurationPath(environment: [String: String]) -> URL {
+        environment["AGENT_IDE_CONFIG_PATH"]
+            .map { URL(fileURLWithPath: $0) }
+            ?? JSONConfigurationStore.defaultPath()
+    }
+
+    private static func captureDirectory(environment: [String: String]) -> URL? {
+        environment["AGENT_IDE_CAPTURE_DIRECTORY"]
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? AgentCLISessionBindingService.defaultCaptureDirectory()
     }
 }
 

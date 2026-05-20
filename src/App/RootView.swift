@@ -224,6 +224,7 @@ private struct SectionHeader: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(dracula(.cyan))
                 .help(actionTitle)
+                .accessibilityLabel("\(actionTitle) \(title)")
         }
     }
 }
@@ -268,9 +269,11 @@ private struct ProjectCreationSheet: View {
 
             TextField("Display name", text: $displayName)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Project display name")
 
             TextField("Directory path", text: $path)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Project directory path")
 
             if let errorMessage {
                 Text(errorMessage)
@@ -339,10 +342,12 @@ private struct ThreadChoiceSheet: View {
                     createThread(agentCLI: .codex)
                 }
                 .keyboardShortcut(.defaultAction)
+                .accessibilityLabel("Create Codex thread")
 
                 Button("Claude") {
                     createThread(agentCLI: .claude)
                 }
+                .accessibilityLabel("Create Claude thread")
             }
 
             if let errorMessage {
@@ -437,6 +442,7 @@ private struct RightPanelView: View {
                     .padding(.vertical, 6)
                     .background(model.selectedRightPanelMode == mode ? dracula(.currentLine) : dracula(.background))
                     .foregroundStyle(model.selectedRightPanelMode == mode ? dracula(.pink) : dracula(.foreground))
+                    .accessibilityLabel("\(mode.displayName) right panel")
                 }
             }
 

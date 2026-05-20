@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "AgentIDE", targets: ["AgentIDE"]),
+        .executable(name: "AgentIDEE2E", targets: ["AgentIDEE2E"]),
         .library(name: "AgentIDEKit", targets: ["AgentIDEKit"])
     ],
     dependencies: [
@@ -29,6 +30,7 @@ let package = Package(
             exclude: [
                 "AGENTS.md",
                 "App",
+                "E2E",
                 "Tests"
             ],
             sources: [
@@ -51,6 +53,11 @@ let package = Package(
             name: "AgentIDEKitTests",
             dependencies: ["AgentIDEKit"],
             path: "src/Tests/AgentIDEKitTests"
+        ),
+        .executableTarget(
+            name: "AgentIDEE2E",
+            dependencies: ["AgentIDEKit"],
+            path: "src/E2E"
         )
     ]
 )
