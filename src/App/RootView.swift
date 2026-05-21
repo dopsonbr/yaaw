@@ -870,6 +870,7 @@ private struct FileBrowserPanel: View {
     @State private var expandedFolders: Set<String> = []
     @State private var typedQuery: String = ""
     @State private var debounceTask: Task<Void, Never>?
+    @State private var treeRoots: [FileBrowserTreeNode] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -930,7 +931,7 @@ private struct FileBrowserPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        ForEach(FileBrowserTreeBuilder.roots(from: state.visibleEntries)) { node in
+                        ForEach(treeRoots) { node in
                             FileBrowserTreeRow(
                                 node: node,
                                 depth: 0,
@@ -947,14 +948,14 @@ private struct FileBrowserPanel: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .onChange(of: state.entries) {
-                seedExpandedFolders()
+                treeRoots = FileBrowserTreeBuilder.roots(from: state.entries)
             }
             .onChange(of: state.rootPath) {
                 expandedFolders.removeAll()
-                seedExpandedFolders()
+                treeRoots = FileBrowserTreeBuilder.roots(from: state.entries)
             }
             .onAppear {
-                seedExpandedFolders()
+                treeRoots = FileBrowserTreeBuilder.roots(from: state.entries)
             }
         }
         .padding(.horizontal, 8)
@@ -969,13 +970,6 @@ private struct FileBrowserPanel: View {
         return "\(state.visibleEntries.count) of \(metadata.fileCount) items, \(ignored)"
     }
 
-    private func seedExpandedFolders() {
-        expandedFolders = Set(
-            state.entries
-                .filter { $0.isDirectory && !$0.relativePath.contains("/") }
-                .map(\.relativePath)
-        )
-    }
 }
 
 private struct FileBrowserTreeRow: View {
