@@ -55,6 +55,11 @@ let package = Package(
             dependencies: ["YAAWKit"],
             path: "src/Tests/YAAWKitTests"
         ),
+        .testTarget(
+            name: "YAAWKitBenchmarks",
+            dependencies: ["YAAWKit"],
+            path: "src/Tests/YAAWKitBenchmarks"
+        ),
         .executableTarget(
             name: "YAAWE2E",
             dependencies: ["YAAWKit"],
