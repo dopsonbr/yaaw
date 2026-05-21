@@ -22,6 +22,8 @@ The main screen has three areas:
 - **Agent CLI session terminal:** the active local CLI agent terminal for the selected thread.
 - **Right tool panel:** project files, isolated WebKit browser previews, opened files in `nvim`/`vim`/`vi`, and Git workflows in `lazygit` or `git diff`.
 
+![YAAW workspace showing a Codex thread, terminal, file browser, and collapsed bottom terminal](../examples/screenshots/current/main-workspace-files-terminal.png)
+
 The sidebar nests thread history under each project. Project rows can be expanded or collapsed, pinned, reordered, and used to start a new thread directly in that project. The sidebar and right tool panel can both be collapsed to keep the terminal-focused view clean. Every major panel can also be resized.
 
 ## Create A Project
@@ -147,7 +149,7 @@ YAAW detects supported destinations from installed macOS apps and shows them in 
 
 Use the right-panel new-tab menu and choose Web Browser to open a browser tab. Enter a URL in the address field to navigate inside the right panel. Browser rendering runs in a helper process so a renderer crash should show a recovery state without taking down YAAW.
 
-From Files mode, right-click a supported preview file and choose Open in Browser. Supported first-pass preview types include HTML, SVG, PDF, common images, text, JSON, and XML. The default file-open action still opens `nvim`; Browser preview is an explicit context-menu action.
+From Files mode, right-click a supported preview file and choose Open in Browser. Supported preview types include HTML, Markdown, SVG, PDF, common images, text, JSON, and XML. Markdown previews render as a GitHub-like HTML page with Mermaid fenced diagrams and relative images or links resolved from the Markdown file's directory. The default file-open action still opens `nvim`; Browser preview is an explicit context-menu action.
 
 ## Open A File In nvim
 
@@ -170,7 +172,11 @@ Use `lazygit` for focused Git tasks without leaving the app shell. If `lazygit` 
 
 ## Paste Images Into CLIs
 
-When a CLI terminal has focus, use `Cmd+V` to paste. Text follows the normal terminal paste behavior. Images from the pasteboard are saved as app-owned PNG files under YAAW's Application Support directory, and the terminal receives `Attached image: <absolute-path>` without pressing Enter. `Ctrl+V` uses the same image attach behavior when the terminal has focus.
+When a CLI terminal has focus, use `Cmd+V` to paste. Text follows the normal terminal paste behavior. Images from the pasteboard use the terminal's native attachment shortcut, so YAAW does not insert a visible filesystem path. `Ctrl+V` uses the same native image attach behavior when the terminal has focus.
+
+## Screenshot Reference
+
+Current and historical screenshots live under `docs/examples/screenshots/`. Prefer `docs/examples/screenshots/current/` for screenshots that are meant to describe the current app, and treat older plan-specific screenshots as implementation evidence for that plan rather than as the canonical UI.
 
 ## Resize Panels
 

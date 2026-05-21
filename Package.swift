@@ -56,6 +56,7 @@ let package = Package(
                 "Icons",
                 "IsolatedTools",
                 "Layout",
+                "MarkdownPreview",
                 "Persistence",
                 "Projects",
                 "RightPanel",

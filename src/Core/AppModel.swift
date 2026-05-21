@@ -1112,7 +1112,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public static func isBrowserPreviewSupported(relativePath: String) -> Bool {
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         let supportedExtensions: Set<String> = [
-            "html", "htm", "svg", "pdf", "png", "jpg", "jpeg", "gif", "webp", "txt", "json", "xml"
+            "html", "htm", "svg", "pdf", "png", "jpg", "jpeg", "gif", "webp", "txt", "json", "xml",
+            "md", "markdown"
         ]
         return supportedExtensions.contains(URL(fileURLWithPath: normalizedPath).pathExtension.lowercased())
     }
@@ -1196,18 +1197,6 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         expandedProjectIDs.insert(project.id)
         rightPanelModesByThreadID[thread.id] = .files
         rightPanelStatesByThreadID[thread.id] = RightPanelState.defaultState()
-        applyThreadActivity(
-            ThreadActivityEvent(
-                threadID: thread.id,
-                status: .working,
-                title: "Starting \(agentCLI.displayName)",
-                body: nil,
-                source: .terminalLifecycle,
-                createdAt: now
-            ),
-            isUnread: false,
-            shouldNotify: false
-        )
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         recordDiagnostic(

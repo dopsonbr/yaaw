@@ -203,7 +203,7 @@ Should define source behavior:
 - Keep UI, persistence, terminal, and indexing concerns separated.
 - Do not test private functions directly.
 - Use public input/output behavior for unit tests.
-- Keep `libghostty` terminal surfaces consistent across project, global, `nvim`, and `lazygit` terminals.
+- Keep `libghostty` terminal surfaces consistent across agent CLI session, selected-thread bottom, `nvim`, and `lazygit` terminals.
 - Keep right-panel state scoped to thread.
 
 ## Migration Plan

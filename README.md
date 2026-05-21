@@ -6,7 +6,7 @@ YAAW is not an agent harness itself. It does not orchestrate agents, rewrite pro
 
 YAAW has no telemetry. App state, settings, indexes, activity previews, and diagnostics stay local on the user's device. Anything that leaves the device is between the user and the agent CLI or CLI harness they chose to run.
 
-The first implementation stays small: it gives users a project list, one active thread at a time, one managed agent CLI session terminal per thread, and a collapsible right tool panel for files, `nvim`/`vim`/`vi`, and `lazygit`/`git diff`. Current code paths cover `codex`, `claude`, `opencode`, and `copilot`.
+The first implementation stays small: it gives users a project list, one active thread at a time, one managed agent CLI session terminal per thread, and a collapsible right tool panel for files, Browser previews, `nvim`/`vim`/`vi`, and `lazygit`/`git diff`. Current code paths cover `codex`, `claude`, `opencode`, and `copilot`.
 
 ## Install
 
@@ -31,11 +31,15 @@ The release installer downloads the latest `YAAW-*-macos-arm64.zip` asset, insta
 - Use `libghostty` for embedded terminal rendering and terminal behavior.
 - Use Dracula by default and keep built-in theme switching consistent across every app surface.
 - Show files for the selected project in a collapsible right tool panel.
+- Preview supported local files and typed URLs in an isolated right-panel Browser mode.
 - Open selected files in `nvim` inside the right panel, falling back to `vim` and then `vi`.
 - Open `lazygit` in a terminal inside the right panel, falling back to `git diff` when `lazygit` is unavailable.
-- Switch the right panel between file tree, `nvim`, and `lazygit` by cycling tabs or clicking mode icons.
+- Switch the right panel between Files, Browser, Git, and `nvim` by cycling tabs or clicking mode icons.
 - Support fuzzy matching in the file browser.
-- Provide a title-bar settings gear for the app-owned YAML settings file.
+- Provide a title-bar settings gear for the app-owned YAML settings editor.
+- Let users configure built-in theme, icon pack, fonts, key bindings, external-open destinations, agent commands, editor fallbacks, Git command, and file indexing ignore rules through YAML-backed settings.
+- Surface thread activity states and sanitized notification previews without storing terminal scrollback.
+- Open selected projects and files in installed external editors, Finder, Terminal, Ghostty, Xcode, or WebStorm.
 - Make every major panel resizeable.
 - Allow old or completed threads to be archived.
 
@@ -82,9 +86,10 @@ The app has three primary regions:
    - Resizeable.
    - Shows files for the selected project directory.
    - Supports fuzzy matching for quickly finding files.
+   - Opens supported preview files and typed URLs in isolated Browser mode.
    - Opens selected files in `nvim` inside the same right panel.
    - Opens `lazygit` in a terminal inside the same right panel.
-   - Switches between file tree, `nvim`, and `lazygit` using tabs or icon buttons.
+   - Switches between Files, Browser, Git, and `nvim` using tabs or icon buttons.
 
 A bottom terminal is available for the selected thread. It is collapsed by default, resizeable when expanded, toggled with `Cmd+J`, and isolated from sidebar selection and sizing.
 
@@ -116,21 +121,22 @@ The bottom terminal is scoped to the selected thread and uses that thread's work
 
 ### Right Tool Panel
 
-The right tool panel shows files for the selected project and provides lightweight terminal-backed tools. It should stay small: directory tree, fuzzy matching, `nvim` file open behavior, and `lazygit` are enough for the first version.
+The right tool panel shows files for the selected project and provides lightweight local tools. It should stay small: file tree, fuzzy matching, isolated Browser previews, `nvim` file open behavior, and `lazygit` are enough for the first version.
 
 When a file is opened, the right panel changes from browse mode to editor mode and launches `nvim` for that file in the selected project's directory. If `nvim` is unavailable, YAAW falls back to `vim` and then `vi`. The panel remains part of the app layout instead of opening a separate editor window.
 
 When the Git mode is opened, the right panel launches `lazygit` in the selected project's directory. If `lazygit` is unavailable, YAAW falls back to `git diff`. This gives users a focused Git terminal UI without building custom source control screens.
 
-When an agent terminal has focus, `Cmd+V` can paste text through the normal terminal path or attach an image from the pasteboard. Image paste stores a normalized PNG under YAAW's Application Support directory and inserts `Attached image: <absolute-path>` without submitting the prompt. `Ctrl+V` uses the same image attach path when the terminal has focus.
+When an agent terminal has focus, `Cmd+V` can paste text through the normal terminal path or attach an image from the pasteboard. Image paste sends the terminal's native attachment shortcut without inserting a visible filesystem path. `Ctrl+V` uses the same native image attach path when the terminal has focus.
 
 User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml` by default. The title-bar gear opens a lightweight settings sheet with actions to open and reload that YAML file.
 
 Users can switch right-panel modes by cycling tabs or clicking mode icons:
 
-- File tree.
+- Files.
+- Browser.
+- Git.
 - `nvim`.
-- `lazygit`.
 
 ### Resizeable Panels
 
@@ -152,12 +158,18 @@ Panel sizes should persist per app workspace unless that adds too much implement
 | Terminals | One `libghostty` agent CLI session terminal per thread. One collapsed selected-thread bottom terminal. |
 | Theme | Dracula across all panels, terminals, modals, and selection states. |
 | Sidebar | Collapsible and resizeable project/thread navigation. |
-| Right tool panel | Collapsible and resizeable file tree, `nvim`, and `lazygit` modes with fuzzy file matching. |
+| Right tool panel | Collapsible and resizeable Files, Browser, `nvim`, and Git modes with fuzzy file matching. |
 | Archive | Move inactive threads out of the main project list. |
+
+## Current Screenshot
+
+This screenshot comes from the local E2E harness and shows the current native app shell with a Codex-backed thread, `libghostty` terminal input, the file browser, agent icon labels, panel rails, and the collapsed selected-thread bottom terminal.
+
+![Current YAAW workspace](docs/examples/screenshots/current/main-workspace-files-terminal.png)
 
 ## Example Pages
 
-Generated Dracula-themed example pages are available under `docs/examples/screenshots/`:
+Additional Dracula-themed example pages are available under `docs/examples/screenshots/`. Some older examples predate the current YAAW name and should be treated as visual references, not exact product status:
 
 - [Main workspace](docs/examples/screenshots/main-workspace-dracula.png)
 - [Main workspace variant](docs/examples/screenshots/main-workspace-dracula-v2.png)

@@ -17,12 +17,12 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = TerminalContainerView()
         container.wantsLayer = true
-        attachTerminal(to: container)
+        attachTerminal(to: container, shouldFocus: true)
         return container
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        attachTerminal(to: nsView)
+        attachTerminal(to: nsView, shouldFocus: false)
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: ()) {
@@ -34,9 +34,10 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
         }
     }
 
-    private func attachTerminal(to container: NSView) {
+    private func attachTerminal(to container: NSView, shouldFocus: Bool) {
         let entry = GhosttyTerminalStateRegistry.shared.entry(for: request)
         let terminal = entry.view
+        var didAttachTerminal = false
 
         for subview in container.subviews where subview !== terminal {
             if let staleTerminal = subview as? TerminalView {
@@ -48,19 +49,21 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
         if terminal.superview !== container {
             terminal.removeFromSuperview()
             container.addSubview(terminal)
+            didAttachTerminal = true
         }
 
         terminal.autoresizingMask = [.width, .height]
-        terminal.frame = container.bounds
         if let terminalContainer = container as? TerminalContainerView {
             terminalContainer.terminalView = terminal
             terminalContainer.request = request
             terminalContainer.registerTerminalForPaste()
         }
-        terminal.fitToSize()
-        terminal.setSurfaceVisible(true)
-        if let terminalContainer = container as? TerminalContainerView {
-            terminalContainer.focusTerminalIfPossible()
+        if terminal.frame != container.bounds {
+            terminal.frame = container.bounds
+        }
+        if didAttachTerminal {
+            terminal.fitToSize()
+            terminal.setSurfaceVisible(true)
         }
         GhosttyTerminalStateRegistry.shared.configure(
             entry,
@@ -73,6 +76,9 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
             onClose: onClose,
             onCommandFinished: onCommandFinished
         )
+        if shouldFocus, let terminalContainer = container as? TerminalContainerView {
+            terminalContainer.requestInitialTerminalFocus()
+        }
     }
 }
 
@@ -80,21 +86,38 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
 private final class TerminalContainerView: NSView {
     weak var terminalView: TerminalView?
     var request: TerminalLaunchRequest?
+    private var lastLayoutBounds: NSRect = .zero
+    private var shouldFocusWhenWindowIsReady = false
+    private weak var observedWindow: NSWindow?
+    private var mouseDownMonitor: Any?
 
     override func layout() {
         super.layout()
         guard let terminalView else { return }
+        guard terminalView.frame != bounds || lastLayoutBounds != bounds else { return }
         terminalView.frame = bounds
         terminalView.fitToSize()
+        lastLayoutBounds = bounds
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {
+            stopObservingWindowKeyChanges()
+            stopMonitoringMouseDown()
             TerminalImagePasteBridge.shared.unregister(container: self)
         } else {
             registerTerminalForPaste()
+            startObservingWindowKeyChanges()
+            startMonitoringMouseDown()
+            if shouldFocusWhenWindowIsReady {
+                focusTerminalIfPossible()
+            }
         }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     func registerTerminalForPaste() {
@@ -106,16 +129,80 @@ private final class TerminalContainerView: NSView {
         )
     }
 
-    func focusTerminalIfPossible() {
+    func requestInitialTerminalFocus() {
+        shouldFocusWhenWindowIsReady = true
+        focusTerminalIfPossible()
+    }
+
+    private func focusTerminalIfPossible() {
         guard let terminalView else { return }
-        DispatchQueue.main.async { [weak terminalView] in
-            guard let terminalView,
+        DispatchQueue.main.async { [weak self, weak terminalView] in
+            guard let self,
+                  let terminalView,
                   terminalView.window?.isKeyWindow == true
             else {
                 return
             }
-            terminalView.window?.makeFirstResponder(terminalView)
+            if terminalView.window?.makeFirstResponder(terminalView) == true {
+                self.shouldFocusWhenWindowIsReady = false
+            }
         }
+    }
+
+    private func startObservingWindowKeyChanges() {
+        guard observedWindow !== window else { return }
+        stopObservingWindowKeyChanges()
+        observedWindow = window
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidBecomeKey(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: window
+        )
+    }
+
+    private func stopObservingWindowKeyChanges() {
+        if let observedWindow {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSWindow.didBecomeKeyNotification,
+                object: observedWindow
+            )
+        }
+        observedWindow = nil
+    }
+
+    @objc private func windowDidBecomeKey(_ notification: Notification) {
+        guard shouldFocusWhenWindowIsReady,
+              notification.object as? NSWindow === window
+        else {
+            return
+        }
+        focusTerminalIfPossible()
+    }
+
+    private func startMonitoringMouseDown() {
+        guard mouseDownMonitor == nil else { return }
+        mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            guard let self,
+                  let terminalView,
+                  event.window === window
+            else {
+                return event
+            }
+            let pointInContainer = convert(event.locationInWindow, from: nil)
+            if bounds.contains(pointInContainer) {
+                window?.makeFirstResponder(terminalView)
+            }
+            return event
+        }
+    }
+
+    private func stopMonitoringMouseDown() {
+        if let mouseDownMonitor {
+            NSEvent.removeMonitor(mouseDownMonitor)
+        }
+        mouseDownMonitor = nil
     }
 }
 
@@ -124,8 +211,7 @@ private final class TerminalContainerView: NSView {
 private final class TerminalImagePasteBridge {
     static let shared = TerminalImagePasteBridge()
 
-    private let imageStore = YAAWPastedImageStore()
-    private let pasteFormatter = TerminalPasteTextFormatter()
+    private let pastePolicy = TerminalImagePastePolicy()
     private var keyMonitor: Any?
     private var registrations: [ObjectIdentifier: Registration] = [:]
 
@@ -168,15 +254,13 @@ private final class TerminalImagePasteBridge {
         guard TerminalPasteShortcut.matches(event),
               let registration = focusedRegistration(in: event.window),
               let terminalView = registration.terminalView,
-              let pngData = PasteboardImageExtractor.pngData(from: .general),
-              let imageURL = try? imageStore.savePNGData(pngData, role: registration.request.role)
+              PasteboardImageExtractor.pngData(from: .general) != nil
         else {
             return event
         }
 
         let agentCLI = registration.request.agentCLI ?? .codex
-        let text = pasteFormatter.text(for: .image(imageURL), agentCLI: agentCLI)
-        terminalView.sendText(text)
+        terminalView.sendText(pastePolicy.textForImagePaste(agentCLI: agentCLI))
         return nil
     }
 
@@ -262,9 +346,25 @@ private final class GhosttyTerminalStateRegistry {
             workingDirectory: request.workingDirectory.path,
             context: .split
         )
-        entry.state.configuration = options
-        entry.state.setTheme(terminalTheme(for: theme))
-        entry.state.setTerminalConfiguration(terminalConfiguration(for: request, theme: theme, fonts: fonts))
+        let terminalTheme = terminalTheme(for: theme)
+        let terminalConfiguration = terminalConfiguration(for: request, theme: theme, fonts: fonts)
+        let configuration = AppliedConfiguration(
+            request: request,
+            theme: theme,
+            fonts: fonts,
+            fontSize: options.fontSize,
+            workingDirectory: options.workingDirectory,
+            context: options.context,
+            terminalConfiguration: terminalConfiguration
+        )
+        if entry.appliedConfiguration != configuration {
+            entry.state.configuration = options
+            entry.state.setTheme(terminalTheme)
+            entry.state.setTerminalConfiguration(terminalConfiguration)
+            entry.view.controller = entry.state.controller
+            entry.view.configuration = options
+            entry.appliedConfiguration = configuration
+        }
         entry.delegate.onTitleChange = { title in
             onTitleChange(request.role, title)
         }
@@ -281,8 +381,6 @@ private final class GhosttyTerminalStateRegistry {
             onCommandFinished(request.role, exitCode)
         }
         entry.view.delegate = entry.delegate
-        entry.view.controller = entry.state.controller
-        entry.view.configuration = options
     }
 
     func closeAll() {
@@ -321,6 +419,9 @@ private final class GhosttyTerminalStateRegistry {
             config.withCursorColor(themeHex(.pink, in: theme))
             config.withCursorText(themeHex(.background, in: theme))
             config.withBoldColor(themeHex(.yellow, in: theme))
+            for (index, color) in theme.terminalANSIPalette.enumerated() {
+                config.withPalette(index, color: color)
+            }
             config.withFontSize(12)
             config.withWindowPaddingX(0)
             config.withWindowPaddingY(0)
@@ -342,6 +443,7 @@ private final class GhosttyTerminalStateRegistry {
         let state: TerminalViewState
         let view: TerminalView
         let delegate: YAAWTerminalDelegate
+        var appliedConfiguration: AppliedConfiguration?
 
         init(request: TerminalLaunchRequest, state: TerminalViewState, view: TerminalView) {
             self.request = request
@@ -349,6 +451,16 @@ private final class GhosttyTerminalStateRegistry {
             self.view = view
             self.delegate = YAAWTerminalDelegate(state: state)
         }
+    }
+
+    fileprivate struct AppliedConfiguration: Equatable {
+        var request: TerminalLaunchRequest
+        var theme: ThemeDefinition
+        var fonts: FontSettings
+        var fontSize: Float?
+        var workingDirectory: String?
+        var context: TerminalSurfaceContext
+        var terminalConfiguration: TerminalConfiguration
     }
 }
 

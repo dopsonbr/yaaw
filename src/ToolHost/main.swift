@@ -14,6 +14,7 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var webView: WKWebView?
     private var currentURLString: String?
     private var hasLaunchedTool = false
+    private var isLoadingMarkdownPreview = false
     private var isSurfaceVisible = false
     private var visibleLeaseDeadline: Date?
     private var watchdogTimer: Timer?
@@ -183,11 +184,33 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         currentURLString = urlString
         if url.isFileURL {
-            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            loadFileURL(url)
         } else {
             webView.load(URLRequest(url: url))
         }
         publishState()
+    }
+
+    private func loadFileURL(_ url: URL) {
+        guard let webView else { return }
+        if MarkdownPreviewRenderer.isMarkdownURL(url) {
+            loadMarkdownFile(url)
+        } else {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+    }
+
+    private func loadMarkdownFile(_ url: URL) {
+        guard let webView else { return }
+        do {
+            let markdown = try String(contentsOf: url, encoding: .utf8)
+            let html = MarkdownPreviewRenderer.renderHTML(markdown: markdown, sourceURL: url)
+            currentURLString = url.absoluteString
+            isLoadingMarkdownPreview = true
+            webView.loadHTMLString(html, baseURL: url.deletingLastPathComponent())
+        } catch {
+            send(type: "error", payload: ["message": "Markdown preview could not read this file: \(error.localizedDescription)"])
+        }
     }
 
     private func reload() {
@@ -226,13 +249,34 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         publishState()
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        if let url = navigationAction.request.url,
+           MarkdownPreviewRenderer.isMarkdownURL(url),
+           url.absoluteString != currentURLString {
+            currentURLString = url.absoluteString
+            loadMarkdownFile(url)
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        currentURLString = webView.url?.absoluteString ?? currentURLString
+        if isLoadingMarkdownPreview {
+            isLoadingMarkdownPreview = false
+        } else {
+            currentURLString = webView.url?.absoluteString ?? currentURLString
+        }
         publishState()
         send(type: "titleChanged", payload: ["title": webView.title ?? ""])
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        isLoadingMarkdownPreview = false
         guard !Self.isCancelled(error) else {
             publishState()
             return
@@ -242,6 +286,7 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        isLoadingMarkdownPreview = false
         guard !Self.isCancelled(error) else {
             publishState()
             return

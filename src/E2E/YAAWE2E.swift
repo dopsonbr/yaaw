@@ -63,7 +63,14 @@ private final class E2ERunner {
             at: paths.projectDirectory.appendingPathComponent("src/App", isDirectory: true),
             withIntermediateDirectories: true
         )
-        try "YAAW E2E README\n".write(
+        try """
+        # YAAW E2E README
+
+        ```mermaid
+        graph TD
+          A[Start] --> B[Browser]
+        ```
+        """.write(
             to: paths.projectDirectory.appendingPathComponent("README.md"),
             atomically: true,
             encoding: .utf8
@@ -381,6 +388,8 @@ private final class E2ERunner {
                 && browserTabIDs.contains(RightPanelTab.browserTabID(urlString: nil, relativePath: "diagram.svg")),
             "browser tabs included HTML and SVG preview files"
         )
+        try assert(model.openFileInBrowser(relativePath: "README.md"), "Markdown fixture opened in Browser mode")
+        try assert(model.selectedRightPanelTab.relativePath == "README.md", "browser tab tracked Markdown relative path")
         model.openBrowserTab(urlString: "example.com")
         try assert(model.selectedRightPanelTab.urlString == "https://example.com", "typed browser URL normalized")
         model.openFileInNvim(relativePath: "src/App/RootView.swift")
@@ -411,7 +420,7 @@ private final class E2ERunner {
         try assert(gitRequest.command.last?.hasSuffix("/lazygit") == true, "git mode launched lazygit")
         try assertMissingLazygitFallsBackToGitDiff()
         try assertMissingNvimFallsBackToVimThenVi()
-        try assertImagePasteFormattingUsesAppOwnedStorage()
+        try assertImagePastePolicyUsesNativeShortcut()
         try assertMissingDirectoryRecovery()
 
         model.toggleBottomTerminal()
@@ -607,28 +616,17 @@ private final class E2ERunner {
         )
     }
 
-    private func assertImagePasteFormattingUsesAppOwnedStorage() throws {
-        let storeRoot = paths.root.appendingPathComponent("pasted-images", isDirectory: true)
-        let imageStore = YAAWPastedImageStore(rootDirectory: storeRoot)
-        let formatter = TerminalPasteTextFormatter()
-        let pngData = Data([
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
-            0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-            0x42, 0x60, 0x82
-        ])
+    private func assertImagePastePolicyUsesNativeShortcut() throws {
+        let policy = TerminalImagePastePolicy()
 
         for cli in AgentCLIKind.allCases {
-            let imageURL = try imageStore.savePNGData(pngData, role: .project(threadID: UUID()))
-            let text = formatter.text(for: .image(imageURL), agentCLI: cli)
-            try assert(text == "Attached image: \(imageURL.path)", "\(cli.displayName) image paste text used CLI-neutral format")
-            try assert(imageURL.path.hasPrefix(storeRoot.path), "\(cli.displayName) image paste stored under app-owned root")
-            try assert(!imageURL.path.hasPrefix(paths.projectDirectory.path), "\(cli.displayName) image paste avoided project root")
+            let text = policy.textForImagePaste(agentCLI: cli)
+            try assert(
+                text == TerminalImagePastePolicy.nativeAttachmentShortcutText,
+                "\(cli.displayName) image paste uses native attachment shortcut"
+            )
+            try assert(!text.contains("Attached image:"), "\(cli.displayName) image paste avoids path formatter")
+            try assert(!text.contains(paths.root.path), "\(cli.displayName) image paste does not expose sandbox path")
         }
     }
 

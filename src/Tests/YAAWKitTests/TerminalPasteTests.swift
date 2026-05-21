@@ -3,24 +3,25 @@ import XCTest
 @testable import YAAWKit
 
 final class TerminalPasteTests: XCTestCase {
-    func testImagePasteStoreWritesAppOwnedPNGOutsideProjectRoot() throws {
-        let appRoot = try temporaryDirectory()
-        let projectRoot = try temporaryDirectory()
-        let store = YAAWPastedImageStore(rootDirectory: appRoot)
-        let threadID = UUID()
+    func testImagePastePolicyUsesNativeAttachmentShortcutForEveryCLI() {
+        let policy = TerminalImagePastePolicy()
 
-        let url = try store.savePNGData(Self.samplePNGData(), role: .project(threadID: threadID))
-
-        XCTAssertTrue(url.path.hasPrefix(appRoot.path))
-        XCTAssertFalse(url.path.hasPrefix(projectRoot.path))
-        XCTAssertEqual(url.pathExtension, "png")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        for kind in AgentCLIKind.allCases {
+            XCTAssertEqual(
+                policy.textForImagePaste(agentCLI: kind),
+                TerminalImagePastePolicy.nativeAttachmentShortcutText
+            )
+        }
     }
 
-    func testImagePasteTextIsCLIUniversal() {
-        let url = URL(fileURLWithPath: "/tmp/yaaw image.png")
+    func testImagePastePolicyDoesNotExposeFilesystemPathForAnyCLI() {
+        let policy = TerminalImagePastePolicy()
+
         for kind in AgentCLIKind.allCases {
-            XCTAssertEqual(kind.imagePasteText(for: url), "Attached image: /tmp/yaaw image.png")
+            let text = policy.textForImagePaste(agentCLI: kind)
+            XCTAssertFalse(text.contains("Attached image:"))
+            XCTAssertFalse(text.contains("/tmp/"))
+            XCTAssertFalse(text.contains("/Users/"))
         }
     }
 

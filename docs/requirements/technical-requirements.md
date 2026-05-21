@@ -165,7 +165,7 @@ Resizeable panels:
 - Sidebar width.
 - Main agent CLI session terminal width.
 - Right tool panel width.
-- Global terminal height when expanded.
+- Bottom terminal height when expanded.
 
 ## Right Tool Panel
 
@@ -216,7 +216,8 @@ If two threads happen to share the same panel state because they point at the sa
 - A browser renderer crash MUST show an inline recovery state with a reload or restart path.
 - Browser mode MUST support typed web URLs and local preview files opened from Files mode.
 - Browser local preview files MUST resolve under the selected thread working directory.
-- Browser local preview support MUST include `html`, `htm`, `svg`, `pdf`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `txt`, `json`, and `xml`.
+- Browser local preview support MUST include `html`, `htm`, `svg`, `pdf`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `txt`, `json`, `xml`, `md`, and `markdown`.
+- Browser Markdown previews MUST render as generated HTML in the isolated WebKit helper, support Mermaid fenced diagrams, sanitize raw HTML, and preserve relative image and link resolution from the Markdown file directory.
 - Browser mode MUST NOT write app metadata into user project directories.
 - Browser mode SHOULD keep new-window requests inside right-panel browser tabs.
 - Browser mode MAY omit downloads, extensions, developer tools, and profile controls for the first version.

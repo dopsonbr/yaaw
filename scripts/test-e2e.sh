@@ -18,6 +18,25 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
 fi
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+running_e2e_app_pids() {
+  { ps -axo pid=,comm= 2>/dev/null || true; } | awk -v app_binary="$APP_BINARY" '
+    {
+      pid = $1
+      $1 = ""
+      sub(/^ +/, "")
+      if ($0 == app_binary) print pid
+    }
+  '
+}
+
+terminate_e2e_app() {
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" >/dev/null 2>&1 || true
+  done < <(running_e2e_app_pids)
+}
+
 SCREENSHOT_DIR="$ARTIFACT_DIR/screenshots"
 SCREENSHOT_BLOCKER="$SCREENSHOT_DIR/SCREENSHOT_BLOCKER.md"
 mkdir -p "$SCREENSHOT_DIR"
@@ -27,7 +46,7 @@ RUNNER_STATUS=0
 swift run YAAWE2E --artifacts "$ARTIFACT_DIR" || RUNNER_STATUS=$?
 
 cleanup() {
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  terminate_e2e_app
   launchctl unsetenv YAAW_E2E_DATABASE_PATH >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_CONFIG_PATH >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_CAPTURE_DIRECTORY >/dev/null 2>&1 || true
@@ -199,7 +218,7 @@ launch_state() {
   local screenshot_path="$SCREENSHOT_DIR/$state.png"
   local log_path="$ARTIFACT_DIR/$state.app.log"
 
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  terminate_e2e_app
   : >"$log_path"
   set_launch_environment "$database_path" "$app_path"
   /usr/bin/open -n "$APP_BUNDLE"
@@ -229,7 +248,7 @@ APPLESCRIPT
   assert_no_privacy_prompts "$state"
   capture_window "$screenshot_path"
   assert_no_terminal_launch_failure "$screenshot_path"
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  terminate_e2e_app
 }
 
 run_keyboard_input_probe() {
@@ -237,7 +256,7 @@ run_keyboard_input_probe() {
   local expected="keyboardprobeenter"
   local screenshot_path="$SCREENSHOT_DIR/keyboard-input.png"
 
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  terminate_e2e_app
   set_launch_environment "$database_path"
   launchctl setenv YAAW_E2E_KEYBOARD_PROBE "1"
   rm -f "$ARTIFACT_DIR/captures"/*.log
@@ -275,7 +294,7 @@ APPLESCRIPT
 
   for _ in {1..80}; do
     if grep -R "YAAW_ENTER_RECEIVED=$expected" "$ARTIFACT_DIR/captures" >/dev/null 2>&1; then
-      pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+      terminate_e2e_app
       launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
       return 0
     fi
@@ -285,7 +304,7 @@ APPLESCRIPT
   echo "$APP_NAME did not deliver typed text plus Enter to the focused terminal" >&2
   capture_window "$screenshot_path" || true
   find "$ARTIFACT_DIR/captures" -maxdepth 1 -type f -print -exec sed -n '1,80p' {} \; >&2 || true
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  terminate_e2e_app
   launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
   return 1
 }
@@ -294,7 +313,7 @@ run_settings_editor_probe() {
   local database_path="$ARTIFACT_DIR/states/settings-editor.sqlite"
   local screenshot_path="$SCREENSHOT_DIR/settings-editor.png"
 
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  terminate_e2e_app
   set_launch_environment "$database_path"
   /usr/bin/open -n "$APP_BUNDLE"
   wait_for_window
@@ -395,7 +414,7 @@ APPLESCRIPT
   then
     echo "$APP_NAME settings editor probe failed" >&2
     capture_window "$screenshot_path" || true
-    pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+    terminate_e2e_app
     return 1
   fi
 
@@ -403,11 +422,11 @@ APPLESCRIPT
     echo "$APP_NAME settings editor save did not update the YAML file" >&2
     sed -n '1,80p' "$ARTIFACT_DIR/config/settings.yaml" >&2 || true
     capture_window "$screenshot_path" || true
-    pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+    terminate_e2e_app
     return 1
   fi
 
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  terminate_e2e_app
 }
 
 if [[ "$RUNNER_STATUS" -ne 0 ]]; then

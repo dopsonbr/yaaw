@@ -73,6 +73,51 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
     public func hex(for role: ThemeRole) -> String {
         tokens.first { $0.role == role }?.hex ?? ThemeCatalog.defaultTheme.hex(for: role)
     }
+
+    public var terminalANSIPalette: [String] {
+        if id == ThemeCatalog.defaultID {
+            return [
+                "#21222c",
+                "#ff5555",
+                "#50fa7b",
+                "#f1fa8c",
+                "#bd93f9",
+                "#ff79c6",
+                "#8be9fd",
+                "#f8f8f2",
+                "#6272a4",
+                "#ff6e6e",
+                "#69ff94",
+                "#ffffa5",
+                "#d6acff",
+                "#ff92df",
+                "#a4ffff",
+                "#ffffff"
+            ]
+        }
+
+        let isLight = group == .light || id == "light-high-contrast"
+        let black = isLight ? hex(for: .foreground) : hex(for: .background)
+        let white = isLight ? hex(for: .background) : hex(for: .foreground)
+        return [
+            black,
+            hex(for: .red),
+            hex(for: .green),
+            hex(for: .yellow),
+            hex(for: .purple),
+            hex(for: .pink),
+            hex(for: .cyan),
+            white,
+            hex(for: .comment),
+            hex(for: .red),
+            hex(for: .green),
+            hex(for: .yellow),
+            hex(for: .purple),
+            hex(for: .pink),
+            hex(for: .cyan),
+            white
+        ]
+    }
 }
 
 public enum ThemeCatalog {

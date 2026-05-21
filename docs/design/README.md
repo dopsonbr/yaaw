@@ -54,7 +54,7 @@ The app shell is a native macOS window with split-view layout.
 | Archive       |                                               |                |
 |               |                                               |                |
 |               +-----------------------------------------------+----------------+
-|               | Global terminal, collapsed by default                          |
+|               | Selected-thread bottom terminal, collapsed by default           |
 +---------------+---------------------------------------------------------------+
 ```
 
@@ -117,7 +117,7 @@ All embedded terminal surfaces should use `libghostty`.
 The MVP needs four terminal roles:
 
 - **Agent CLI session terminal:** one terminal per thread, launched in the thread working directory and running the bound user-installed local CLI agent session.
-- **Global terminal:** shared terminal, launched in the user's home directory, collapsed by default.
+- **Bottom terminal:** one selected-thread terminal, launched in the selected thread working directory and collapsed by default.
 - **Editor terminal:** right-panel terminal used to run `nvim` for an opened file.
 - **Git terminal:** right-panel terminal used to run `lazygit` for the active project.
 
@@ -188,7 +188,7 @@ Panels should support both collapse and resize.
 | Sidebar | Collapse to icon rail. | Horizontal width resize. |
 | Main terminal | Never fully collapsed. | Resizes as adjacent panels change. |
 | Right tool panel | Collapse to icon rail. | Horizontal width resize. |
-| Global terminal | Collapsed by default. | Vertical height resize when expanded. |
+| Bottom terminal | Collapsed by default. | Vertical height resize when expanded. |
 
 Persist panel sizes when practical. If persistence is deferred, runtime resizing must still work.
 
@@ -269,6 +269,6 @@ Add more shortcuts only after the interaction model stabilizes.
 - The right panel can preview supported local files and typed URLs in Browser mode.
 - Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
 - Opening Git mode launches `lazygit` or `git diff` inside the right panel.
-- Users can switch the right panel between file tree, Browser, `nvim`, and `lazygit` by cycling tabs or clicking icons.
+- Users can switch the right panel between Files, Browser, Git, and `nvim` by cycling tabs or clicking icons.
 - The full app uses the selected built-in theme, defaulting to Dracula.
 - A user can archive inactive threads.

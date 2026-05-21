@@ -42,7 +42,7 @@ E2E tests MUST cover the primary user workflows:
 - Navigate to a typed URL in Browser mode.
 - Open a file in editor mode and verify `nvim` fallback behavior.
 - Open Git mode and verify `lazygit` or `git diff`.
-- Paste an image into each supported CLI terminal and verify the inserted path points to app-owned storage.
+- Paste an image into each supported CLI terminal and verify YAAW uses the terminal-native attachment shortcut without inserting a visible filesystem path.
 - Cycle right-panel modes with `Cmd+Shift+[` and `Cmd+Shift+]`.
 - Navigate globally with `Cmd+[` and `Cmd+]`.
 - Archive a thread.

@@ -13,10 +13,10 @@ Implement embedded terminal rendering with `libghostty` behind the terminal abst
 ## Implementation
 
 - Add the `libghostty` bridge behind the terminal abstraction without changing public app-state APIs.
-- Embed project terminal and global terminal surfaces first.
-- Embed right-panel `nvim` and `lazygit` terminal surfaces after project/global terminals are stable. YAAW-side `codex` / `claude` launch and resume behavior for user-provided CLIs is owned by [Plan 07](07-agent-cli-session-binding.md); this plan only renders the surface.
-- Launch project terminals in the selected thread working directory.
-- Launch the global terminal in the user's home directory.
+- Embed agent CLI session and selected-thread bottom terminal surfaces first.
+- Embed right-panel `nvim` and `lazygit` terminal surfaces after agent/bottom terminals are stable. YAAW-side `codex` / `claude` launch and resume behavior for user-provided CLIs is owned by [Plan 07](07-agent-cli-session-binding.md); this plan only renders the surface.
+- Launch agent CLI session terminals in the selected thread working directory.
+- Launch the selected-thread bottom terminal in the selected thread working directory.
 - Preserve terminal runtime state while the app process is open.
 - Do not restore live terminal processes after app restart.
 
@@ -35,16 +35,16 @@ Implement embedded terminal rendering with `libghostty` behind the terminal abst
 
 - Unit tests continue to use the placeholder terminal implementation.
 - Integration smoke tests verify terminal surfaces can be created and attached.
-- Manual smoke test verifies shell input works in project and global terminals.
+- Manual smoke test verifies shell input works in agent CLI session and selected-thread bottom terminals.
 
 ## Acceptance Criteria
 
 - Every embedded terminal surface uses `libghostty`.
-- Project terminal launches in the selected thread working directory.
-- Global terminal launches in the user's home directory.
+- Agent CLI session terminal launches in the selected thread working directory.
+- Selected-thread bottom terminal launches in the selected thread working directory.
 - Terminal sessions remain isolated by thread while the app is open.
 - Restarting the app does not attempt to restore live terminal processes.
 - The libghostty distribution form, bridge boundary, threading model, and cleanup behavior are documented in the plan PR.
 - `scripts/build.sh` passes for a contributor following the documented bootstrap steps.
 - `scripts/test.sh` passes.
-- A manual smoke run verifies visible project and global terminal surfaces and verifies no orphaned PTY processes remain after quitting the app.
+- A manual smoke run verifies visible agent CLI session and selected-thread bottom terminal surfaces and verifies no orphaned PTY processes remain after quitting the app.

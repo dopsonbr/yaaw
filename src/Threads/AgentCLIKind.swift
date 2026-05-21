@@ -46,8 +46,4 @@ public enum AgentCLIKind: String, CaseIterable, Identifiable, Equatable, Sendabl
             "person.2.wave.2"
         }
     }
-
-    public func imagePasteText(for imageURL: URL) -> String {
-        "Attached image: \(imageURL.path)"
-    }
 }

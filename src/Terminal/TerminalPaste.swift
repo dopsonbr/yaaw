@@ -1,69 +1,12 @@
 import Foundation
 
-public enum TerminalPastePayload: Equatable, Sendable {
-    case text(String)
-    case image(URL)
-}
+public struct TerminalImagePastePolicy: Sendable {
+    public static let nativeAttachmentShortcutText = "\u{16}"
 
-public protocol PastedImageStoring {
-    func savePNGData(_ data: Data, role: TerminalRole) throws -> URL
-}
-
-public struct YAAWPastedImageStore: PastedImageStoring {
-    public let rootDirectory: URL
-    private let fileManager: FileManager
-
-    public init(
-        rootDirectory: URL = YAAWPastedImageStore.defaultRootDirectory(),
-        fileManager: FileManager = .default
-    ) {
-        self.rootDirectory = rootDirectory
-        self.fileManager = fileManager
-    }
-
-    public static func defaultRootDirectory() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("YAAW", isDirectory: true)
-            .appendingPathComponent("PastedImages", isDirectory: true)
-    }
-
-    public func savePNGData(_ data: Data, role: TerminalRole) throws -> URL {
-        let directory = rootDirectory
-            .appendingPathComponent(role.storageComponent, isDirectory: true)
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("\(UUID().uuidString).png")
-        try data.write(to: url, options: [.atomic])
-        return url
-    }
-}
-
-public struct TerminalPasteTextFormatter: Sendable {
     public init() {}
 
-    public func text(for payload: TerminalPastePayload, agentCLI: AgentCLIKind) -> String {
-        switch payload {
-        case .text(let text):
-            return text
-        case .image(let url):
-            return agentCLI.imagePasteText(for: url)
-        }
-    }
-}
-
-private extension TerminalRole {
-    var storageComponent: String {
-        switch self {
-        case .project(let threadID):
-            return "project-\(threadID.uuidString)"
-        case .bottom(let threadID):
-            return "bottom-\(threadID.uuidString)"
-        case .nvim(let threadID):
-            return "nvim-\(threadID.uuidString)"
-        case .nvimTab(let threadID, let tabID):
-            return "nvim-\(threadID.uuidString)-\(tabID)"
-        case .lazygit(let threadID):
-            return "git-\(threadID.uuidString)"
-        }
+    public func textForImagePaste(agentCLI _: AgentCLIKind) -> String {
+        Self.nativeAttachmentShortcutText
     }
 }
 

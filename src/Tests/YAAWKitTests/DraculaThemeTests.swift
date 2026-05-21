@@ -34,6 +34,15 @@ final class DraculaThemeTests: XCTestCase {
         }
     }
 
+    func testEveryBuiltInThemeExposesTerminalANSIPalette() {
+        for theme in ThemeCatalog.themes {
+            XCTAssertEqual(theme.terminalANSIPalette.count, 16, theme.id)
+            for color in theme.terminalANSIPalette {
+                XCTAssertTrue(isValidHexColor(color), "\(theme.id) \(color)")
+            }
+        }
+    }
+
     func testDraculaThemeExposesExpectedInitialTokens() {
         XCTAssertEqual(DraculaTheme.hex(for: .background), "#282a36")
         XCTAssertEqual(DraculaTheme.hex(for: .currentLine), "#44475a")
@@ -46,6 +55,30 @@ final class DraculaThemeTests: XCTestCase {
         XCTAssertEqual(DraculaTheme.hex(for: .purple), "#bd93f9")
         XCTAssertEqual(DraculaTheme.hex(for: .red), "#ff5555")
         XCTAssertEqual(DraculaTheme.hex(for: .yellow), "#f1fa8c")
+    }
+
+    func testDraculaTerminalANSIPaletteMatchesCanonicalTerminalColors() {
+        XCTAssertEqual(
+            ThemeCatalog.defaultTheme.terminalANSIPalette,
+            [
+                "#21222c",
+                "#ff5555",
+                "#50fa7b",
+                "#f1fa8c",
+                "#bd93f9",
+                "#ff79c6",
+                "#8be9fd",
+                "#f8f8f2",
+                "#6272a4",
+                "#ff6e6e",
+                "#69ff94",
+                "#ffffa5",
+                "#d6acff",
+                "#ff92df",
+                "#a4ffff",
+                "#ffffff"
+            ]
+        )
     }
 
     private func isValidHexColor(_ value: String) -> Bool {

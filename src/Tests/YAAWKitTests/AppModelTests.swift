@@ -524,12 +524,33 @@ final class AppModelTests: XCTestCase {
 
         let threadID = try model.createThread(agentCLI: .claude, now: Date(timeIntervalSince1970: 123))
         let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
+        let activity = model.threadActivity(for: threadID)
 
         XCTAssertEqual(thread.displayName, "Starting Claude...")
         XCTAssertEqual(thread.agentCLI, .claude)
         XCTAssertEqual(thread.workingDirectory, fixture.root)
         XCTAssertEqual(model.selectedThreadID, threadID)
         XCTAssertEqual(model.selectedRightPanelMode, .files)
+        XCTAssertEqual(activity.status, .inactive)
+        XCTAssertNil(activity.preview)
+        XCTAssertNil(fixture.store.load().threadActivityByThreadID[threadID])
+    }
+
+    func testTerminalLifecycleEventsStillDriveThreadActivity() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCommandFinished(threadID: fixture.firstThreadID, exitCode: 0)
+
+        var activity = model.threadActivity(for: fixture.firstThreadID)
+        XCTAssertEqual(activity.status, .complete)
+        XCTAssertEqual(activity.preview, "Command exited with status 0")
+
+        model.recordAgentTerminalClosed(threadID: fixture.firstThreadID)
+
+        activity = model.threadActivity(for: fixture.firstThreadID)
+        XCTAssertEqual(activity.status, .inactive)
+        XCTAssertEqual(activity.preview, "Terminal closed")
     }
 
     func testCreateThreadCanTargetNonSelectedProjectAndUseOptionalName() throws {
@@ -1144,6 +1165,43 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.selectedRightPanelMode, .browser)
         XCTAssertEqual(model.selectedRightPanelTab.id, RightPanelTab.browserTabID(urlString: nil, relativePath: "index.html"))
         XCTAssertEqual(model.selectedRightPanelTab.relativePath, "index.html")
+        XCTAssertEqual(model.selectedRightPanelTab.urlString, preview.standardizedFileURL.absoluteString)
+        XCTAssertNil(model.selectedBrowserUnavailableMessage)
+    }
+
+    func testOpeningMarkdownFileInBrowserUsesFileURLAndStaysInWorkingDirectory() throws {
+        let root = try temporaryDirectory()
+        let preview = root.appendingPathComponent("README.md")
+        try """
+        # Preview
+
+        ```mermaid
+        graph TD
+          A[Start] --> B[Done]
+        ```
+        """.write(to: preview, atomically: true, encoding: .utf8)
+        let projectID = UUID()
+        let threadID = UUID()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(store: store)
+
+        XCTAssertTrue(model.openFileInBrowser(relativePath: "README.md"))
+
+        XCTAssertEqual(model.selectedRightPanelMode, .browser)
+        XCTAssertEqual(model.selectedRightPanelTab.id, RightPanelTab.browserTabID(urlString: nil, relativePath: "README.md"))
+        XCTAssertEqual(model.selectedRightPanelTab.relativePath, "README.md")
         XCTAssertEqual(model.selectedRightPanelTab.urlString, preview.standardizedFileURL.absoluteString)
         XCTAssertNil(model.selectedBrowserUnavailableMessage)
     }

@@ -50,7 +50,26 @@ HELPER_BINARY="$APP_HELPERS/$HELPER_PRODUCT"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON="$ROOT_DIR/resources/YAAW.icns"
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+running_bundled_app_pids() {
+  { ps -axo pid=,comm= 2>/dev/null || true; } | awk -v app_binary="$APP_BINARY" '
+    {
+      pid = $1
+      $1 = ""
+      sub(/^ +/, "")
+      if ($0 == app_binary) print pid
+    }
+  '
+}
+
+terminate_bundled_app() {
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" >/dev/null 2>&1 || true
+  done < <(running_bundled_app_pids)
+}
+
+terminate_bundled_app
 
 cd "$ROOT_DIR"
 if [[ "$BUILD_CONFIGURATION" != "debug" ]]; then
