@@ -1,0 +1,17 @@
+title: YAAW
+description: Native macOS wrapper for local CLI agents
+url: https://dopsonbr.github.io
+baseurl: /yaaw
+markdown: kramdown
+exclude:
+  - README.md
+  - CONTRIBUTING.md
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+  - scope:
+      path: "index.md"
+    values:
+      layout: home

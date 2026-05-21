@@ -31,16 +31,12 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .pages _site
-          mkdir -p .pages
-          cp README.md .pages/index.md
+          cp -R docs/site .pages
+          cp README.md .pages/readme.md
+          cp README.md .pages/README.md
           cp CONTRIBUTING.md .pages/contributing.md
           cp -R docs .pages/docs
-          cat > .pages/_config.yml <<'YAML'
-          title: YAAW
-          description: Yet Another Agent Wrapper
-          markdown: kramdown
-          theme: minima
-          YAML
+          rm -rf .pages/docs/site
 
       - name: Build Pages site
         uses: actions/jekyll-build-pages@v1

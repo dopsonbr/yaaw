@@ -17,3 +17,29 @@ Read the documentation in this order:
 9. [Decisions](decisions/) — open product/architecture questions and the defaults plans assume until they are resolved.
 
 Implementation plans should reference the relevant requirements and standards.
+
+## Current Product Goals
+
+- Keep YAAW a native macOS wrapper around user-owned local agent CLIs, not an agent harness.
+- Bind each thread to exactly one `codex`, `claude`, `opencode`, or `copilot` CLI session and resume that session by stored identity.
+- Keep project metadata, settings, file indexes, diagnostics, and activity previews in app-owned local storage.
+- Use `libghostty` for terminal-backed work surfaces: agent sessions, bottom terminal, `nvim`, and Git.
+- Keep the right panel focused on four local tools: Files, Browser previews, `nvim`, and Git.
+- Preserve Dracula as the default visual system while supporting built-in theme, icon, font, keyboard, tool, and indexing settings.
+- Prefer E2E behavior tests and screenshot artifacts over internals-heavy tests.
+
+## Current Screenshot
+
+The latest checked-in current-state screenshot is:
+
+![Current YAAW workspace](examples/screenshots/current/main-workspace-files-terminal.png)
+
+## GitHub Pages Site
+
+The published documentation site is built by `.github/workflows/docs.yml`.
+Durable docs remain in this `docs/` tree. The site-specific shell lives in
+`docs/site/` and should be limited to layouts, CSS, config, and homepage
+presentation.
+
+Do not commit local Pages build output. `.pages/` and `_site/` are temporary
+Jekyll staging directories and are ignored at the repo root.

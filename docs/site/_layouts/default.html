@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}</title>
+    <meta name="description" content="{{ site.description }}">
+    <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="{{ '/' | relative_url }}" aria-label="YAAW home">
+        <img src="{{ '/docs/branding/yaaw-cowboy-app-icon.png' | relative_url }}" alt="">
+        <span>YAAW</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="{{ '/docs/user-guide/' | relative_url }}">User Guide</a>
+        <a href="{{ '/docs/requirements/technical-requirements.html' | relative_url }}">Requirements</a>
+        <a href="{{ '/docs/design/' | relative_url }}">Design</a>
+        <a href="{{ '/docs/plans/implementation-order.html' | relative_url }}">Plans</a>
+        <a href="https://github.com/dopsonbr/yaaw">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="content-shell">
+      <article class="prose">
+        {{ content }}
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <span>YAAW</span>
+      <span>Local-first macOS workflow for user-owned CLI agents.</span>
+    </footer>
+  </body>
+</html>

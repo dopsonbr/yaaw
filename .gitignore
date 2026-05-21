@@ -1,5 +1,7 @@
 .build/
 .swiftpm/
+.pages/
+_site/
 dist/
 .DS_Store
 Vendor/Ghostty/*.xcframework/

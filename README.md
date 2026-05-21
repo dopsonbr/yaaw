@@ -217,3 +217,12 @@ Read these documents in order:
 6. [Design](docs/design/README.md)
 
 Implementation plans should be written after the requirements documents and should reference the applicable requirement ids or sections.
+
+## Documentation Site
+
+The GitHub Pages site is published from `.github/workflows/docs.yml`. The workflow stages the durable Markdown documentation and overlays the site shell from `docs/site/`.
+
+- Keep long-lived product content in `docs/`, not `docs/site/`.
+- Keep `docs/site/` limited to Pages presentation files: layouts, CSS, config, and the homepage.
+- Add screenshots and other documentation assets under `docs/examples/` or the relevant `docs/` subdirectory so both Markdown docs and the Pages site can reference the same files.
+- Local Jekyll staging folders, `.pages/` and `_site/`, are ignored and should not be committed.
