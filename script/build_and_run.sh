@@ -1,9 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VARIANT="production"
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --variant=*)
+      VARIANT="${arg#--variant=}"
+      ;;
+    *)
+      POSITIONAL+=("$arg")
+      ;;
+  esac
+done
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
+
 MODE="${1:-run}"
-APP_NAME="YAAW"
-BUNDLE_ID="dev.dopsonbr.YAAW"
+BUILD_PRODUCT="YAAW"
+case "$VARIANT" in
+  production)
+    APP_NAME="YAAW"
+    BUNDLE_ID="dev.dopsonbr.YAAW"
+    ;;
+  e2e)
+    APP_NAME="YAAW-E2E"
+    BUNDLE_ID="dev.dopsonbr.YAAW.E2E"
+    ;;
+  *)
+    echo "unknown --variant=$VARIANT (expected production|e2e)" >&2
+    exit 2
+    ;;
+esac
 MIN_SYSTEM_VERSION="26.0"
 BUILD_CONFIGURATION="${YAAW_BUILD_CONFIGURATION:-debug}"
 
@@ -23,10 +50,10 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 cd "$ROOT_DIR"
 if [[ "$BUILD_CONFIGURATION" != "debug" ]]; then
   swift build -c "$BUILD_CONFIGURATION"
-  BUILD_BINARY="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)/$APP_NAME"
+  BUILD_BINARY="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)/$BUILD_PRODUCT"
 else
   swift build
-  BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+  BUILD_BINARY="$(swift build --show-bin-path)/$BUILD_PRODUCT"
 fi
 
 rm -rf "$APP_BUNDLE"

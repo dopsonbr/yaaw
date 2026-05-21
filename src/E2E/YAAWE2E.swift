@@ -586,8 +586,8 @@ private final class E2ERunner {
     private var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = paths.binDirectory.path + ":" + (env["PATH"] ?? "")
-        env["YAAW_CONFIG_PATH"] = paths.configPath.path
-        env["YAAW_CAPTURE_DIRECTORY"] = paths.captureDirectory.path
+        env["YAAW_E2E_CONFIG_PATH"] = paths.configPath.path
+        env["YAAW_E2E_CAPTURE_DIRECTORY"] = paths.captureDirectory.path
         return env
     }
 

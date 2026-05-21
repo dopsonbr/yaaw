@@ -4,15 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_ARTIFACT_DIR="${TMPDIR:-/tmp}/yaaw-e2e-artifacts/latest"
 ARTIFACT_DIR="${YAAW_E2E_ARTIFACTS:-$DEFAULT_ARTIFACT_DIR}"
-APP_NAME="YAAW"
-E2E_HOME="$ARTIFACT_DIR/home"
-E2E_ZDOTDIR="$ARTIFACT_DIR/zsh"
-ORIGINAL_HOME="$(launchctl getenv HOME || true)"
-ORIGINAL_ZDOTDIR="$(launchctl getenv ZDOTDIR || true)"
+APP_NAME="YAAW-E2E"
 
 cd "$ROOT_DIR"
 
-APP_BUNDLE="$(./script/build_and_run.sh --build-only | tail -1)"
+APP_BUNDLE="$(./script/build_and_run.sh --build-only --variant=e2e | tail -1)"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 SCREENSHOT_DIR="$ARTIFACT_DIR/screenshots"
@@ -25,53 +21,21 @@ swift run YAAWE2E --artifacts "$ARTIFACT_DIR" || RUNNER_STATUS=$?
 
 cleanup() {
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
-  launchctl unsetenv YAAW_DATABASE_PATH >/dev/null 2>&1 || true
-  launchctl unsetenv YAAW_CONFIG_PATH >/dev/null 2>&1 || true
-  launchctl unsetenv YAAW_CAPTURE_DIRECTORY >/dev/null 2>&1 || true
-  launchctl unsetenv YAAW_PATH >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_E2E_DATABASE_PATH >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_E2E_CONFIG_PATH >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_E2E_CAPTURE_DIRECTORY >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_E2E_PATH >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
-  restore_home
-  restore_zdotdir
 }
-trap cleanup EXIT
-
-restore_home() {
-  if [[ -n "$ORIGINAL_HOME" ]]; then
-    launchctl setenv HOME "$ORIGINAL_HOME"
-  else
-    launchctl unsetenv HOME >/dev/null 2>&1 || true
-  fi
-}
-
-restore_zdotdir() {
-  if [[ -n "$ORIGINAL_ZDOTDIR" ]]; then
-    launchctl setenv ZDOTDIR "$ORIGINAL_ZDOTDIR"
-  else
-    launchctl unsetenv ZDOTDIR >/dev/null 2>&1 || true
-  fi
-}
+trap cleanup EXIT INT TERM
 
 set_launch_environment() {
   local database_path="$1"
   local app_path="${2:-$ARTIFACT_DIR/bin:$PATH}"
-  local zdotdir="${3:-$E2E_ZDOTDIR}"
-  launchctl setenv YAAW_DATABASE_PATH "$database_path"
-  launchctl setenv YAAW_CONFIG_PATH "$ARTIFACT_DIR/config/settings.yaml"
-  launchctl setenv YAAW_CAPTURE_DIRECTORY "$ARTIFACT_DIR/captures"
-  launchctl setenv YAAW_PATH "$app_path"
-  launchctl setenv HOME "$E2E_HOME"
-  if [[ -n "$zdotdir" ]]; then
-    launchctl setenv ZDOTDIR "$zdotdir"
-  else
-    restore_zdotdir
-  fi
-}
-
-write_sandbox_shell_environment() {
-  mkdir -p "$E2E_HOME" "$E2E_ZDOTDIR"
-  printf 'export PATH=%q\n' "$ARTIFACT_DIR/bin:/usr/bin:/bin:/usr/sbin:/sbin" >"$E2E_ZDOTDIR/.zshenv"
-  : >"$E2E_ZDOTDIR/.zprofile"
-  : >"$E2E_ZDOTDIR/.zshrc"
+  launchctl setenv YAAW_E2E_DATABASE_PATH "$database_path"
+  launchctl setenv YAAW_E2E_CONFIG_PATH "$ARTIFACT_DIR/config/settings.yaml"
+  launchctl setenv YAAW_E2E_CAPTURE_DIRECTORY "$ARTIFACT_DIR/captures"
+  launchctl setenv YAAW_E2E_PATH "$app_path"
 }
 
 wait_for_window() {
@@ -224,14 +188,13 @@ SWIFT
 launch_state() {
   local state="$1"
   local app_path="${2:-$ARTIFACT_DIR/bin:$PATH}"
-  local zdotdir="${3:-}"
   local database_path="$ARTIFACT_DIR/states/$state.sqlite"
   local screenshot_path="$SCREENSHOT_DIR/$state.png"
   local log_path="$ARTIFACT_DIR/$state.app.log"
 
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
   : >"$log_path"
-  set_launch_environment "$database_path" "$app_path" "$zdotdir"
+  set_launch_environment "$database_path" "$app_path"
   /usr/bin/open -n "$APP_BUNDLE"
 
   if ! wait_for_window; then
@@ -307,8 +270,6 @@ APPLESCRIPT
   return 1
 }
 
-write_sandbox_shell_environment
-
 if [[ "$RUNNER_STATUS" -ne 0 ]]; then
   launch_state "launch" || true
   exit "$RUNNER_STATUS"
@@ -319,15 +280,11 @@ fi
 # below verify real rendering and terminal behavior through screenshots.
 run_keyboard_input_probe
 
-MISSING_TOOL_ZDOTDIR="$ARTIFACT_DIR/zsh-missing-tools"
-mkdir -p "$MISSING_TOOL_ZDOTDIR"
-printf 'export PATH=/usr/bin:/bin:/usr/sbin:/sbin\n' >"$MISSING_TOOL_ZDOTDIR/.zshenv"
-
 for state in launch project-creation files nvim git missing-directory bottom-terminal panel-collapse; do
   launch_state "$state"
 done
 
-launch_state "missing-tool" "$ARTIFACT_DIR/bin-missing-lazygit:/usr/bin:/bin:/usr/sbin:/sbin" "$MISSING_TOOL_ZDOTDIR"
+launch_state "missing-tool" "$ARTIFACT_DIR/bin-missing-lazygit:/usr/bin:/bin:/usr/sbin:/sbin"
 
 if [[ -s "$SCREENSHOT_BLOCKER" ]]; then
   cat "$SCREENSHOT_BLOCKER" >&2

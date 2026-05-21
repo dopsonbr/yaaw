@@ -12,22 +12,35 @@ struct YAAWApp: App {
 
     init() {
         var environment = ProcessInfo.processInfo.environment
-        if let pathOverride = environment["YAAW_PATH"] {
-            environment["PATH"] = pathOverride
-        }
+        let envPrefix = Self.envPrefix()
         let diagnostics = LoggerDiagnosticEventRecorder.shared
-        let databasePath = Self.databasePath(environment: environment)
-        let configurationPath = Self.configurationPath(environment: environment)
+        var appliedOverrides: [String] = []
+        if let pathOverride = environment["\(envPrefix)PATH"] {
+            environment["PATH"] = pathOverride
+            appliedOverrides.append("\(envPrefix)PATH")
+        }
+        let databasePath = Self.databasePath(environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
+        let configurationPath = Self.configurationPath(environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
         self.databasePath = databasePath
         self.configurationPath = configurationPath
         self.configurationStore = YAMLConfigurationStore(path: configurationPath, diagnosticRecorder: diagnostics)
+        diagnostics.record(
+            DiagnosticEvent(
+                category: "Lifecycle",
+                name: "env_override_applied",
+                metadata: [
+                    "prefix": envPrefix,
+                    "applied": appliedOverrides.joined(separator: ",")
+                ]
+            )
+        )
         do {
             diagnostics.record(DiagnosticEvent(category: "Lifecycle", name: "app_starting"))
             let store = try SQLiteYAAWStore(databasePath: databasePath, diagnosticRecorder: diagnostics)
             let configuration = configurationStore.load()
             let agentCLIBindings = AgentCLISessionBindingService(
                 environment: environment,
-                captureDirectory: Self.captureDirectory(environment: environment)
+                captureDirectory: Self.captureDirectory(environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
             )
             _model = StateObject(
                 wrappedValue: AppModel(
@@ -121,22 +134,35 @@ struct YAAWApp: App {
         }
     }
 
-    private static func databasePath(environment: [String: String]) -> URL {
-        environment["YAAW_DATABASE_PATH"]
-            .map { URL(fileURLWithPath: $0) }
-            ?? SQLiteYAAWStore.defaultDatabasePath()
+    private static func envPrefix() -> String {
+        Bundle.main.bundleIdentifier == "dev.dopsonbr.YAAW.E2E" ? "YAAW_E2E_" : "YAAW_"
     }
 
-    private static func configurationPath(environment: [String: String]) -> URL {
-        environment["YAAW_CONFIG_PATH"]
-            .map { URL(fileURLWithPath: $0) }
-            ?? YAMLConfigurationStore.defaultPath()
+    private static func databasePath(environment: [String: String], envPrefix: String, applied: inout [String]) -> URL {
+        let key = "\(envPrefix)DATABASE_PATH"
+        if let value = environment[key] {
+            applied.append(key)
+            return URL(fileURLWithPath: value)
+        }
+        return SQLiteYAAWStore.defaultDatabasePath()
     }
 
-    private static func captureDirectory(environment: [String: String]) -> URL? {
-        environment["YAAW_CAPTURE_DIRECTORY"]
-            .map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? AgentCLISessionBindingService.defaultCaptureDirectory()
+    private static func configurationPath(environment: [String: String], envPrefix: String, applied: inout [String]) -> URL {
+        let key = "\(envPrefix)CONFIG_PATH"
+        if let value = environment[key] {
+            applied.append(key)
+            return URL(fileURLWithPath: value)
+        }
+        return YAMLConfigurationStore.defaultPath()
+    }
+
+    private static func captureDirectory(environment: [String: String], envPrefix: String, applied: inout [String]) -> URL? {
+        let key = "\(envPrefix)CAPTURE_DIRECTORY"
+        if let value = environment[key] {
+            applied.append(key)
+            return URL(fileURLWithPath: value, isDirectory: true)
+        }
+        return AgentCLISessionBindingService.defaultCaptureDirectory()
     }
 
     private func openSettingsFile() {
