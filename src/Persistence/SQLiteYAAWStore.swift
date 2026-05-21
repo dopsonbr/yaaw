@@ -19,7 +19,7 @@ private struct SidebarProjectStateRow {
 }
 
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 11
+    public static let schemaVersion = 12
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -79,6 +79,7 @@ public final class SQLiteYAAWStore: YAAWStore {
                 fallbackGlobalTerminalExpanded: fallbackGlobalTerminalExpanded
             )
             let fileIndexMetadata = try loadFileIndexMetadata()
+            let threadActivity = try loadThreadActivity()
             let bottomTerminalExpandedThreadIDs = try loadBottomTerminalExpandedThreadIDs()
             let sidebarProjectState = try loadSidebarProjectState()
 
@@ -94,6 +95,7 @@ public final class SQLiteYAAWStore: YAAWStore {
                 isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
                 layoutState: layoutState,
                 fileIndexMetadataByThreadID: fileIndexMetadata,
+                threadActivityByThreadID: threadActivity,
                 expandedProjectIDs: sidebarProjectState.expandedProjectIDs,
                 expandedArchivedProjectIDs: sidebarProjectState.expandedArchivedProjectIDs
             )
@@ -111,6 +113,7 @@ public final class SQLiteYAAWStore: YAAWStore {
                 try execute("DELETE FROM right_panel_tabs")
                 try execute("DELETE FROM bottom_terminal_state")
                 try execute("DELETE FROM file_index_metadata")
+                try execute("DELETE FROM thread_activity_state")
                 try execute("DELETE FROM sidebar_project_state")
                 try execute("DELETE FROM layout_state")
                 try execute("DELETE FROM app_state")
@@ -138,6 +141,9 @@ public final class SQLiteYAAWStore: YAAWStore {
                 }
                 for metadata in snapshot.fileIndexMetadataByThreadID.values {
                     try insertFileIndexMetadata(metadata)
+                }
+                for activity in snapshot.threadActivityByThreadID.values {
+                    try insertThreadActivity(activity)
                 }
                 for project in snapshot.projects {
                     try insertSidebarProjectState(
@@ -357,6 +363,12 @@ public final class SQLiteYAAWStore: YAAWStore {
         }
     }
 
+    public func upsertThreadActivity(_ activity: ThreadActivityState) {
+        runIncremental(name: "upsert_thread_activity") {
+            try upsertThreadActivityStatement(activity)
+        }
+    }
+
     public func cachedFileIndex(cacheKey: String) -> CachedFileIndex? {
         do {
             return try loadCachedFileIndex(cacheKey: cacheKey)
@@ -475,6 +487,12 @@ private extension SQLiteYAAWStore {
                 try execute("PRAGMA user_version = 11")
             }
         }
+        if currentVersion < 12 {
+            try transaction {
+                try createThreadActivityStateSchema()
+                try execute("PRAGMA user_version = 12")
+            }
+        }
     }
 
     func migrateToVersionNine() throws {
@@ -528,6 +546,23 @@ private extension SQLiteYAAWStore {
                 isArchiveExpanded: false
             )
         }
+    }
+
+    func createThreadActivityStateSchema() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS thread_activity_state (
+                thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK (status IN ('working', 'needsInput', 'complete', 'inactive')),
+                preview TEXT,
+                is_unread INTEGER NOT NULL CHECK (is_unread IN (0, 1)),
+                title TEXT,
+                body TEXT,
+                source TEXT NOT NULL CHECK (source IN ('helper', 'terminalNotification', 'terminalLifecycle')),
+                updated_at REAL NOT NULL
+            )
+            """
+        )
     }
 
     func createVersionOneSchema() throws {
@@ -1194,6 +1229,70 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
+    func insertThreadActivity(_ activity: ThreadActivityState) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO thread_activity_state (
+                thread_id,
+                status,
+                preview,
+                is_unread,
+                title,
+                body,
+                source,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(activity.threadID.uuidString, at: 1, in: statement)
+        bind(activity.status.rawValue, at: 2, in: statement)
+        bindOptional(activity.preview, at: 3, in: statement)
+        sqlite3_bind_int(statement, 4, activity.isUnread ? 1 : 0)
+        bindOptional(activity.title, at: 5, in: statement)
+        bindOptional(activity.body, at: 6, in: statement)
+        bind(activity.source.rawValue, at: 7, in: statement)
+        sqlite3_bind_double(statement, 8, activity.updatedAt.timeIntervalSince1970)
+        try stepDone(statement)
+    }
+
+    func upsertThreadActivityStatement(_ activity: ThreadActivityState) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO thread_activity_state (
+                thread_id,
+                status,
+                preview,
+                is_unread,
+                title,
+                body,
+                source,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(thread_id) DO UPDATE SET
+                status = excluded.status,
+                preview = excluded.preview,
+                is_unread = excluded.is_unread,
+                title = excluded.title,
+                body = excluded.body,
+                source = excluded.source,
+                updated_at = excluded.updated_at
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(activity.threadID.uuidString, at: 1, in: statement)
+        bind(activity.status.rawValue, at: 2, in: statement)
+        bindOptional(activity.preview, at: 3, in: statement)
+        sqlite3_bind_int(statement, 4, activity.isUnread ? 1 : 0)
+        bindOptional(activity.title, at: 5, in: statement)
+        bindOptional(activity.body, at: 6, in: statement)
+        bind(activity.source.rawValue, at: 7, in: statement)
+        sqlite3_bind_double(statement, 8, activity.updatedAt.timeIntervalSince1970)
+        try stepDone(statement)
+    }
+
     func deleteCachedFileIndexEntries(cacheKey: String) throws {
         let statement = try prepare("DELETE FROM file_index_cache_entries WHERE cache_key = ?")
         defer { sqlite3_finalize(statement) }
@@ -1542,6 +1641,44 @@ private extension SQLiteYAAWStore {
             )
         }
         return metadataByThreadID
+    }
+
+    func loadThreadActivity() throws -> [UUID: ThreadActivityState] {
+        let statement = try prepare(
+            """
+            SELECT
+                thread_id,
+                status,
+                preview,
+                is_unread,
+                title,
+                body,
+                source,
+                updated_at
+            FROM thread_activity_state
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        var activityByThreadID: [UUID: ThreadActivityState] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let threadID = UUID(uuidString: text(at: 0, in: statement)),
+                  let status = ThreadActivityStatus(rawValue: text(at: 1, in: statement)),
+                  let source = ThreadActivitySource(rawValue: text(at: 6, in: statement))
+            else {
+                throw SQLiteStoreError.executionFailed("Invalid thread activity state")
+            }
+            activityByThreadID[threadID] = ThreadActivityState(
+                threadID: threadID,
+                status: status,
+                preview: optionalText(at: 2, in: statement),
+                isUnread: sqlite3_column_int(statement, 3) == 1,
+                title: optionalText(at: 4, in: statement),
+                body: optionalText(at: 5, in: statement),
+                source: source,
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 7))
+            )
+        }
+        return activityByThreadID
     }
 
     func loadCachedFileIndex(cacheKey: String) throws -> CachedFileIndex? {

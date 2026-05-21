@@ -73,6 +73,26 @@ The MVP expectation is simple:
 - Project commands run from the project directory.
 - Terminal surfaces use the selected built-in theme.
 
+## Track Agent Activity
+
+Thread rows show the latest known agent activity:
+
+- Cyan spinner/ring: working.
+- Yellow attention state: needs input.
+- Green check: complete.
+- Muted ring: inactive.
+
+When an agent sends a terminal notification, YAAW updates that thread's status and shows a short sanitized preview under the thread name. If the app is not already focused on that thread's agent terminal, YAAW also sends a macOS notification named with the thread title and a preview body when available. Selecting and focusing the thread marks its notification read without clearing the preview.
+
+Managed agent terminals expose a helper command named `yaaw-notify`:
+
+```sh
+yaaw-notify --status needs-input --title "Approval needed" --body "Review the proposed command"
+yaaw-notify --status complete --title "Task complete" --body "Tests passed"
+```
+
+The helper is added only to YAAW-managed agent terminal sessions. It writes app-owned notification metadata under Application Support and emits a terminal notification sequence for compatibility. YAAW does not edit Codex, Claude, OpenCode, Copilot, shell, or repository config files automatically; users can add hook calls themselves if they want deeper integration.
+
 ## Use The Bottom Terminal
 
 The bottom terminal is collapsed by default and scoped to the selected project thread.
@@ -165,13 +185,23 @@ Archived threads move out of the active list for their project but remain availa
 
 | Shortcut | Action |
 | --- | --- |
+| `Cmd+,` | Open Settings. |
+| `Cmd+N` | Create a project from a chosen directory. |
+| `Cmd+Shift+N` | Create a thread under the selected project with the configured default agent CLI. |
 | `Cmd+J` | Toggle the selected-thread bottom terminal. |
 | `Cmd+[` | Navigate back. |
 | `Cmd+]` | Navigate forward. |
 | `Cmd+Shift+[` | Cycle right-panel tabs backward. |
 | `Cmd+Shift+]` | Cycle right-panel tabs forward. |
+| `Cmd+1` | Select Files in the right panel. |
+| `Cmd+2` | Select Git in the right panel. |
+| `Cmd+3` | Select `nvim` in the right panel. |
+| `Cmd+Option+S` | Toggle the sidebar. |
+| `Cmd+Option+R` | Toggle the right panel. |
 
-Additional shortcuts should be added only when the behavior is stable and clearly useful.
+Open Settings and choose Key Bindings to search every configurable action, edit its key and modifiers, clear the binding, or restore the default. Contextual actions such as pinning, archiving, external-open targets, Settings YAML actions, and selected-file actions are bindable even when they are unbound by default.
+
+The generated YAML exposes the same complete action list under `keyboardShortcuts`. Set `key: ""` and `modifiers: []` to leave an action unbound. Invalid entries fall back to their defaults, and conflicting active bindings in the same scope are shown as conflicts in Settings.
 
 ## Configure Settings
 
@@ -181,7 +211,7 @@ Open the title-bar gear to navigate to the in-app YAML settings editor. By defau
 ~/Library/Application Support/YAAW/settings.yaml
 ```
 
-The generated YAML file includes comments showing current defaults and which fields are active now. Current active settings include theme selection, keyboard shortcuts, the default agent CLI, editor fallback order, external-open destination order, Git and diff commands, agent command names, fonts, and file indexing ignore rules.
+The generated YAML file includes comments showing current defaults and which fields are active now. Current active settings include theme selection, the complete key binding catalog, the default agent CLI, editor fallback order, external-open destination order, Git and diff commands, agent command names, fonts, and file indexing ignore rules.
 
 Theme settings are represented under `theme.active`. Use the Settings Appearance picker or set one of the supported theme ids in YAML: `dracula`, `dark-2026`, `dark-plus`, `dark-modern`, `monokai`, `solarized-dark`, `light-2026`, `light-modern`, `light-plus`, `quiet-light`, `solarized-light`, `dark-high-contrast`, or `light-high-contrast`. Unknown values fall back to `dracula` and record a local diagnostic event. Custom theme palettes are placeholders for future expansion.
 

@@ -9,6 +9,10 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
     let theme: ThemeDefinition
     let fonts: FontSettings
     var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
+    var onDesktopNotification: (TerminalRole, String, String) -> Void = { _, _, _ in }
+    var onFocusChange: (TerminalRole, Bool) -> Void = { _, _ in }
+    var onClose: (TerminalRole) -> Void = { _ in }
+    var onCommandFinished: (TerminalRole, Int?) -> Void = { _, _ in }
 
     func makeNSView(context: Context) -> NSView {
         let container = TerminalContainerView()
@@ -63,7 +67,11 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
             for: request,
             theme: theme,
             fonts: fonts,
-            onTitleChange: onTitleChange
+            onTitleChange: onTitleChange,
+            onDesktopNotification: onDesktopNotification,
+            onFocusChange: onFocusChange,
+            onClose: onClose,
+            onCommandFinished: onCommandFinished
         )
     }
 }
@@ -223,7 +231,17 @@ private final class GhosttyTerminalStateRegistry {
         view.delegate = state
         let entry = Entry(request: request, state: state, view: view)
         entriesByRole[request.role] = entry
-        configure(entry, for: request, theme: ThemeCatalog.defaultTheme, fonts: FontSettings(), onTitleChange: { _, _ in })
+        configure(
+            entry,
+            for: request,
+            theme: ThemeCatalog.defaultTheme,
+            fonts: FontSettings(),
+            onTitleChange: { _, _ in },
+            onDesktopNotification: { _, _, _ in },
+            onFocusChange: { _, _ in },
+            onClose: { _ in },
+            onCommandFinished: { _, _ in }
+        )
         return entry
     }
 
@@ -232,7 +250,11 @@ private final class GhosttyTerminalStateRegistry {
         for request: TerminalLaunchRequest,
         theme: ThemeDefinition,
         fonts: FontSettings,
-        onTitleChange: @escaping (TerminalRole, String) -> Void
+        onTitleChange: @escaping (TerminalRole, String) -> Void,
+        onDesktopNotification: @escaping (TerminalRole, String, String) -> Void,
+        onFocusChange: @escaping (TerminalRole, Bool) -> Void,
+        onClose: @escaping (TerminalRole) -> Void,
+        onCommandFinished: @escaping (TerminalRole, Int?) -> Void
     ) {
         let options = TerminalSurfaceOptions(
             backend: .exec,
@@ -245,6 +267,18 @@ private final class GhosttyTerminalStateRegistry {
         entry.state.setTerminalConfiguration(terminalConfiguration(for: request, theme: theme, fonts: fonts))
         entry.delegate.onTitleChange = { title in
             onTitleChange(request.role, title)
+        }
+        entry.delegate.onDesktopNotification = { title, body in
+            onDesktopNotification(request.role, title, body)
+        }
+        entry.delegate.onFocusChange = { focused in
+            onFocusChange(request.role, focused)
+        }
+        entry.delegate.onClose = {
+            onClose(request.role)
+        }
+        entry.delegate.onCommandFinished = { exitCode in
+            onCommandFinished(request.role, exitCode)
         }
         entry.view.delegate = entry.delegate
         entry.view.controller = entry.state.controller
@@ -333,6 +367,10 @@ private final class YAAWTerminalDelegate:
 {
     private let state: TerminalViewState
     var onTitleChange: (String) -> Void = { _ in }
+    var onDesktopNotification: (String, String) -> Void = { _, _ in }
+    var onFocusChange: (Bool) -> Void = { _ in }
+    var onClose: () -> Void = {}
+    var onCommandFinished: (Int?) -> Void = { _ in }
 
     init(state: TerminalViewState) {
         self.state = state
@@ -349,10 +387,12 @@ private final class YAAWTerminalDelegate:
 
     func terminalDidChangeFocus(_ focused: Bool) {
         state.terminalDidChangeFocus(focused)
+        onFocusChange(focused)
     }
 
     func terminalDidClose(processAlive: Bool) {
         state.terminalDidClose(processAlive: processAlive)
+        onClose()
     }
 
     func terminalDidRingBell() {
@@ -361,6 +401,7 @@ private final class YAAWTerminalDelegate:
 
     func terminalDidRequestDesktopNotification(title: String, body: String) {
         state.terminalDidRequestDesktopNotification(title: title, body: body)
+        onDesktopNotification(title, body)
     }
 
     func terminalDidChangeWorkingDirectory(_ path: String) {
@@ -369,6 +410,7 @@ private final class YAAWTerminalDelegate:
 
     func terminalDidFinishCommand(exitCode: Int?, durationNanos: UInt64) {
         state.terminalDidFinishCommand(exitCode: exitCode, durationNanos: durationNanos)
+        onCommandFinished(exitCode)
     }
 
     func terminalDidAttachSurface(_ surface: TerminalSurface) {

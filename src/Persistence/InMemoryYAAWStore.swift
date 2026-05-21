@@ -11,6 +11,7 @@ public struct YAAWSnapshot: Equatable, Sendable {
     public var bottomTerminalExpandedThreadIDs: Set<UUID>
     public var layoutState: LayoutState
     public var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
+    public var threadActivityByThreadID: [UUID: ThreadActivityState]
     public var expandedProjectIDs: Set<UUID>
     public var expandedArchivedProjectIDs: Set<UUID>
 
@@ -38,6 +39,7 @@ public struct YAAWSnapshot: Equatable, Sendable {
         isGlobalTerminalExpanded: Bool,
         layoutState: LayoutState? = nil,
         fileIndexMetadataByThreadID: [UUID: FileIndexMetadata] = [:],
+        threadActivityByThreadID: [UUID: ThreadActivityState] = [:],
         expandedProjectIDs: Set<UUID> = [],
         expandedArchivedProjectIDs: Set<UUID> = []
     ) {
@@ -62,6 +64,7 @@ public struct YAAWSnapshot: Equatable, Sendable {
         }
         self.layoutState.isGlobalTerminalExpanded = false
         self.fileIndexMetadataByThreadID = fileIndexMetadataByThreadID
+        self.threadActivityByThreadID = threadActivityByThreadID
         self.expandedProjectIDs = expandedProjectIDs
         self.expandedArchivedProjectIDs = expandedArchivedProjectIDs
     }
@@ -83,6 +86,7 @@ public protocol YAAWStore: AnyObject {
     func setProjectExpanded(_ projectID: UUID, isExpanded: Bool)
     func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool)
     func upsertFileIndexMetadata(_ metadata: FileIndexMetadata)
+    func upsertThreadActivity(_ activity: ThreadActivityState)
     func cachedFileIndex(cacheKey: String) -> CachedFileIndex?
     func upsertCachedFileIndex(_ index: CachedFileIndex)
 }
@@ -90,9 +94,12 @@ public protocol YAAWStore: AnyObject {
 public final class InMemoryYAAWStore: YAAWStore {
     private var snapshot: YAAWSnapshot
     private var cachedFileIndexesByKey: [String: CachedFileIndex] = [:]
+    private var projectIndexByID: [UUID: Int] = [:]
+    private var threadIndexByID: [UUID: Int] = [:]
 
     public init(snapshot: YAAWSnapshot) {
         self.snapshot = snapshot
+        rebuildIndexes()
     }
 
     public func load() -> YAAWSnapshot {
@@ -101,30 +108,36 @@ public final class InMemoryYAAWStore: YAAWStore {
 
     public func save(_ snapshot: YAAWSnapshot) {
         self.snapshot = snapshot
+        rebuildIndexes()
     }
 
     public func upsertProject(_ project: Project) {
-        if let index = snapshot.projects.firstIndex(where: { $0.id == project.id }) {
+        if let index = projectIndexByID[project.id] {
             snapshot.projects[index] = project
         } else {
+            projectIndexByID[project.id] = snapshot.projects.count
             snapshot.projects.append(project)
         }
     }
 
     public func upsertThread(_ thread: AgentThread) {
-        if let index = snapshot.threads.firstIndex(where: { $0.id == thread.id }) {
+        if let index = threadIndexByID[thread.id] {
             snapshot.threads[index] = thread
         } else {
+            threadIndexByID[thread.id] = snapshot.threads.count
             snapshot.threads.append(thread)
         }
     }
 
     public func deleteThread(id: UUID) {
         snapshot.threads.removeAll { $0.id == id }
+        threadIndexByID.removeValue(forKey: id)
+        rebuildThreadIndex()
         snapshot.rightPanelModesByThreadID.removeValue(forKey: id)
         snapshot.rightPanelStatesByThreadID.removeValue(forKey: id)
         snapshot.bottomTerminalExpandedThreadIDs.remove(id)
         snapshot.fileIndexMetadataByThreadID.removeValue(forKey: id)
+        snapshot.threadActivityByThreadID.removeValue(forKey: id)
         if snapshot.selectedThreadID == id {
             snapshot.selectedThreadID = nil
         }
@@ -178,6 +191,10 @@ public final class InMemoryYAAWStore: YAAWStore {
         snapshot.fileIndexMetadataByThreadID[metadata.threadID] = metadata
     }
 
+    public func upsertThreadActivity(_ activity: ThreadActivityState) {
+        snapshot.threadActivityByThreadID[activity.threadID] = activity
+    }
+
     public func cachedFileIndex(cacheKey: String) -> CachedFileIndex? {
         cachedFileIndexesByKey[cacheKey]
     }
@@ -185,6 +202,15 @@ public final class InMemoryYAAWStore: YAAWStore {
     public func upsertCachedFileIndex(_ index: CachedFileIndex) {
         guard let cacheKey = index.metadata.cacheKey else { return }
         cachedFileIndexesByKey[cacheKey] = index
+    }
+
+    private func rebuildIndexes() {
+        projectIndexByID = Dictionary(uniqueKeysWithValues: snapshot.projects.enumerated().map { ($0.element.id, $0.offset) })
+        rebuildThreadIndex()
+    }
+
+    private func rebuildThreadIndex() {
+        threadIndexByID = Dictionary(uniqueKeysWithValues: snapshot.threads.enumerated().map { ($0.element.id, $0.offset) })
     }
 
     public static func helloWorld() -> InMemoryYAAWStore {

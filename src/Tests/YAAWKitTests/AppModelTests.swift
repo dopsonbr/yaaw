@@ -2,6 +2,181 @@ import XCTest
 @testable import YAAWKit
 
 final class AppModelTests: XCTestCase {
+    func testTerminalNotificationUpdatesThreadActivityAndDispatchesSystemNotification() {
+        let fixture = AppModelFixture()
+        let dispatcher = RecordingThreadActivityNotificationDispatcher()
+        let badgeUpdater = RecordingThreadActivityBadgeUpdater()
+        let model = AppModel(
+            store: fixture.store,
+            notificationDispatcher: dispatcher,
+            badgeUpdater: badgeUpdater,
+            isApplicationActive: { false }
+        )
+
+        model.recordAgentTerminalNotification(
+            threadID: fixture.firstThreadID,
+            title: "Agent waiting",
+            body: "Agent needs input before continuing"
+        )
+
+        let activity = model.threadActivity(for: fixture.firstThreadID)
+        XCTAssertEqual(activity.status, .needsInput)
+        XCTAssertEqual(activity.preview, "Agent needs input before continuing")
+        XCTAssertTrue(activity.isUnread)
+        XCTAssertEqual(model.unreadThreadActivityCount, 1)
+        XCTAssertEqual(badgeUpdater.counts.last, 1)
+        XCTAssertEqual(dispatcher.notifications.first?.title, "First")
+        XCTAssertEqual(dispatcher.notifications.first?.body, "Agent needs input before continuing")
+    }
+
+    func testFocusedSelectedThreadSuppressesUnreadAndSystemNotification() {
+        let fixture = AppModelFixture()
+        let dispatcher = RecordingThreadActivityNotificationDispatcher()
+        let model = AppModel(
+            store: fixture.store,
+            notificationDispatcher: dispatcher,
+            isApplicationActive: { true }
+        )
+
+        model.recordAgentTerminalFocus(threadID: fixture.firstThreadID, focused: true)
+        model.recordAgentTerminalNotification(
+            threadID: fixture.firstThreadID,
+            title: "Agent waiting",
+            body: "Agent needs input"
+        )
+
+        let activity = model.threadActivity(for: fixture.firstThreadID)
+        XCTAssertEqual(activity.status, .needsInput)
+        XCTAssertFalse(activity.isUnread)
+        XCTAssertTrue(dispatcher.notifications.isEmpty)
+    }
+
+    func testGenericTerminalNotificationPreservesExistingStatus() {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store, isApplicationActive: { false })
+
+        model.recordAgentTerminalNotification(
+            threadID: fixture.firstThreadID,
+            title: "Agent update",
+            body: "Wrote a draft response"
+        )
+
+        let activity = model.threadActivity(for: fixture.firstThreadID)
+        XCTAssertEqual(activity.status, .inactive)
+        XCTAssertEqual(activity.preview, "Wrote a draft response")
+        XCTAssertTrue(activity.isUnread)
+    }
+
+    func testPersistedWorkingActivityDowngradesToInactiveOnLaunch() {
+        let fixture = AppModelFixture()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: fixture.projectID, displayName: "Project", rootDirectory: fixture.root)],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "First",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                rightPanelModesByThreadID: [fixture.firstThreadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false,
+                threadActivityByThreadID: [
+                    fixture.firstThreadID: ThreadActivityState(
+                        threadID: fixture.firstThreadID,
+                        status: .working,
+                        preview: "Running",
+                        isUnread: true,
+                        title: "Running",
+                        body: nil,
+                        source: .helper
+                    )
+                ]
+            )
+        )
+
+        let model = AppModel(store: store)
+
+        XCTAssertEqual(model.threadActivity(for: fixture.firstThreadID).status, .inactive)
+        XCTAssertFalse(model.threadActivity(for: fixture.firstThreadID).isUnread)
+        XCTAssertEqual(store.load().threadActivityByThreadID[fixture.firstThreadID]?.status, .inactive)
+    }
+
+    func testPollingHelperActivityEventsUpdatesThreadActivity() throws {
+        let fixture = AppModelFixture()
+        let activityDirectory = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(activityDirectory: activityDirectory, helperBinDirectory: activityDirectory)
+        let model = AppModel(store: fixture.store, agentCLIBindings: service)
+        let thread = try XCTUnwrap(model.selectedThread)
+        let logURL = try XCTUnwrap(service.activityLogURL(for: thread))
+        try """
+        {"thread_id":"\(thread.id.uuidString)","status":"complete","title":"Done","body":"Tests passed","source":"helper","created_at":42}
+
+        """.write(to: logURL, atomically: true, encoding: .utf8)
+
+        model.pollAgentCLIActivityLogs()
+
+        let activity = model.threadActivity(for: thread.id)
+        XCTAssertEqual(activity.status, .complete)
+        XCTAssertEqual(activity.preview, "Tests passed")
+        XCTAssertTrue(activity.isUnread)
+    }
+
+    func testPollingHelperActivityEventsSkipsUnlaunchedBackgroundThreads() throws {
+        let fixture = AppModelFixture()
+        let activityDirectory = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(
+            captureDirectory: activityDirectory,
+            activityDirectory: activityDirectory,
+            helperBinDirectory: activityDirectory
+        )
+        let model = AppModel(store: fixture.store, agentCLIBindings: service)
+        let backgroundThread = try XCTUnwrap(model.threads.first { $0.id == fixture.secondThreadID })
+        let logURL = try XCTUnwrap(service.activityLogURL(for: backgroundThread))
+        try """
+        {"thread_id":"\(backgroundThread.id.uuidString)","status":"complete","title":"Done","body":"Background finished","source":"helper","created_at":42}
+
+        """.write(to: logURL, atomically: true, encoding: .utf8)
+
+        model.pollAgentCLIActivityLogs()
+
+        XCTAssertEqual(model.threadActivity(for: backgroundThread.id).status, .inactive)
+
+        _ = model.terminalLaunchRequest(for: .project(threadID: backgroundThread.id))
+        model.pollAgentCLIActivityLogs()
+
+        let activity = model.threadActivity(for: backgroundThread.id)
+        XCTAssertEqual(activity.status, .complete)
+        XCTAssertEqual(activity.preview, "Background finished")
+    }
+
+    func testPollingHelperActivityEventsBuffersSplitJSONLines() throws {
+        let fixture = AppModelFixture()
+        let activityDirectory = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(activityDirectory: activityDirectory, helperBinDirectory: activityDirectory)
+        let model = AppModel(store: fixture.store, agentCLIBindings: service)
+        let thread = try XCTUnwrap(model.selectedThread)
+        let logURL = try XCTUnwrap(service.activityLogURL(for: thread))
+        let prefix = #"{"thread_id":"\#(thread.id.uuidString)","status":"complete","title":"Done""#
+        let suffix = #","body":"Buffered event","source":"helper","created_at":42}"# + "\n"
+        try prefix.write(to: logURL, atomically: true, encoding: .utf8)
+
+        model.pollAgentCLIActivityLogs()
+
+        XCTAssertEqual(model.threadActivity(for: thread.id).status, .inactive)
+
+        try FileHandle(forWritingTo: logURL).closeAfterAppending(suffix)
+        model.pollAgentCLIActivityLogs()
+
+        let activity = model.threadActivity(for: thread.id)
+        XCTAssertEqual(activity.status, .complete)
+        XCTAssertEqual(activity.preview, "Buffered event")
+    }
+
     func testBottomTerminalStartsCollapsed() {
         let model = AppModel()
 
@@ -359,6 +534,72 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
 
         model.toggleThreadPinned(id: secondThreadID)
+        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+    }
+
+    func testArchiveAndUnarchiveMoveThreadsBetweenOrderedCaches() {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.archiveThread(id: fixture.firstThreadID)
+
+        XCTAssertEqual(model.activeThreads(for: fixture.projectID).map(\.id), [fixture.secondThreadID])
+        XCTAssertEqual(model.archivedThreads(for: fixture.projectID).map(\.id), [fixture.firstThreadID])
+
+        model.unarchiveThread(id: fixture.firstThreadID)
+
+        XCTAssertEqual(model.activeThreads(for: fixture.projectID).map(\.id).first, fixture.firstThreadID)
+        XCTAssertTrue(model.archivedThreads(for: fixture.projectID).isEmpty)
+    }
+
+    func testAgentCLIMetadataRenameReordersCachedThreads() {
+        let projectID = UUID()
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let root = FileManager.default.temporaryDirectory
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                    threads: [
+                        AgentThread(
+                            id: firstThreadID,
+                            displayName: "Bravo",
+                            projectID: projectID,
+                            workingDirectory: root,
+                            agentCLI: .codex,
+                            createdAt: timestamp,
+                            lastOpenedAt: timestamp
+                        ),
+                        AgentThread(
+                            id: secondThreadID,
+                            displayName: "Charlie",
+                            projectID: projectID,
+                            workingDirectory: root,
+                            agentCLI: .codex,
+                            createdAt: timestamp,
+                            lastOpenedAt: timestamp
+                        )
+                    ],
+                    selectedProjectID: projectID,
+                    selectedThreadID: firstThreadID,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            )
+        )
+
+        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
+
+        model.recordAgentCLIOutput(
+            threadID: secondThreadID,
+            output: """
+            session id: codex-session-222
+            session name: Alpha
+            """
+        )
+
         XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
     }
 
@@ -916,6 +1157,42 @@ final class AppModelTests: XCTestCase {
         )
     }
 
+    func testSelectedContextProjectAndThreadCommandsUpdateCurrentSelection() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.toggleSelectedProjectPinned()
+        model.toggleSelectedThreadPinned()
+        model.archiveSelectedThread()
+
+        XCTAssertTrue(try XCTUnwrap(model.projects.first { $0.id == fixture.projectID }).isPinned)
+        XCTAssertTrue(try XCTUnwrap(model.threads.first { $0.id == fixture.firstThreadID }).isPinned)
+        XCTAssertTrue(try XCTUnwrap(model.threads.first { $0.id == fixture.firstThreadID }).isArchived)
+        XCTAssertEqual(model.selectedThreadID, fixture.secondThreadID)
+    }
+
+    func testSelectedFileDrivesExternalOpenAndNvimCommands() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.openFileInNvim(relativePath: "src/App/RootView.swift")
+        let target = try XCTUnwrap(model.selectedExternalOpenFileTarget)
+
+        XCTAssertEqual(
+            target,
+            ExternalOpenTarget(
+                url: fixture.root.appendingPathComponent("src/App/RootView.swift"),
+                kind: .file
+            )
+        )
+        XCTAssertEqual(model.selectedRightPanelMode, .nvim)
+
+        model.selectRightPanelMode(.files)
+        model.openSelectedFileInNvim()
+
+        XCTAssertEqual(model.selectedRightPanelMode, .nvim)
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("YAAWKitTests-\(UUID().uuidString)", isDirectory: true)
@@ -942,6 +1219,30 @@ private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, 
 
     func record(_ event: DiagnosticEvent) {
         events.append(event)
+    }
+}
+
+private final class RecordingThreadActivityNotificationDispatcher: ThreadActivityNotificationDispatching, @unchecked Sendable {
+    private(set) var notifications: [ThreadActivityNotification] = []
+
+    func dispatch(_ notification: ThreadActivityNotification) {
+        notifications.append(notification)
+    }
+}
+
+private final class RecordingThreadActivityBadgeUpdater: ThreadActivityBadgeUpdating, @unchecked Sendable {
+    private(set) var counts: [Int] = []
+
+    func updateUnreadThreadActivityCount(_ count: Int) {
+        counts.append(count)
+    }
+}
+
+private extension FileHandle {
+    func closeAfterAppending(_ text: String) throws {
+        defer { try? close() }
+        try seekToEnd()
+        try write(contentsOf: Data(text.utf8))
     }
 }
 

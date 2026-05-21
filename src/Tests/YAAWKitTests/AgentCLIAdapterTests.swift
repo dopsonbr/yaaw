@@ -220,10 +220,15 @@ final class AgentCLIAdapterTests: XCTestCase {
 
     func testTerminalCommandWrapsCLIWithCaptureLogWhenCaptureDirectoryIsConfigured() throws {
         let root = try temporaryDirectory()
+        let helperBin = try temporaryDirectory()
+        let helperURL = helperBin.appendingPathComponent("yaaw-notify")
+        try "stale helper".write(to: helperURL, atomically: true, encoding: .utf8)
         let service = AgentCLISessionBindingService(
             resolver: StaticExecutableResolver(paths: ["claude": "/tmp/bin/claude"]),
             environment: ["SHELL": "/bin/zsh"],
-            captureDirectory: root
+            captureDirectory: root,
+            activityDirectory: root,
+            helperBinDirectory: helperBin
         )
         let thread = AgentThread(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
@@ -239,10 +244,16 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(command[1], "-lic")
         XCTAssertTrue(command[2].contains("/usr/bin/script -q"))
         XCTAssertTrue(command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).log").path))
+        XCTAssertTrue(command[2].contains("YAAW_THREAD_ID=\(thread.id.uuidString)"))
+        XCTAssertTrue(command[2].contains("YAAW_PROJECT_ID=\(thread.projectID.uuidString)"))
+        XCTAssertTrue(command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).ndjson").path))
+        XCTAssertTrue(command[2].contains(helperBin.path))
         XCTAssertTrue(command[2].contains("/tmp/bin/claude"))
         XCTAssertTrue(command[2].contains("yaaw_exit_status=$?"))
         XCTAssertFalse(command[2].contains("; status=$?"))
         XCTAssertTrue(command[2].contains("exec /bin/zsh -l"))
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: helperURL.path))
+        XCTAssertTrue(try String(contentsOf: helperURL, encoding: .utf8).contains("]777;notify"))
     }
 
     func testCapturedOutputReadsOnlyAppendedBytes() throws {
@@ -263,7 +274,58 @@ final class AgentCLIAdapterTests: XCTestCase {
         let second = try XCTUnwrap(service.capturedOutput(for: thread, after: first.nextOffset))
 
         XCTAssertEqual(first.output, "first\n")
+        XCTAssertEqual(first.startOffset, 0)
         XCTAssertEqual(second.output, "second\n")
+        XCTAssertEqual(second.startOffset, first.nextOffset)
+    }
+
+    func testNotifyHelperWritesActivityEventAndTerminalNotification() throws {
+        let root = try temporaryDirectory()
+        let helperBin = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticExecutableResolver(paths: ["codex": "/tmp/bin/codex"]),
+            environment: ["SHELL": "/bin/zsh"],
+            captureDirectory: root,
+            activityDirectory: root,
+            helperBinDirectory: helperBin
+        )
+        let thread = AgentThread(
+            id: UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!,
+            displayName: "Codex",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex
+        )
+        _ = service.terminalCommand(for: thread)
+        let helperURL = helperBin.appendingPathComponent("yaaw-notify")
+        let eventLogURL = root.appendingPathComponent("activity.ndjson")
+        let stdout = Pipe()
+        let process = Process()
+        process.executableURL = helperURL
+        process.arguments = [
+            "--status", "needs-input",
+            "--title", "Needs \"quote\"",
+            "--body", "Approve command"
+        ]
+        process.environment = [
+            "YAAW_THREAD_ID": thread.id.uuidString,
+            "YAAW_EVENT_LOG": eventLogURL.path
+        ]
+        process.standardOutput = stdout
+
+        try process.run()
+        process.waitUntilExit()
+
+        let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let log = try String(contentsOf: eventLogURL, encoding: .utf8)
+        let event = try XCTUnwrap(ThreadActivityEvent.helperEvents(from: log).first)
+
+        XCTAssertEqual(process.terminationStatus, 0)
+        XCTAssertTrue(output.contains("\u{001B}]777;notify;Needs \"quote\";Approve command\u{0007}"))
+        XCTAssertEqual(event.threadID, thread.id)
+        XCTAssertEqual(event.status, .needsInput)
+        XCTAssertEqual(event.title, "Needs \"quote\"")
+        XCTAssertEqual(event.body, "Approve command")
     }
 
     func testCapturedMetadataPersistsThroughSQLiteReload() throws {

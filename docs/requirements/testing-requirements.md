@@ -157,8 +157,11 @@ Recommended tests:
 | Thread naming | The visible thread name matches the bound CLI session name, title, or id. |
 | Thread resume | Closing and reopening a thread resumes the stored CLI session identity. |
 | Thread switching | Switching threads changes the active agent CLI session terminal and right-panel context. |
+| Thread activity | Agent helper and OSC notifications update the selected thread status, preview, unread state, focus-based read clearing, and persisted latest activity after relaunch. |
 | Right-panel modes | Files, `nvim`, and Git modes can be selected by icon/tab. |
 | Right-panel shortcuts | `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes. |
+| Settings key bindings | Settings exposes a searchable key binding list, edits write through to YAML, unbound actions remain unbound, and duplicate active bindings in a scope are reported. |
+| Native shortcut defaults | `Cmd+,`, `Cmd+N`, `Cmd+Shift+N`, `Cmd+1`, `Cmd+2`, `Cmd+3`, and `Cmd+R` route to their documented app or Settings-scope actions. |
 | Global navigation | `Cmd+[` and `Cmd+]` move through app navigation history. |
 | Bottom terminal | `Cmd+J` expands and collapses the selected-thread bottom terminal. |
 | File search | Hidden files are visible and fuzzy search returns expected matches. |

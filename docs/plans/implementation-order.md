@@ -20,6 +20,7 @@ The initial commit established a SwiftPM scaffold with placeholder models for pr
 10. [Behavior E2E Suite](10-behavior-e2e-suite.md)
 11. [Polish And Hardening](11-polish-hardening.md)
 12. [Icon System](12-icon-system.md)
+13. [Agent Notifications And Thread Status](13-agent-notifications-status.md)
 
 ## Sequencing Rule
 
@@ -43,6 +44,7 @@ Plan 02 establishes the SQLite store and migrates only what Plan 01 produces (pr
 - Plan 04 adds panel sizes and collapsed states.
 - Plan 07 adds CLI session identity and canonical session name per thread.
 - Plan 08 adds file-index metadata.
+- Plan 13 adds latest thread activity status and notification preview per thread.
 
 This avoids persisting columns that have no producer yet.
 

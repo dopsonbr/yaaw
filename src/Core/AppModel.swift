@@ -20,9 +20,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var bottomTerminalExpandedThreadIDs: Set<UUID>
     @Published public private(set) var layoutState: LayoutState
     @Published public private(set) var fileBrowserState: FileBrowserState
+    @Published public private(set) var selectedFileRelativePath: String?
     @Published public private(set) var configuration: YAAWConfiguration
     @Published public private(set) var expandedProjectIDs: Set<UUID>
     @Published public private(set) var expandedArchivedProjectIDs: Set<UUID>
+    @Published public private(set) var threadActivityByThreadID: [UUID: ThreadActivityState]
 
     public let projectTerminal: TerminalSurfaceDescriptor
     public private(set) var navigationHistory: NavigationHistory
@@ -34,6 +36,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private let fileIndexDirectoryWatcher: FileIndexDirectoryWatcher
     private let externalToolResolver: any AgentCLIExecutableResolving
     private let diagnosticRecorder: DiagnosticEventRecording
+    private let notificationDispatcher: any ThreadActivityNotificationDispatching
+    private let badgeUpdater: any ThreadActivityBadgeUpdating
+    private let isApplicationActive: () -> Bool
     private let environment: [String: String]
     private let homeDirectory: URL
     private var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
@@ -43,7 +48,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var nvimRelaunchTokensByTabKey: [String: UUID] = [:]
     private var activeProjectLaunchCommandsByThreadID: [UUID: [String]] = [:]
     private var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
+    private var activityReadOffsetsByThreadID: [UUID: UInt64] = [:]
+    private var activityPartialLinesByThreadID: [UUID: String] = [:]
     private var pendingTerminalTitlesByThreadID: [UUID: String] = [:]
+    private var focusedProjectTerminalThreadID: UUID?
     private var threadIndexByID: [UUID: Int] = [:]
     private var cachedActiveThreadsByProject: [UUID: [AgentThread]] = [:]
     private var cachedArchivedThreadsByProject: [UUID: [AgentThread]] = [:]
@@ -56,6 +64,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         externalToolResolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
         configuration: YAAWConfiguration = YAAWConfiguration(),
         diagnosticRecorder: DiagnosticEventRecording = LoggerDiagnosticEventRecorder.shared,
+        notificationDispatcher: any ThreadActivityNotificationDispatching = NoopThreadActivityNotificationDispatcher(),
+        badgeUpdater: any ThreadActivityBadgeUpdating = NoopThreadActivityBadgeUpdater(),
+        isApplicationActive: @escaping () -> Bool = { false },
         environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
@@ -67,6 +78,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.fileIndexDirectoryWatcher = FileIndexDirectoryWatcher()
         self.externalToolResolver = externalToolResolver
         self.diagnosticRecorder = diagnosticRecorder
+        self.notificationDispatcher = notificationDispatcher
+        self.badgeUpdater = badgeUpdater
+        self.isApplicationActive = isApplicationActive
         self.configuration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
         self.environment = environment
         self.homeDirectory = homeDirectory
@@ -74,6 +88,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.projects = Self.sortedProjects(snapshot.projects)
         self.threads = snapshot.threads
         self.fileIndexMetadataByThreadID = snapshot.fileIndexMetadataByThreadID
+        self.threadActivityByThreadID = snapshot.threadActivityByThreadID.mapValues {
+            $0.downgradedForLaunch()
+        }
         for (index, thread) in snapshot.threads.enumerated() {
             threadIndexByID[thread.id] = index
             if thread.isArchived {
@@ -119,6 +136,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             },
             metadata: selectedThreadID.flatMap { snapshot.fileIndexMetadataByThreadID[$0] }
         )
+        self.selectedFileRelativePath = nil
         self.navigationHistory = NavigationHistory(
             initial: AppSelection(projectID: selectedProjectID, threadID: selectedThreadID)
         )
@@ -127,6 +145,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             title: "Project Terminal",
             placeholderText: "Terminal placeholder for the selected thread"
         )
+        persistLaunchDowngradedThreadActivity(snapshot.threadActivityByThreadID)
+        updateDockBadge()
         recordDiagnostic(
             category: "Lifecycle",
             name: "app_model_loaded",
@@ -169,6 +189,87 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private func mutateThreads(_ block: (inout [AgentThread]) -> Void) {
         block(&threads)
         rebuildThreadIndexes()
+    }
+
+    private func mutateThread(at index: Int, _ block: (inout AgentThread) -> Void) {
+        let previousThread = threads[index]
+        block(&threads[index])
+        let updatedThread = threads[index]
+        if previousThread.id != updatedThread.id {
+            threadIndexByID.removeValue(forKey: previousThread.id)
+        }
+        threadIndexByID[updatedThread.id] = index
+        updateCachedThread(previousThread: previousThread, updatedThread: updatedThread)
+    }
+
+    private func updateCachedThread(previousThread: AgentThread, updatedThread: AgentThread) {
+        if previousThread.projectID == updatedThread.projectID,
+           previousThread.isArchived == updatedThread.isArchived {
+            replaceCachedThread(updatedThread, matching: previousThread)
+        } else {
+            removeCachedThread(previousThread)
+            insertCachedThread(updatedThread)
+        }
+    }
+
+    private func replaceCachedThread(_ thread: AgentThread, matching previousThread: AgentThread) {
+        if thread.isArchived {
+            replaceCachedThread(thread, matching: previousThread, in: &cachedArchivedThreadsByProject)
+        } else {
+            replaceCachedThread(thread, matching: previousThread, in: &cachedActiveThreadsByProject)
+        }
+    }
+
+    private func replaceCachedThread(
+        _ thread: AgentThread,
+        matching previousThread: AgentThread,
+        in cache: inout [UUID: [AgentThread]]
+    ) {
+        let projectID = thread.projectID
+        guard let currentIndex = cache[projectID]?.firstIndex(where: { $0.id == previousThread.id }) else {
+            insertCachedThread(thread, into: &cache)
+            return
+        }
+
+        cache[projectID]?.remove(at: currentIndex)
+        let insertionIndex = cache[projectID]?.firstIndex { Self.threadPrecedes(thread, $0) }
+            ?? cache[projectID]?.endIndex
+            ?? 0
+        cache[projectID]?.insert(thread, at: insertionIndex)
+    }
+
+    private func removeCachedThread(_ thread: AgentThread) {
+        if thread.isArchived {
+            removeCachedThread(thread, from: &cachedArchivedThreadsByProject)
+        } else {
+            removeCachedThread(thread, from: &cachedActiveThreadsByProject)
+        }
+    }
+
+    private func removeCachedThread(_ thread: AgentThread, from cache: inout [UUID: [AgentThread]]) {
+        guard var projectThreads = cache[thread.projectID] else { return }
+        projectThreads.removeAll { $0.id == thread.id }
+        if projectThreads.isEmpty {
+            cache.removeValue(forKey: thread.projectID)
+        } else {
+            cache[thread.projectID] = projectThreads
+        }
+    }
+
+    private func insertCachedThread(_ thread: AgentThread) {
+        if thread.isArchived {
+            insertCachedThread(thread, into: &cachedArchivedThreadsByProject)
+        } else {
+            insertCachedThread(thread, into: &cachedActiveThreadsByProject)
+        }
+    }
+
+    private func insertCachedThread(_ thread: AgentThread, into cache: inout [UUID: [AgentThread]]) {
+        var projectThreads = cache[thread.projectID] ?? []
+        projectThreads.removeAll { $0.id == thread.id }
+        let insertionIndex = projectThreads.firstIndex { Self.threadPrecedes(thread, $0) } ?? projectThreads.endIndex
+        projectThreads.insert(thread, at: insertionIndex)
+        cache[thread.projectID] = projectThreads
     }
 
     private func thread(withID threadID: UUID) -> AgentThread? {
@@ -221,9 +322,15 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         configuration.shortcut(for: action)
     }
 
+    public func isKeyboardShortcutEnabled(for action: KeyboardShortcutAction) -> Bool {
+        let definition = keyboardShortcutDefinition(for: action)
+        return definition.isBound && !configuration.keyboardShortcuts.duplicateActions().contains(action)
+    }
+
     public func reloadConfiguration(_ configuration: YAAWConfiguration) {
         self.configuration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
         activeProjectLaunchCommandsByThreadID.removeAll()
+        activityPartialLinesByThreadID.removeAll()
         recordDiagnostic(
             category: "Configuration",
             name: "settings_yaml_reloaded",
@@ -272,6 +379,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         )
     }
 
+    public var selectedExternalOpenFileTarget: ExternalOpenTarget? {
+        guard let selectedFileRelativePath else { return nil }
+        return externalOpenFileTarget(relativePath: selectedFileRelativePath)
+    }
+
     public var selectedRightPanelMode: RightPanelMode {
         guard let selectedThreadID else { return .files }
         return rightPanelStatesByThreadID[selectedThreadID]?.selectedMode
@@ -312,6 +424,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func archivedThreads(for projectID: UUID) -> [AgentThread] {
         cachedArchivedThreadsByProject[projectID] ?? []
+    }
+
+    public var unreadThreadActivityCount: Int {
+        threadActivityByThreadID.values.filter(\.isUnread).count
+    }
+
+    public func threadActivity(for threadID: UUID) -> ThreadActivityState {
+        threadActivityByThreadID[threadID] ?? ThreadActivityState(threadID: threadID)
     }
 
     public var hasArchivedThreadsForSelectedProject: Bool {
@@ -581,6 +701,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         if case .project(let threadID) = role {
             activeProjectLaunchCommandsByThreadID.removeValue(forKey: threadID)
             captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+            activityReadOffsetsByThreadID.removeValue(forKey: threadID)
+            activityPartialLinesByThreadID.removeValue(forKey: threadID)
+            recordAgentTerminalClosed(threadID: threadID)
         }
     }
 
@@ -624,6 +747,66 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         applyAgentCLIMetadata(metadata, toThreadAt: index)
     }
 
+    public func recordAgentTerminalFocus(threadID: UUID, focused: Bool) {
+        if focused {
+            focusedProjectTerminalThreadID = threadID
+            markThreadActivityRead(threadID: threadID)
+        } else if focusedProjectTerminalThreadID == threadID {
+            focusedProjectTerminalThreadID = nil
+        }
+    }
+
+    public func recordAgentTerminalNotification(threadID: UUID, title: String, body: String) {
+        let status = ThreadActivityText.inferredStatus(title: title, body: body)
+        applyThreadActivity(
+            ThreadActivityEvent(
+                threadID: threadID,
+                status: status,
+                title: title,
+                body: body,
+                source: .terminalNotification
+            ),
+            isUnread: true,
+            shouldNotify: true
+        )
+    }
+
+    public func recordAgentTerminalClosed(threadID: UUID) {
+        activeProjectLaunchCommandsByThreadID.removeValue(forKey: threadID)
+        captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+        activityReadOffsetsByThreadID.removeValue(forKey: threadID)
+        activityPartialLinesByThreadID.removeValue(forKey: threadID)
+        applyThreadActivity(
+            ThreadActivityEvent(
+                threadID: threadID,
+                status: .inactive,
+                title: "Terminal closed",
+                body: nil,
+                source: .terminalLifecycle
+            ),
+            isUnread: false,
+            shouldNotify: false
+        )
+        if focusedProjectTerminalThreadID == threadID {
+            focusedProjectTerminalThreadID = nil
+        }
+    }
+
+    public func recordAgentCommandFinished(threadID: UUID, exitCode: Int?) {
+        let body = exitCode.map { "Command exited with status \($0)" } ?? "Command finished"
+        applyThreadActivity(
+            ThreadActivityEvent(
+                threadID: threadID,
+                status: .complete,
+                title: "Command finished",
+                body: body,
+                source: .terminalLifecycle
+            ),
+            isUnread: false,
+            shouldNotify: false
+        )
+    }
+
     public func pollSelectedAgentCLICaptureLog() {
         guard let thread = selectedThread,
               let captured = agentCLIBindings.capturedOutput(
@@ -636,9 +819,70 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         recordAgentCLIOutput(threadID: thread.id, output: captured.output)
     }
 
+    public func pollAgentCLIActivityLogs() {
+        for threadID in threadIDsForAgentCLIActivityPolling() {
+            guard let thread = activeThread(id: threadID) else { continue }
+            let previousOffset = activityReadOffsetsByThreadID[thread.id] ?? 0
+            guard let captured = agentCLIBindings.capturedActivityEvents(
+                for: thread,
+                after: previousOffset
+            ) else {
+                continue
+            }
+            if captured.startOffset != previousOffset {
+                activityPartialLinesByThreadID.removeValue(forKey: thread.id)
+            }
+            activityReadOffsetsByThreadID[thread.id] = captured.nextOffset
+            let completeOutput = completeActivityLogOutput(threadID: thread.id, output: captured.output)
+            for event in ThreadActivityEvent.helperEvents(from: completeOutput) {
+                applyThreadActivity(
+                    event,
+                    isUnread: event.status != .working && event.status != .inactive,
+                    shouldNotify: true
+                )
+            }
+        }
+    }
+
+    private func threadIDsForAgentCLIActivityPolling() -> [UUID] {
+        var seen = Set<UUID>()
+        var threadIDs: [UUID] = []
+
+        func append(_ threadID: UUID?) {
+            guard let threadID, seen.insert(threadID).inserted else { return }
+            threadIDs.append(threadID)
+        }
+
+        append(selectedThreadID)
+        append(focusedProjectTerminalThreadID)
+        for threadID in activeProjectLaunchCommandsByThreadID.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+            append(threadID)
+        }
+        return threadIDs
+    }
+
+    private func completeActivityLogOutput(threadID: UUID, output: String) -> String {
+        let combinedOutput = (activityPartialLinesByThreadID[threadID] ?? "") + output
+        guard let lastNewlineIndex = combinedOutput.lastIndex(where: \.isNewline) else {
+            activityPartialLinesByThreadID[threadID] = combinedOutput
+            return ""
+        }
+
+        let completeOutput = String(combinedOutput[...lastNewlineIndex])
+        let tailStart = combinedOutput.index(after: lastNewlineIndex)
+        let tail = String(combinedOutput[tailStart...])
+        if tail.isEmpty {
+            activityPartialLinesByThreadID.removeValue(forKey: threadID)
+        } else {
+            activityPartialLinesByThreadID[threadID] = tail
+        }
+        return completeOutput
+    }
+
     public func refreshSelectedFileBrowser() {
         guard let thread = selectedThread else {
             fileBrowserState = FileBrowserState()
+            selectedFileRelativePath = nil
             return
         }
         refreshFileBrowser(for: thread)
@@ -650,12 +894,48 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             fileBrowserState.entries,
             query: query
         )
+        updateSelectedFileAfterVisibleEntriesChanged()
+    }
+
+    public func selectFile(relativePath: String?) {
+        guard let relativePath else {
+            selectedFileRelativePath = nil
+            return
+        }
+        let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
+        guard fileBrowserState.entries.contains(where: { $0.relativePath == normalizedPath }) else { return }
+        selectedFileRelativePath = normalizedPath
+    }
+
+    public func selectAdjacentFile(direction: ProjectMoveDirection) {
+        let entries = fileBrowserState.visibleEntries.filter { !$0.isDirectory }
+        guard !entries.isEmpty else {
+            selectedFileRelativePath = nil
+            return
+        }
+        let currentIndex = selectedFileRelativePath.flatMap { selectedPath in
+            entries.firstIndex { $0.relativePath == selectedPath }
+        } ?? -1
+        let nextIndex: Int
+        switch direction {
+        case .up:
+            nextIndex = max(0, currentIndex - 1)
+        case .down:
+            nextIndex = min(entries.count - 1, currentIndex + 1)
+        }
+        selectedFileRelativePath = entries[nextIndex].relativePath
+    }
+
+    public func openSelectedFileInNvim() {
+        guard let selectedFileRelativePath else { return }
+        openFileInNvim(relativePath: selectedFileRelativePath)
     }
 
     public func openFileInNvim(relativePath: String) {
         guard let selectedThreadID else { return }
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         guard !normalizedPath.isEmpty else { return }
+        selectedFileRelativePath = normalizedPath
         var state = selectedRightPanelState
         let existingTabID = RightPanelTab.nvimTabID(relativePath: normalizedPath)
         let alreadyOpen = state.tabs.contains { $0.id == existingTabID }
@@ -751,6 +1031,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         expandedProjectIDs.insert(project.id)
         rightPanelModesByThreadID[thread.id] = .files
         rightPanelStatesByThreadID[thread.id] = RightPanelState.defaultState()
+        applyThreadActivity(
+            ThreadActivityEvent(
+                threadID: thread.id,
+                status: .working,
+                title: "Starting \(agentCLI.displayName)",
+                body: nil,
+                source: .terminalLifecycle,
+                createdAt: now
+            ),
+            isUnread: false,
+            shouldNotify: false
+        )
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         recordDiagnostic(
@@ -786,10 +1078,19 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         persistProject(projects.first { $0.id == projectID }!)
     }
 
+    public func toggleSelectedProjectPinned() {
+        toggleProjectPinned(id: selectedProjectID)
+    }
+
     public func toggleThreadPinned(id threadID: UUID) {
         guard let index = threadIndexByID[threadID] else { return }
-        mutateThreads { $0[index].isPinned.toggle() }
+        mutateThread(at: index) { $0.isPinned.toggle() }
         persistThread(threads[index])
+    }
+
+    public func toggleSelectedThreadPinned() {
+        guard let selectedThreadID else { return }
+        toggleThreadPinned(id: selectedThreadID)
     }
 
     public func moveProject(id projectID: UUID, direction: ProjectMoveDirection) {
@@ -810,6 +1111,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         normalizeProjectSortOrders(preservingCurrentOrder: true)
     }
 
+    public func moveSelectedProject(direction: ProjectMoveDirection) {
+        moveProject(id: selectedProjectID, direction: direction)
+    }
+
     public func setProjectExpanded(_ projectID: UUID, isExpanded: Bool) {
         guard projects.contains(where: { $0.id == projectID }) else { return }
         if isExpanded {
@@ -820,6 +1125,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         persistProjectExpanded(projectID: projectID)
     }
 
+    public func toggleSelectedProjectExpanded() {
+        setProjectExpanded(selectedProjectID, isExpanded: !isProjectExpanded(selectedProjectID))
+    }
+
     public func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool) {
         guard projects.contains(where: { $0.id == projectID }) else { return }
         if isExpanded {
@@ -828,6 +1137,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             expandedArchivedProjectIDs.remove(projectID)
         }
         persistProjectArchiveExpanded(projectID: projectID)
+    }
+
+    public func toggleSelectedProjectArchiveExpanded() {
+        setProjectArchiveExpanded(selectedProjectID, isExpanded: !isProjectArchiveExpanded(selectedProjectID))
     }
 
     public func selectProject(id projectID: UUID) {
@@ -875,7 +1188,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public func archiveThread(id threadID: UUID) {
         guard let index = threadIndexByID[threadID] else { return }
         let projectID = threads[index].projectID
-        mutateThreads { $0[index].isArchived = true }
+        mutateThread(at: index) { $0.isArchived = true }
         if selectedThreadID == threadID {
             selectedThreadID = firstActiveThreadID(forProject: projectID)
             resetFileBrowserForSelectedThread()
@@ -885,13 +1198,23 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         persistSelection()
     }
 
+    public func archiveSelectedThread() {
+        guard let selectedThreadID else { return }
+        archiveThread(id: selectedThreadID)
+    }
+
     public func unarchiveThread(id threadID: UUID) {
         guard let index = threadIndexByID[threadID] else { return }
-        mutateThreads {
-            $0[index].isArchived = false
-            $0[index].lastOpenedAt = Date()
+        mutateThread(at: index) {
+            $0.isArchived = false
+            $0.lastOpenedAt = Date()
         }
         selectThread(id: threadID)
+    }
+
+    public func unarchiveSelectedThread() {
+        guard let selectedThreadID else { return }
+        unarchiveThread(id: selectedThreadID)
     }
 
     public func navigateBack() {
@@ -925,10 +1248,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     private func applyAgentCLIMetadata(_ metadata: AgentCLISessionMetadata, toThreadAt index: Int) {
-        mutateThreads { threads in
-            threads[index].sessionIdentity = metadata.identity
-            threads[index].canonicalSessionName = metadata.canonicalName
-            threads[index].displayName = metadata.canonicalName
+        mutateThread(at: index) {
+            $0.sessionIdentity = metadata.identity
+            $0.canonicalSessionName = metadata.canonicalName
+            $0.displayName = metadata.canonicalName
         }
         pendingTerminalTitlesByThreadID.removeValue(forKey: threads[index].id)
         persistThread(threads[index])
@@ -939,6 +1262,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         latestFileBrowserRequestIDByThreadID[thread.id] = requestID
         guard isExistingDirectory(thread.workingDirectory) else {
             fileIndexDirectoryWatcher.stop()
+            selectedFileRelativePath = nil
             fileBrowserState = FileBrowserState(
                 rootPath: thread.workingDirectory.path,
                 searchQuery: fileBrowserState.searchQuery,
@@ -978,6 +1302,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             metadata: metadata,
             errorMessage: nil
         )
+        updateSelectedFileAfterVisibleEntriesChanged()
         fileIndexCacheCoordinator.refreshIndex(
             threadID: thread.id,
             root: thread.workingDirectory,
@@ -1010,6 +1335,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                     metadata: result.metadata,
                     errorMessage: nil
                 )
+                updateSelectedFileAfterVisibleEntriesChanged()
             }
             persistFileIndexMetadata(result.metadata)
         case .failure(let error):
@@ -1032,6 +1358,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard let selectedThread else {
             fileIndexDirectoryWatcher.stop()
             fileBrowserState = FileBrowserState()
+            selectedFileRelativePath = nil
             return
         }
         let cachedResult: FileIndexResult?
@@ -1051,6 +1378,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             visibleEntries: cachedResult?.entries ?? [],
             metadata: cachedResult?.metadata ?? fileIndexMetadataByThreadID[selectedThread.id]
         )
+        updateSelectedFileAfterVisibleEntriesChanged()
+    }
+
+    private func updateSelectedFileAfterVisibleEntriesChanged() {
+        let fileEntries = fileBrowserState.visibleEntries.filter { !$0.isDirectory }
+        guard !fileEntries.isEmpty else {
+            selectedFileRelativePath = nil
+            return
+        }
+        if let selectedFileRelativePath,
+           fileEntries.contains(where: { $0.relativePath == selectedFileRelativePath }) {
+            return
+        }
+        selectedFileRelativePath = fileEntries.first?.relativePath
     }
 
     private func directoryState(for url: URL) -> ProjectDirectoryState {
@@ -1135,7 +1476,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func markThreadOpened(_ threadID: UUID, now: Date = Date()) {
         guard let index = threadIndexByID[threadID] else { return }
-        mutateThreads { $0[index].lastOpenedAt = now }
+        mutateThread(at: index) { $0.lastOpenedAt = now }
     }
 
     private func persistSelection() {
@@ -1187,6 +1528,88 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func persistFileIndexMetadata(_ metadata: FileIndexMetadata) {
         store.upsertFileIndexMetadata(metadata)
+    }
+
+    private func persistThreadActivity(_ activity: ThreadActivityState) {
+        store.upsertThreadActivity(activity)
+    }
+
+    private func persistLaunchDowngradedThreadActivity(_ loaded: [UUID: ThreadActivityState]) {
+        for (threadID, loadedActivity) in loaded {
+            guard let downgraded = threadActivityByThreadID[threadID],
+                  downgraded != loadedActivity else { continue }
+            persistThreadActivity(downgraded)
+        }
+    }
+
+    private func applyThreadActivity(
+        _ event: ThreadActivityEvent,
+        isUnread: Bool,
+        shouldNotify: Bool
+    ) {
+        guard threadIndexByID[event.threadID] != nil else { return }
+        let currentActivity = threadActivity(for: event.threadID)
+        let status = event.status
+            ?? ThreadActivityText.inferredStatus(title: event.title, body: event.body)
+            ?? currentActivity.status
+        let preview = ThreadActivityText.preview(title: event.title, body: event.body)
+        let suppressNotification = shouldSuppressSystemNotification(for: event.threadID)
+        let activity = ThreadActivityState(
+            threadID: event.threadID,
+            status: status,
+            preview: preview,
+            isUnread: isUnread && !suppressNotification,
+            title: event.title,
+            body: event.body,
+            source: event.source,
+            updatedAt: event.createdAt
+        )
+        threadActivityByThreadID[event.threadID] = activity
+        persistThreadActivity(activity)
+        updateDockBadge()
+        recordDiagnostic(
+            category: "Threads",
+            name: "thread_activity_updated",
+            metadata: [
+                "thread_id": event.threadID.uuidString,
+                "status": status.rawValue,
+                "source": event.source.rawValue
+            ]
+        )
+        if shouldNotify, activity.isUnread, !suppressNotification {
+            dispatchSystemNotification(for: activity)
+        }
+    }
+
+    private func markThreadActivityRead(threadID: UUID) {
+        guard var activity = threadActivityByThreadID[threadID], activity.isUnread else { return }
+        activity.isUnread = false
+        threadActivityByThreadID[threadID] = activity
+        persistThreadActivity(activity)
+        updateDockBadge()
+    }
+
+    private func shouldSuppressSystemNotification(for threadID: UUID) -> Bool {
+        isApplicationActive()
+            && selectedThreadID == threadID
+            && focusedProjectTerminalThreadID == threadID
+    }
+
+    private func dispatchSystemNotification(for activity: ThreadActivityState) {
+        guard let thread = thread(withID: activity.threadID),
+              let project = projects.first(where: { $0.id == thread.projectID }) else { return }
+        notificationDispatcher.dispatch(
+            ThreadActivityNotification(
+                threadID: activity.threadID,
+                title: thread.displayName,
+                subtitle: "\(project.displayName) - \(activity.status.cliValue)",
+                body: activity.preview ?? activity.body ?? activity.title ?? activity.status.cliValue
+            )
+        )
+    }
+
+    private func updateDockBadge() {
+        badgeUpdater.updateUnreadThreadActivityCount(unreadThreadActivityCount)
     }
 
     private func recordTerminalLaunchFailure(role: TerminalRole, path: String, reason: String) {

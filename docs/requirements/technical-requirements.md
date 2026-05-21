@@ -44,6 +44,7 @@ The SQLite database MUST store:
 - Thread agent CLI selection.
 - Thread agent CLI session identity.
 - Thread canonical CLI session name.
+- Thread latest activity status, unread flag, and sanitized notification preview.
 - Archive state.
 - Last selected project.
 - Last selected thread.
@@ -114,6 +115,8 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - Archived threads MUST move out of the primary active thread list.
 - Archived threads MUST retain the agent CLI selection and CLI session identity required for later resume.
 - Thread lists MUST sort pinned threads before unpinned threads, then sort by most recently opened.
+- Each active thread SHOULD show whether the bound CLI is working, needs input, complete, or inactive.
+- Thread activity previews MUST be sanitized and app-owned; YAAW MUST NOT store full terminal scrollback as activity history.
 
 ## Terminal Requirements
 
@@ -131,6 +134,8 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - Terminal sessions MUST preserve runtime state while the app is open.
 - Live PTY processes MUST NOT be restored after app restart for the first version.
 - SQLite MUST persist terminal metadata, agent CLI resume metadata, and layout state, not live PTY process state.
+- Agent CLI terminals SHOULD expose a YAAW-owned `yaaw-notify` helper on `PATH` with `YAAW_THREAD_ID`, `YAAW_PROJECT_ID`, and `YAAW_EVENT_LOG` environment variables.
+- The app SHOULD treat OSC terminal notifications as thread activity events when the terminal surface reports them.
 
 ## App Layout
 
@@ -239,6 +244,7 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - The app MUST NOT require users to manually run the selected CLI or resume commands for normal thread creation or reopening.
 - The app MUST NOT orchestrate multiple agent CLI sessions inside one thread for the first version.
 - The app MUST NOT mediate prompts, tool calls, model behavior, or agent decisions beyond launching and resuming the user's selected local CLI.
+- The app MAY surface CLI-agent activity notifications, but MUST keep that behavior status-oriented rather than prompt orchestration.
 
 ## External Tools
 
@@ -263,6 +269,7 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - Closing and reopening a thread resumes the stored CLI session identity.
 - A thread can point at a project root or a separate worktree.
 - Each running thread has one agent CLI session terminal.
+- Each active thread shows a latest activity indicator and notification preview when available.
 - The selected-thread bottom terminal is collapsed by default and toggles with `Cmd+J`.
 - The sidebar, right tool panel, and bottom terminal are resizeable.
 - The right tool panel is scoped to the active thread.
@@ -275,4 +282,5 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - Opening Git mode launches `lazygit` or `git diff` inside the right panel.
 - `lazygit` is resolved from `PATH`, with `git diff` fallback when unavailable.
 - Project, thread, agent CLI session, index, archive, and layout metadata are stored in SQLite.
+- Latest thread activity state is stored in SQLite without persisting full terminal scrollback.
 - User-editable configuration is stored in YAML.

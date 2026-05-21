@@ -4,6 +4,7 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var model: AppModel
+    @Binding var isSettingsOpen: Bool
     let externalOpenWorkspace: ExternalOpenWorkspace
     let settingsPath: URL
     let onLoadSettingsText: () throws -> String
@@ -11,7 +12,6 @@ struct RootView: View {
     let onSaveSettingsText: (String) throws -> YAAWConfiguration
     let onOpenSettingsFile: () -> Void
     let onReloadSettings: () -> Void
-    @State private var route: RootRoute = .workspace
 
     var body: some View {
         GeometryReader { geometry in
@@ -31,7 +31,7 @@ struct RootView: View {
                         externalOpenIcon: externalOpenWorkspace.icon(for:),
                         onOpenDefaultExternal: openSelectedDirectoryWithDefaultExternalTool,
                         onOpenExternalTool: openSelectedDirectoryExternally,
-                        onOpenSettings: { route = .settings }
+                        onOpenSettings: { isSettingsOpen = true }
                     )
                 }
                 .frame(height: 44)
@@ -40,10 +40,7 @@ struct RootView: View {
                 Divider()
                     .overlay(dracula(.currentLine))
 
-                switch route {
-                case .workspace:
-                    workspaceContent(windowWidth: geometry.size.width)
-                case .settings:
+                if isSettingsOpen {
                     SettingsEditorView(
                         configuration: model.configuration,
                         fonts: model.configuration.fonts,
@@ -53,8 +50,10 @@ struct RootView: View {
                         onSaveText: onSaveSettingsText,
                         onOpenExternal: onOpenSettingsFile,
                         onReloadConfiguration: onReloadSettings,
-                        onBack: { route = .workspace }
+                        onBack: { isSettingsOpen = false }
                     )
+                } else {
+                    workspaceContent(windowWidth: geometry.size.width)
                 }
             }
         }
@@ -188,11 +187,6 @@ struct RootView: View {
                 .frame(width: model.layoutState.rightPanelWidth)
         }
     }
-}
-
-private enum RootRoute {
-    case workspace
-    case settings
 }
 
 private let rightPanelAdaptiveMinimumWidth = 1_680.0
@@ -379,13 +373,16 @@ private struct SettingsEditorView: View {
     @State private var pendingDiscardAction: SettingsDiscardAction?
     @State private var isShowingDiscardConfirmation = false
     @State private var selectedThemeID = ThemeCatalog.defaultID
+    @State private var selectedSection: SettingsSection = .yaml
+    @State private var shortcutSearchText = ""
+    @State private var currentConfiguration = YAAWConfiguration()
 
     private var hasUnsavedChanges: Bool {
         editorText != lastSavedText
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Settings")
@@ -412,36 +409,23 @@ private struct SettingsEditorView: View {
                 .accessibilityIdentifier("settings-back-button")
             }
 
-            appearanceSection
-
-            VStack(alignment: .leading, spacing: 10) {
-                SettingsSummaryRow(label: "Theme", value: configuration.resolvedTheme.displayName)
-                SettingsSummaryRow(label: "Default agent", value: configuration.defaultAgentCLI.displayName)
-                SettingsSummaryRow(label: "Editors", value: configuration.tools.editors.preferred.joined(separator: ", "))
-                SettingsSummaryRow(label: "External open", value: configuration.tools.externalOpen.default)
-                SettingsSummaryRow(label: "Git", value: configuration.tools.git.preferred)
-                SettingsSummaryRow(label: "Diff fallback", value: configuration.tools.diff.fallback.joined(separator: " "))
-                SettingsSummaryRow(label: "File icons", value: configuration.fileIconPack.rawValue)
-                SettingsSummaryRow(label: "Interface font", value: "\(configuration.fonts.interfaceFamily), \(configuration.fonts.interfaceSize.formattedFontSize) pt")
-                SettingsSummaryRow(label: "Editor font", value: "\(configuration.fonts.editorFamily), \(configuration.fonts.editorSize.formattedFontSize) pt")
-                SettingsSummaryRow(label: "Terminal font", value: terminalFontSummary)
-                SettingsSummaryRow(label: "Ignore rules", value: "\(configuration.ignoreRules.count) rules")
+            Picker("Settings Section", selection: $selectedSection) {
+                ForEach(SettingsSection.allCases) { section in
+                    Text(section.title).tag(section)
+                }
             }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("settings-section-picker")
 
-            editorHeader
-
-            TextEditor(text: $editorText)
-                .font(fonts.editorFont())
-                .foregroundStyle(dracula(.foreground))
-                .scrollContentBackground(.hidden)
-                .background(dracula(.currentLine).opacity(0.45))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(validationError == nil ? dracula(.currentLine) : dracula(.red), lineWidth: 1)
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel("Settings YAML editor")
-                .accessibilityIdentifier("settings-yaml-editor")
+            switch selectedSection {
+            case .appearance:
+                appearanceSection
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            case .keyBindings:
+                keyBindingsSection
+            case .yaml:
+                yamlSection
+            }
 
             if let validationError {
                 Label(validationError, systemImage: IconRole.warning.icon.systemSymbolName)
@@ -461,6 +445,7 @@ private struct SettingsEditorView: View {
                 } label: {
                     Label("Save", systemImage: "square.and.arrow.down")
                 }
+                .configuredKeyboardShortcut(currentConfiguration.shortcut(for: .saveSettings))
                 .disabled(!hasUnsavedChanges)
                 .accessibilityIdentifier("settings-save-button")
 
@@ -469,6 +454,7 @@ private struct SettingsEditorView: View {
                 } label: {
                     Label("Reload", systemImage: IconRole.reload.icon.systemSymbolName)
                 }
+                .configuredKeyboardShortcut(currentConfiguration.shortcut(for: .reloadSettings))
                 .accessibilityIdentifier("settings-reload-button")
 
                 Button {
@@ -476,6 +462,7 @@ private struct SettingsEditorView: View {
                 } label: {
                     Label("Revert", systemImage: "arrow.uturn.backward")
                 }
+                .configuredKeyboardShortcut(currentConfiguration.shortcut(for: .revertSettings))
                 .disabled(!hasUnsavedChanges)
                 .accessibilityIdentifier("settings-revert-button")
 
@@ -484,11 +471,12 @@ private struct SettingsEditorView: View {
                 } label: {
                     Label("Open External", systemImage: IconRole.openDocument.icon.systemSymbolName)
                 }
+                .configuredKeyboardShortcut(currentConfiguration.shortcut(for: .openSettingsExternal))
 
                 Spacer()
             }
         }
-        .padding(24)
+        .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
@@ -528,8 +516,104 @@ private struct SettingsEditorView: View {
         }
     }
 
+    private var yamlSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            editorHeader
+
+            TextEditor(text: $editorText)
+                .font(fonts.editorFont())
+                .foregroundStyle(dracula(.foreground))
+                .scrollContentBackground(.hidden)
+                .background(dracula(.currentLine).opacity(0.45))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(validationError == nil ? dracula(.currentLine) : dracula(.red), lineWidth: 1)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+                .accessibilityLabel("Settings YAML editor")
+                .accessibilityIdentifier("settings-yaml-editor")
+        }
+    }
+
+    private var keyBindingsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("Key Bindings")
+                    .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+                    .foregroundStyle(dracula(.comment))
+
+                TextField("Search actions", text: $shortcutSearchText)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(dracula(.currentLine))
+                    .frame(maxWidth: 320)
+                    .accessibilityIdentifier("settings-keybindings-search")
+
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                Text("Action")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Scope")
+                    .frame(width: 110, alignment: .leading)
+                Text("Shortcut")
+                    .frame(width: 180, alignment: .leading)
+                Text("Default")
+                    .frame(width: 150, alignment: .leading)
+                Text("Modifiers")
+                    .frame(width: 260, alignment: .leading)
+                Text("")
+                    .frame(width: 130)
+            }
+            .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+            .foregroundStyle(dracula(.comment))
+            .padding(.horizontal, 8)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(filteredShortcutActions) { action in
+                        SettingsKeyBindingRow(
+                            action: action,
+                            definition: currentConfiguration.shortcut(for: action),
+                            isConflicting: currentConfiguration.keyboardShortcuts.duplicateActions().contains(action),
+                            onSetKey: { key in
+                                updateShortcut(action, key: key)
+                            },
+                            onToggleModifier: { modifier in
+                                toggleShortcutModifier(modifier, for: action)
+                            },
+                            onClear: {
+                                saveShortcut(.unbound, for: action)
+                            },
+                            onReset: {
+                                saveShortcut(action.defaultShortcut, for: action)
+                            }
+                        )
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .background(dracula(.background))
+            .accessibilityIdentifier("settings-keybindings-list")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var filteredShortcutActions: [KeyboardShortcutAction] {
+        let query = shortcutSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return KeyboardShortcutAction.allCases }
+        return KeyboardShortcutAction.allCases.filter {
+            $0.displayName.lowercased().contains(query)
+                || $0.scope.rawValue.lowercased().contains(query)
+                || $0.rawValue.lowercased().contains(query)
+        }
+    }
+
     private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .center, spacing: 12) {
             Text("Appearance")
                 .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
                 .foregroundStyle(dracula(.comment))
@@ -547,6 +631,8 @@ private struct SettingsEditorView: View {
             .frame(maxWidth: 360, alignment: .leading)
             .accessibilityLabel("Theme")
             .accessibilityIdentifier("settings-theme-picker")
+
+            Spacer()
         }
     }
 
@@ -559,11 +645,6 @@ private struct SettingsEditorView: View {
                 saveThemeSelection(newValue)
             }
         )
-    }
-
-    private var terminalFontSummary: String {
-        let family = configuration.fonts.terminalFamily.isEmpty ? "Ghostty default" : configuration.fonts.terminalFamily
-        return "\(family), \(configuration.fonts.terminalSize.formattedFontSize) pt"
     }
 
     private func loadIfNeeded() {
@@ -610,6 +691,7 @@ private struct SettingsEditorView: View {
             lastSavedText = text
             do {
                 let configuration = try onValidateText(text)
+                currentConfiguration = configuration
                 selectedThemeID = configuration.resolvedTheme.id
                 validationError = nil
                 onReloadConfiguration()
@@ -628,6 +710,7 @@ private struct SettingsEditorView: View {
         do {
             _ = try onSaveText(editorText)
             let configuration = try onValidateText(editorText)
+            currentConfiguration = configuration
             selectedThemeID = configuration.resolvedTheme.id
             lastSavedText = editorText
             validationError = nil
@@ -642,6 +725,7 @@ private struct SettingsEditorView: View {
         editorText = lastSavedText
         do {
             let configuration = try onValidateText(editorText)
+            currentConfiguration = configuration
             selectedThemeID = configuration.resolvedTheme.id
             validationError = nil
             statusMessage = "Unsaved edits reverted."
@@ -659,6 +743,7 @@ private struct SettingsEditorView: View {
             _ = try onSaveText(renderedText)
             editorText = renderedText
             lastSavedText = renderedText
+            currentConfiguration = nextConfiguration.validated()
             selectedThemeID = themeID
             validationError = nil
             statusMessage = "Theme saved and applied."
@@ -668,6 +753,47 @@ private struct SettingsEditorView: View {
             statusMessage = "Theme was not changed."
         }
     }
+
+    private func updateShortcut(_ action: KeyboardShortcutAction, key: String) {
+        var definition = currentConfiguration.shortcut(for: action)
+        definition.key = String(key.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1))
+        saveShortcut(definition, for: action)
+    }
+
+    private func toggleShortcutModifier(_ modifier: KeyboardShortcutModifier, for action: KeyboardShortcutAction) {
+        var definition = currentConfiguration.shortcut(for: action)
+        if definition.modifiers.contains(modifier) {
+            definition.modifiers.removeAll { $0 == modifier }
+        } else {
+            definition.modifiers.append(modifier)
+        }
+        saveShortcut(definition, for: action)
+    }
+
+    private func saveShortcut(_ definition: KeyboardShortcutDefinition, for action: KeyboardShortcutAction) {
+        do {
+            var nextConfiguration = try onValidateText(editorText)
+            nextConfiguration.keyboardShortcuts.setDefinition(definition, for: action)
+            nextConfiguration = nextConfiguration.validated()
+            let conflicts = nextConfiguration.keyboardShortcuts.duplicateActions()
+            if conflicts.contains(action) {
+                validationError = "Shortcut conflict: \(definition.displayText) is already used by another action."
+                statusMessage = "Shortcut was not changed."
+                return
+            }
+            let renderedText = YAMLConfigurationStore.render(nextConfiguration)
+            _ = try onSaveText(renderedText)
+            editorText = renderedText
+            lastSavedText = renderedText
+            currentConfiguration = nextConfiguration
+            selectedThemeID = nextConfiguration.resolvedTheme.id
+            validationError = nil
+            statusMessage = "Shortcut saved and applied."
+        } catch {
+            validationError = "YAML validation failed: \(error)"
+            statusMessage = "Shortcut was not changed."
+        }
+    }
 }
 
 private enum SettingsDiscardAction {
@@ -675,24 +801,154 @@ private enum SettingsDiscardAction {
     case reload
 }
 
-private struct SettingsSummaryRow: View {
-    let label: String
-    let value: String
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case appearance
+    case keyBindings
+    case yaml
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .appearance:
+            "Appearance"
+        case .keyBindings:
+            "Key Bindings"
+        case .yaml:
+            "YAML"
+        }
+    }
+}
+
+private struct SettingsKeyBindingRow: View {
+    let action: KeyboardShortcutAction
+    let definition: KeyboardShortcutDefinition
+    let isConflicting: Bool
+    let onSetKey: (String) -> Void
+    let onToggleModifier: (KeyboardShortcutModifier) -> Void
+    let onClear: () -> Void
+    let onReset: () -> Void
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(action.displayName)
+                    .font(fonts.interfaceFont(weight: .semibold))
+                    .lineLimit(1)
+                Text(action.rawValue)
+                    .font(fonts.editorFont(sizeOffset: -2))
+                    .foregroundStyle(dracula(.comment))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(action.scope.rawValue)
+                .font(fonts.interfaceFont(sizeOffset: -1))
                 .foregroundStyle(dracula(.comment))
                 .frame(width: 110, alignment: .leading)
 
-            Text(value)
-                .font(fonts.editorFont())
-                .foregroundStyle(dracula(.foreground))
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                TextField("Key", text: keyBinding)
+                    .textFieldStyle(.plain)
+                    .font(fonts.editorFont())
+                    .frame(width: 46)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .background(dracula(.currentLine))
+                    .accessibilityLabel("\(action.displayName) key")
+
+                Text(definition.displayText)
+                    .font(fonts.interfaceFont(sizeOffset: -1))
+                    .foregroundStyle(isConflicting ? dracula(.red) : dracula(.foreground))
+                    .lineLimit(1)
+            }
+            .frame(width: 180, alignment: .leading)
+
+            Text(action.defaultShortcutDescription)
+                .font(fonts.interfaceFont(sizeOffset: -1))
+                .foregroundStyle(dracula(.comment))
+                .frame(width: 150, alignment: .leading)
+
+            HStack(spacing: 6) {
+                ForEach(KeyboardShortcutModifier.allCases, id: \.self) { modifier in
+                    Toggle(modifier.shortName, isOn: modifierBinding(modifier))
+                        .toggleStyle(.button)
+                        .controlSize(.small)
+                }
+            }
+            .frame(width: 260, alignment: .leading)
+
+            HStack(spacing: 6) {
+                Button("Clear", action: onClear)
+                Button("Default", action: onReset)
+            }
+            .controlSize(.small)
+            .frame(width: 130, alignment: .trailing)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isConflicting ? dracula(.red).opacity(0.18) : dracula(.currentLine).opacity(0.25))
+        .accessibilityIdentifier("settings-keybinding-\(action.rawValue)")
+    }
+
+    private var keyBinding: Binding<String> {
+        Binding(
+            get: { definition.key },
+            set: { onSetKey($0) }
+        )
+    }
+
+    private func modifierBinding(_ modifier: KeyboardShortcutModifier) -> Binding<Bool> {
+        Binding(
+            get: { definition.modifiers.contains(modifier) },
+            set: { _ in onToggleModifier(modifier) }
+        )
+    }
+}
+
+private extension KeyboardShortcutModifier {
+    var shortName: String {
+        switch self {
+        case .command:
+            "Cmd"
+        case .shift:
+            "Shift"
+        case .option:
+            "Opt"
+        case .control:
+            "Ctrl"
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func configuredKeyboardShortcut(_ definition: KeyboardShortcutDefinition) -> some View {
+        if definition.isBound, let character = definition.key.first {
+            keyboardShortcut(KeyEquivalent(character), modifiers: definition.eventModifiers)
+        } else {
+            self
+        }
+    }
+}
+
+private extension KeyboardShortcutDefinition {
+    var eventModifiers: EventModifiers {
+        var eventModifiers = EventModifiers()
+        for modifier in modifiers {
+            switch modifier {
+            case .command:
+                eventModifiers.insert(.command)
+            case .shift:
+                eventModifiers.insert(.shift)
+            case .option:
+                eventModifiers.insert(.option)
+            case .control:
+                eventModifiers.insert(.control)
+            }
+        }
+        return eventModifiers
     }
 }
 
@@ -844,31 +1100,48 @@ private struct ActiveThreadRow: View {
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
+        let activity = model.threadActivity(for: thread.id)
         HStack(spacing: 6) {
             Button {
                 model.selectThread(id: thread.id)
             } label: {
-                HStack(spacing: 6) {
-                    if thread.isPinned {
-                        Image(systemName: IconRole.pinned.icon.systemSymbolName)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(dracula(.pink))
-                    }
+                HStack(alignment: .center, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            if thread.isPinned {
+                                Image(systemName: IconRole.pinned.icon.systemSymbolName)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(dracula(.pink))
+                            }
 
-                    Text(thread.displayName)
-                        .lineLimit(1)
+                            Text(thread.displayName)
+                                .font(fonts.interfaceFont(weight: activity.isUnread ? .semibold : .regular))
+                                .lineLimit(1)
+                        }
+
+                        if let preview = activity.preview {
+                            Text(preview)
+                                .font(fonts.interfaceFont(sizeOffset: -2))
+                                .foregroundStyle(activity.isUnread ? dracula(.yellow) : dracula(.comment))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
 
                     Spacer()
 
+                    ThreadActivityIndicator(activity: activity)
+                        .frame(width: 16, height: 16)
+
                     Text(thread.agentCLI.displayName)
                         .font(fonts.interfaceFont(sizeOffset: -1))
-                        .foregroundStyle(dracula(.cyan))
+                        .foregroundStyle(activity.isUnread ? dracula(.yellow) : dracula(.cyan))
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Thread \(thread.displayName), \(thread.agentCLI.displayName)")
+            .accessibilityLabel("Thread \(thread.displayName), \(thread.agentCLI.displayName), \(activity.status.rawValue)")
 
             SidebarIconButton(
                 systemImage: (thread.isPinned ? IconRole.unpin : IconRole.pin).icon.systemSymbolName,
@@ -885,6 +1158,35 @@ private struct ActiveThreadRow: View {
         .padding(.vertical, 5)
         .padding(.horizontal, 4)
         .background(model.selectedThreadID == thread.id ? dracula(.currentLine) : dracula(.background))
+    }
+}
+
+private struct ThreadActivityIndicator: View {
+    let activity: ThreadActivityState
+
+    var body: some View {
+        switch activity.status {
+        case .working:
+            ProgressView()
+                .controlSize(.small)
+                .tint(dracula(.cyan))
+                .help("Working")
+        case .needsInput:
+            Image(systemName: activity.isUnread ? "exclamationmark.circle.fill" : "exclamationmark.circle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(dracula(.yellow))
+                .help("Needs input")
+        case .complete:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(dracula(.green))
+                .help("Complete")
+        case .inactive:
+            Image(systemName: "circle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(dracula(.comment))
+                .help("Inactive")
+        }
     }
 }
 
@@ -1221,6 +1523,26 @@ private struct MainWorkspaceView: View {
                     if case .project(let threadID) = role {
                         model.recordAgentCLITerminalTitle(threadID: threadID, title: title)
                     }
+                },
+                onDesktopNotification: { role, title, body in
+                    if case .project(let threadID) = role {
+                        model.recordAgentTerminalNotification(threadID: threadID, title: title, body: body)
+                    }
+                },
+                onFocusChange: { role, focused in
+                    if case .project(let threadID) = role {
+                        model.recordAgentTerminalFocus(threadID: threadID, focused: focused)
+                    }
+                },
+                onClose: { role in
+                    if case .project(let threadID) = role {
+                        model.recordAgentTerminalClosed(threadID: threadID)
+                    }
+                },
+                onCommandFinished: { role, exitCode in
+                    if case .project(let threadID) = role {
+                        model.recordAgentCommandFinished(threadID: threadID, exitCode: exitCode)
+                    }
                 }
             )
             .id(model.selectedThreadID)
@@ -1229,6 +1551,7 @@ private struct MainWorkspaceView: View {
             }
             .onReceive(capturePoll) { _ in
                 model.pollSelectedAgentCLICaptureLog()
+                model.pollAgentCLIActivityLogs()
             }
         }
         .padding(8)
@@ -1299,8 +1622,12 @@ private struct RightPanelView: View {
                         get: { model.fileBrowserState.searchQuery },
                         set: { model.updateFileSearchQuery($0) }
                     ),
+                    selectedRelativePath: model.selectedFileRelativePath,
                     fileIconPack: model.configuration.fileIconPack,
                     onRefresh: model.refreshSelectedFileBrowser,
+                    onSelectFile: { entry in
+                        model.selectFile(relativePath: entry.relativePath)
+                    },
                     onOpenFile: { entry in
                         model.openFileInNvim(relativePath: entry.relativePath)
                     },
@@ -1421,8 +1748,10 @@ private struct MissingDirectoryBanner: View {
 private struct FileBrowserPanel: View {
     let state: FileBrowserState
     @Binding var searchQuery: String
+    let selectedRelativePath: String?
     let fileIconPack: FileIconPack
     let onRefresh: () -> Void
+    let onSelectFile: (FileBrowserEntry) -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
     let externalOpenTools: [ExternalOpenToolID]
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
@@ -1494,8 +1823,10 @@ private struct FileBrowserPanel: View {
                             FileBrowserTreeRow(
                                 node: node,
                                 depth: 0,
+                                selectedRelativePath: selectedRelativePath,
                                 expandedFolders: $expandedFolders,
                                 fileIconPack: fileIconPack,
+                                onSelectFile: onSelectFile,
                                 onOpenFile: onOpenFile,
                                 externalOpenTools: externalOpenTools,
                                 onOpenExternally: onOpenExternally
@@ -1505,7 +1836,9 @@ private struct FileBrowserPanel: View {
                         ForEach(state.visibleEntries) { entry in
                             FileBrowserSearchRow(
                                 entry: entry,
+                                isSelected: selectedRelativePath == entry.relativePath,
                                 fileIconPack: fileIconPack,
+                                onSelectFile: onSelectFile,
                                 onOpenFile: onOpenFile,
                                 externalOpenTools: externalOpenTools,
                                 onOpenExternally: onOpenExternally
@@ -1543,8 +1876,10 @@ private struct FileBrowserPanel: View {
 private struct FileBrowserTreeRow: View {
     let node: FileBrowserTreeNode
     let depth: Int
+    let selectedRelativePath: String?
     @Binding var expandedFolders: Set<String>
     let fileIconPack: FileIconPack
+    let onSelectFile: (FileBrowserEntry) -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
     let externalOpenTools: [ExternalOpenToolID]
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
@@ -1552,6 +1887,7 @@ private struct FileBrowserTreeRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                onSelectFile(node.entry)
                 if node.entry.isDirectory {
                     toggleExpanded()
                 } else {
@@ -1571,14 +1907,17 @@ private struct FileBrowserTreeRow: View {
             .contextMenu {
                 externalOpenMenuItems(for: node.entry)
             }
+            .background(selectedRelativePath == node.entry.relativePath ? dracula(.currentLine) : dracula(.background))
 
             if node.entry.isDirectory && isExpanded {
                 ForEach(node.children) { child in
                     FileBrowserTreeRow(
                         node: child,
                         depth: depth + 1,
+                        selectedRelativePath: selectedRelativePath,
                         expandedFolders: $expandedFolders,
                         fileIconPack: fileIconPack,
+                        onSelectFile: onSelectFile,
                         onOpenFile: onOpenFile,
                         externalOpenTools: externalOpenTools,
                         onOpenExternally: onOpenExternally
@@ -1614,7 +1953,9 @@ private struct FileBrowserTreeRow: View {
 
 private struct FileBrowserSearchRow: View {
     let entry: FileBrowserEntry
+    let isSelected: Bool
     let fileIconPack: FileIconPack
+    let onSelectFile: (FileBrowserEntry) -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
     let externalOpenTools: [ExternalOpenToolID]
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
@@ -1628,8 +1969,13 @@ private struct FileBrowserSearchRow: View {
                 fileIconPack: fileIconPack,
                 isExpanded: false
             )
+            .background(isSelected ? dracula(.currentLine) : dracula(.background))
+            .onTapGesture {
+                onSelectFile(entry)
+            }
         } else {
             Button {
+                onSelectFile(entry)
                 onOpenFile(entry)
             } label: {
                 FileBrowserRowContent(
@@ -1641,6 +1987,7 @@ private struct FileBrowserSearchRow: View {
                 )
             }
             .buttonStyle(.plain)
+            .background(isSelected ? dracula(.currentLine) : dracula(.background))
             .help("Open in nvim")
             .contextMenu {
                 ForEach(externalOpenTools) { tool in
@@ -1700,6 +2047,10 @@ private struct TerminalPlaceholderView: View {
     let unavailableMessage: String
     let fonts: FontSettings
     var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
+    var onDesktopNotification: (TerminalRole, String, String) -> Void = { _, _, _ in }
+    var onFocusChange: (TerminalRole, Bool) -> Void = { _, _ in }
+    var onClose: (TerminalRole) -> Void = { _ in }
+    var onCommandFinished: (TerminalRole, Int?) -> Void = { _, _ in }
     @Environment(\.appTheme) private var appTheme
 
     var body: some View {
@@ -1709,7 +2060,11 @@ private struct TerminalPlaceholderView: View {
                     request: request,
                     theme: appTheme,
                     fonts: fonts,
-                    onTitleChange: onTitleChange
+                    onTitleChange: onTitleChange,
+                    onDesktopNotification: onDesktopNotification,
+                    onFocusChange: onFocusChange,
+                    onClose: onClose,
+                    onCommandFinished: onCommandFinished
                 )
                     .accessibilityLabel("\(request.title) terminal")
             } else {

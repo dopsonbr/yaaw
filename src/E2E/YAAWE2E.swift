@@ -53,6 +53,8 @@ private final class E2ERunner {
         try fileManager.createDirectory(at: paths.projectDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.captureDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: paths.activityDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: paths.helperBinDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.screenshotDirectory, withIntermediateDirectories: true)
     }
 
@@ -283,6 +285,29 @@ private final class E2ERunner {
             output: "YAAW_SESSION_ID=codex-e2e-001\nYAAW_SESSION_NAME=Codex E2E Session\n"
         )
         try assert(model.selectedThread?.displayName == "Codex E2E Session", "codex CLI metadata renamed the thread")
+        try runYAAWNotify(
+            threadID: codexThreadID,
+            status: "needs-input",
+            title: "Approval needed",
+            body: "Review fixture command"
+        )
+        model.pollAgentCLIActivityLogs()
+        try assert(
+            model.threadActivity(for: codexThreadID).status == .needsInput,
+            "helper notification marked codex thread as needing input"
+        )
+        try assert(
+            model.threadActivity(for: codexThreadID).preview == "Review fixture command",
+            "helper notification preview was captured"
+        )
+        try assert(model.threadActivity(for: codexThreadID).isUnread, "helper notification marked codex thread unread")
+        model.recordAgentTerminalFocus(threadID: codexThreadID, focused: true)
+        try assert(!model.threadActivity(for: codexThreadID).isUnread, "focused codex terminal cleared unread notification")
+        model.recordAgentTerminalNotification(threadID: codexThreadID, title: "Task complete", body: "Fixture tests passed")
+        try assert(
+            model.threadActivity(for: codexThreadID).status == .complete,
+            "OSC-style terminal notification marked codex thread complete"
+        )
 
         let claudeThreadID = try model.createThread(agentCLI: .claude)
         model.recordAgentCLIOutput(
@@ -477,7 +502,9 @@ private final class E2ERunner {
             store: store,
             agentCLIBindings: AgentCLISessionBindingService(
                 environment: missingToolEnvironment,
-                captureDirectory: paths.captureDirectory
+                captureDirectory: paths.captureDirectory,
+                activityDirectory: paths.activityDirectory,
+                helperBinDirectory: paths.helperBinDirectory
             ),
             fileIndexer: ImmediateFileIndexer(),
             externalToolResolver: PATHAgentCLIExecutableResolver(fallbackSearchPaths: []),
@@ -509,7 +536,9 @@ private final class E2ERunner {
             store: try makeSandboxSeededStore(databasePath: databasePath),
             agentCLIBindings: AgentCLISessionBindingService(
                 environment: missingToolEnvironment,
-                captureDirectory: paths.captureDirectory
+                captureDirectory: paths.captureDirectory,
+                activityDirectory: paths.activityDirectory,
+                helperBinDirectory: paths.helperBinDirectory
             ),
             fileIndexer: ImmediateFileIndexer(),
             externalToolResolver: PATHAgentCLIExecutableResolver(fallbackSearchPaths: []),
@@ -657,8 +686,35 @@ private final class E2ERunner {
     private func makeAgentCLIService() -> AgentCLISessionBindingService {
         AgentCLISessionBindingService(
             environment: environment,
-            captureDirectory: paths.captureDirectory
+            captureDirectory: paths.captureDirectory,
+            activityDirectory: paths.activityDirectory,
+            helperBinDirectory: paths.helperBinDirectory
         )
+    }
+
+    private func runYAAWNotify(threadID: UUID, status: String, title: String, body: String) throws {
+        let helperURL = paths.helperBinDirectory.appendingPathComponent("yaaw-notify")
+        if !fileManager.isExecutableFile(atPath: helperURL.path) {
+            let thread = AgentThread(
+                id: threadID,
+                displayName: "Fixture",
+                projectID: UUID(),
+                workingDirectory: paths.projectDirectory
+            )
+            _ = makeAgentCLIService().terminalCommand(for: thread)
+        }
+        let eventLogURL = paths.activityDirectory.appendingPathComponent("\(threadID.uuidString).ndjson")
+        let process = Process()
+        process.executableURL = helperURL
+        process.arguments = ["--status", status, "--title", title, "--body", body]
+        process.environment = [
+            "YAAW_THREAD_ID": threadID.uuidString,
+            "YAAW_EVENT_LOG": eventLogURL.path
+        ]
+        process.standardOutput = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        try assert(process.terminationStatus == 0, "yaaw-notify helper exited successfully")
     }
 
     private func makeModel(databasePath: URL) throws -> AppModel {
@@ -750,6 +806,8 @@ private struct E2EPaths {
     var binDirectory: URL { root.appendingPathComponent("bin", isDirectory: true) }
     var missingToolBinDirectory: URL { root.appendingPathComponent("bin-missing-lazygit", isDirectory: true) }
     var captureDirectory: URL { root.appendingPathComponent("captures", isDirectory: true) }
+    var activityDirectory: URL { root.appendingPathComponent("activity", isDirectory: true) }
+    var helperBinDirectory: URL { root.appendingPathComponent("helper-bin", isDirectory: true) }
     var configPath: URL { root.appendingPathComponent("config/settings.yaml") }
     var workspaceDirectory: URL { root.appendingPathComponent("sandbox-workspace", isDirectory: true) }
     var projectDirectory: URL { root.appendingPathComponent("fixture-project", isDirectory: true) }

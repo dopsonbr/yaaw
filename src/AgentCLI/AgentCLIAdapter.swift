@@ -184,10 +184,12 @@ public enum AgentCLISessionBindingError: Error, Equatable {
 
 public struct AgentCLICapturedOutput: Equatable, Sendable {
     public var output: String
+    public var startOffset: UInt64
     public var nextOffset: UInt64
 
-    public init(output: String, nextOffset: UInt64) {
+    public init(output: String, nextOffset: UInt64, startOffset: UInt64 = 0) {
         self.output = output
+        self.startOffset = startOffset
         self.nextOffset = nextOffset
     }
 }
@@ -197,6 +199,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
     private let resolver: any AgentCLIExecutableResolving
     private let environment: [String: String]
     private let captureDirectory: URL?
+    private let activityDirectory: URL?
+    private let helperBinDirectory: URL
 
     public init(
         adapters: [any AgentCLIAdapter] = [
@@ -207,12 +211,16 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         ],
         resolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        captureDirectory: URL? = AgentCLISessionBindingService.defaultCaptureDirectory()
+        captureDirectory: URL? = AgentCLISessionBindingService.defaultCaptureDirectory(),
+        activityDirectory: URL? = AgentCLISessionBindingService.defaultActivityDirectory(),
+        helperBinDirectory: URL = AgentCLISessionBindingService.defaultHelperBinDirectory()
     ) {
         self.adaptersByKind = Dictionary(uniqueKeysWithValues: adapters.map { ($0.kind, $0) })
         self.resolver = resolver
         self.environment = environment
         self.captureDirectory = captureDirectory
+        self.activityDirectory = activityDirectory
+        self.helperBinDirectory = helperBinDirectory
     }
 
     public static func defaultCaptureDirectory() -> URL {
@@ -221,12 +229,26 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             .appendingPathComponent("AgentCLICaptures", isDirectory: true)
     }
 
+    public static func defaultActivityDirectory() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("YAAW", isDirectory: true)
+            .appendingPathComponent("AgentCLIEvents", isDirectory: true)
+    }
+
+    public static func defaultHelperBinDirectory() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("YAAW", isDirectory: true)
+            .appendingPathComponent("HelperBin", isDirectory: true)
+    }
+
     public func terminalCommand(for thread: AgentThread, executableNameOverride: String? = nil) -> [String] {
         let command = invocation(for: thread, executableNameOverride: executableNameOverride).command
         guard let captureLogURL = captureLogURL(for: thread),
               FileManager.default.isExecutableFile(atPath: "/usr/bin/script") else {
             return command
         }
+        let helperBinURL = installNotifyHelperIfNeeded()
+        let activityLogURL = activityLogURL(for: thread)
         try? FileManager.default.createDirectory(
             at: captureLogURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -236,7 +258,12 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         let captureCommand = (["/usr/bin/script", "-q", captureLogURL.path] + command)
             .map(Self.shellQuoted)
             .joined(separator: " ")
-        let shellCommand = "\(captureCommand); yaaw_exit_status=$?; if [ \"$yaaw_exit_status\" -ne 0 ]; then printf '\\nYAAW: agent command exited with status %s\\n' \"$yaaw_exit_status\"; fi; exec \(Self.shellQuoted(shellPath)) -l"
+        let environmentPrefix = shellEnvironmentPrefix(
+            thread: thread,
+            helperBinURL: helperBinURL,
+            activityLogURL: activityLogURL
+        )
+        let shellCommand = "\(environmentPrefix)\(captureCommand); yaaw_exit_status=$?; if [ \"$yaaw_exit_status\" -ne 0 ]; then printf '\\nYAAW: agent command exited with status %s\\n' \"$yaaw_exit_status\"; fi; exec \(Self.shellQuoted(shellPath)) -l"
         return [shellPath, "-lic", shellCommand]
     }
 
@@ -281,6 +308,110 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         captureDirectory?.appendingPathComponent("\(thread.id.uuidString).log")
     }
 
+    public func activityLogURL(for thread: AgentThread) -> URL? {
+        activityDirectory?.appendingPathComponent("\(thread.id.uuidString).ndjson")
+    }
+
+    private func shellEnvironmentPrefix(
+        thread: AgentThread,
+        helperBinURL: URL?,
+        activityLogURL: URL?
+    ) -> String {
+        var assignments = [
+            "export YAAW_THREAD_ID=\(Self.shellQuoted(thread.id.uuidString))",
+            "export YAAW_PROJECT_ID=\(Self.shellQuoted(thread.projectID.uuidString))"
+        ]
+        if let activityLogURL {
+            try? FileManager.default.createDirectory(
+                at: activityLogURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            assignments.append("export YAAW_EVENT_LOG=\(Self.shellQuoted(activityLogURL.path))")
+        }
+        if let helperBinURL {
+            assignments.append("export PATH=\(Self.shellQuoted(helperBinURL.path)):\u{0022}$PATH\u{0022}")
+        }
+        return assignments.joined(separator: "; ") + "; "
+    }
+
+    private func installNotifyHelperIfNeeded() -> URL? {
+        let helperBinURL = helperBinDirectory
+        let helperURL = helperBinURL.appendingPathComponent("yaaw-notify")
+        do {
+            try FileManager.default.createDirectory(at: helperBinURL, withIntermediateDirectories: true)
+            try Self.notifyHelperScript.write(to: helperURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helperURL.path)
+            return helperBinURL
+        } catch {
+            return nil
+        }
+    }
+
+    private static let notifyHelperScript = """
+    #!/bin/zsh
+    set -e
+
+    activity_status=""
+    title=""
+    body=""
+
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --status)
+          activity_status="$2"
+          shift 2
+          ;;
+        --title)
+          title="$2"
+          shift 2
+          ;;
+        --body)
+          body="$2"
+          shift 2
+          ;;
+        *)
+          if [[ -z "$body" ]]; then
+            body="$1"
+          else
+            body="$body $1"
+          fi
+          shift
+          ;;
+      esac
+    done
+
+    case "$activity_status" in
+      needs-input|needs_input) activity_status="needsInput" ;;
+      working|complete|inactive) ;;
+      "") activity_status="" ;;
+      *) activity_status="" ;;
+    esac
+
+    json_escape() {
+      local s="$1"
+      s="${s//\\/\\\\}"
+      s="${s//\\"/\\\\\\"}"
+      s="${s//$'\\n'/\\\\n}"
+      s="${s//$'\\r'/\\\\r}"
+      s="${s//$'\\t'/\\\\t}"
+      print -r -- "$s"
+    }
+
+    if [[ -n "$YAAW_EVENT_LOG" && -n "$YAAW_THREAD_ID" ]]; then
+      mkdir -p "$(dirname "$YAAW_EVENT_LOG")"
+      printf '{"thread_id":"%s","status":"%s","title":"%s","body":"%s","source":"helper","created_at":%s}\\n' \\
+        "$(json_escape "$YAAW_THREAD_ID")" \\
+        "$(json_escape "$activity_status")" \\
+        "$(json_escape "$title")" \\
+        "$(json_escape "$body")" \\
+        "$(date +%s)" >> "$YAAW_EVENT_LOG"
+    fi
+
+    notification_title="${title:-YAAW}"
+    notification_body="${body:-$activity_status}"
+    printf '\\033]777;notify;%s;%s\\007' "$notification_title" "$notification_body"
+    """
+
     private func interactiveShellPath() -> String {
         if let shell = environment["SHELL"],
            FileManager.default.isExecutableFile(atPath: shell) {
@@ -306,10 +437,29 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         after offset: UInt64,
         maxBytes: Int = 64 * 1024
     ) -> AgentCLICapturedOutput? {
-        guard let url = captureLogURL(for: thread),
-              let fileHandle = try? FileHandle(forReadingFrom: url) else {
+        guard let url = captureLogURL(for: thread) else {
             return nil
         }
+        return capturedOutput(from: url, after: offset, maxBytes: maxBytes)
+    }
+
+    public func capturedActivityEvents(
+        for thread: AgentThread,
+        after offset: UInt64,
+        maxBytes: Int = 64 * 1024
+    ) -> AgentCLICapturedOutput? {
+        guard let url = activityLogURL(for: thread) else {
+            return nil
+        }
+        return capturedOutput(from: url, after: offset, maxBytes: maxBytes)
+    }
+
+    private func capturedOutput(
+        from url: URL,
+        after offset: UInt64,
+        maxBytes: Int
+    ) -> AgentCLICapturedOutput? {
+        guard let fileHandle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? fileHandle.close() }
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?
             .uint64Value ?? 0
@@ -329,7 +479,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         }
         return AgentCLICapturedOutput(
             output: String(decoding: data, as: UTF8.self),
-            nextOffset: effectiveOffset + UInt64(data.count)
+            nextOffset: effectiveOffset + UInt64(data.count),
+            startOffset: effectiveOffset
         )
     }
 

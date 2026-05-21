@@ -47,7 +47,9 @@ Requirements use:
 
 - The app MUST keep all first-version project and thread metadata local.
 - The app MUST keep thread agent CLI selection and CLI session identity local.
+- The app MUST keep thread activity status and notification previews local.
 - The app MUST NOT send project paths, file names, terminal output, agent CLI session metadata, or repository content to a remote service outside of the user's chosen local CLI process.
+- The app MUST sanitize notification previews before storing or displaying them and MUST NOT treat notification support as permission to persist full terminal scrollback.
 - The app itself MUST NOT require network access for core first-version workflows outside of any network behavior performed by the user's chosen local CLI process.
 - The app MUST use the user's local shell and local tools.
 - The app SHOULD avoid storing terminal scrollback unless explicitly added in a later plan.
@@ -55,6 +57,8 @@ Requirements use:
 ## Accessibility
 
 - The app SHOULD support macOS keyboard navigation for primary workflows.
+- The app SHOULD expose a Settings key binding editor backed by the same YAML settings file as startup configuration.
+- The app SHOULD make all visible stable actions configurable as keyboard shortcuts, with contextual or destructive actions unbound by default.
 - The app SHOULD expose meaningful accessibility labels for sidebar items, right-panel mode controls, resize handles, and terminal regions.
 - The app SHOULD preserve sufficient contrast using the selected built-in palette.
 - The app SHOULD support system text scaling where practical without breaking the panel layout.
@@ -63,10 +67,12 @@ Requirements use:
 
 - The app MUST make the active project and thread visible.
 - The app MUST make each thread's selected agent CLI visible when starting or inspecting a thread.
+- The app SHOULD make each active thread's latest activity state visible in the sidebar.
 - The app MUST make the active right-panel mode visible.
 - The app MUST keep Files, `nvim`, and Git mode controls available in the right panel.
 - The app MUST use familiar shortcuts for global back/forward navigation.
 - The app MUST use `Cmd+J` for the selected-thread bottom terminal.
+- The app SHOULD use native macOS defaults where they fit, including `Cmd+,` for Settings, `Cmd+N` for new project, and `Cmd+S` for saving settings edits.
 - The app SHOULD remember the user's last selected project, thread, panel layout, and right-panel mode.
 - The app SHOULD avoid modal workflows except for project creation, settings inspection, and destructive confirmations.
 

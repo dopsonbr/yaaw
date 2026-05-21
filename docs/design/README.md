@@ -105,6 +105,8 @@ The thread display name should mirror the bound CLI session's reported name, tit
 
 The left sidebar is the only required thread switcher for the MVP. It should use nested project rows: each project can expand to show active threads and an archived-thread disclosure, and each project row owns the new-thread action for that project. Pinned projects sort above unpinned projects, manual project reorder is scoped within pinned/unpinned groups, and pinned threads sort above recently opened unpinned threads.
 
+Thread rows also carry lightweight activity state. A thread can be `working`, `needsInput`, `complete`, or `inactive`, with the latest sanitized preview and unread flag stored separately from `AgentThread` so session identity and activity UI stay decoupled. Persist only the latest activity state per thread; on launch, downgrade `working` to `inactive` because live process progress cannot survive restart.
+
 ## Terminal Design
 
 All embedded terminal surfaces should use `libghostty`.
@@ -119,6 +121,8 @@ The MVP needs four terminal roles:
 Agent CLI session terminals should remain associated with their thread. Switching threads should restore the matching terminal surface rather than starting a new shell every time.
 
 Live terminal process state is runtime state. It should be kept while the app process is running, but the first version does not need to restore live PTY processes after app restart. Agent CLI resume metadata is durable state and should be stored so reopening a thread resumes the same CLI agent session.
+
+Agent terminal surfaces should forward desktop notification, focus, close, and command-finished callbacks into app state. YAAW also exposes a helper command, `yaaw-notify`, only inside managed agent terminals by prepending an app-owned helper directory to `PATH` and setting `YAAW_THREAD_ID`, `YAAW_PROJECT_ID`, and `YAAW_EVENT_LOG`. The helper writes app-owned NDJSON and emits OSC 777 for compatibility with terminal notification conventions.
 
 ## Right Tool Panel
 

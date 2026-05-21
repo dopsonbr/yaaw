@@ -245,6 +245,44 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(reloaded.isGlobalTerminalExpanded)
     }
 
+    func testSQLiteStorePersistsThreadActivityState() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: path)
+        let projectID = UUID()
+        let threadID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
+        let updatedAt = Date(timeIntervalSince1970: 123)
+        let activity = ThreadActivityState(
+            threadID: threadID,
+            status: .needsInput,
+            preview: "Approve the command",
+            isUnread: true,
+            title: "Needs input",
+            body: "Approve the command",
+            source: .helper,
+            updatedAt: updatedAt
+        )
+
+        store.save(
+            YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false,
+                threadActivityByThreadID: [threadID: activity]
+            )
+        )
+
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
+
+        XCTAssertEqual(reloaded.threadActivityByThreadID[threadID], activity)
+    }
+
     func testSQLitePersistsRightPanelNvimTabsThroughReload() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         let store = try SQLiteYAAWStore(databasePath: path)
@@ -980,6 +1018,87 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.tools.agents.codex, "codex-nightly")
         XCTAssertTrue(reloaded.ignoreRules.contains("vendor"))
         XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
+    }
+
+    func testYAMLConfigurationRendersEveryKeyboardShortcutAction() throws {
+        let rendered = YAMLConfigurationStore.render(YAAWConfiguration())
+
+        for action in KeyboardShortcutAction.allCases {
+            XCTAssertTrue(rendered.contains("\(action.rawValue):"), "Missing \(action.rawValue)")
+        }
+    }
+
+    func testYAMLConfigurationAllowsUnboundKeyboardShortcuts() throws {
+        let store = YAMLConfigurationStore(path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
+
+        let configuration = try store.validate(
+            text: """
+            keyboardShortcuts:
+              archiveSelectedThread:
+                key: ""
+                modifiers: []
+            """
+        )
+
+        XCTAssertTrue(configuration.shortcut(for: .archiveSelectedThread).isUnbound)
+    }
+
+    func testYAMLConfigurationFallsBackInvalidKeyboardShortcutToDefault() throws {
+        let store = YAMLConfigurationStore(path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
+
+        let configuration = try store.validate(
+            text: """
+            keyboardShortcuts:
+              toggleBottomTerminal:
+                key: too-long
+                modifiers: []
+            """
+        )
+
+        XCTAssertEqual(configuration.shortcut(for: .toggleBottomTerminal), KeyboardShortcutAction.toggleBottomTerminal.defaultShortcut)
+    }
+
+    func testYAMLConfigurationDetectsDuplicateKeyboardShortcutsWithinScope() throws {
+        let store = YAMLConfigurationStore(path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
+
+        let configuration = try store.validate(
+            text: """
+            keyboardShortcuts:
+              selectFilesRightPanelMode:
+                key: "7"
+                modifiers: [command]
+              selectGitRightPanelMode:
+                key: "7"
+                modifiers: [command]
+            """
+        )
+
+        XCTAssertEqual(
+            configuration.keyboardShortcuts.duplicateActions(),
+            [.selectFilesRightPanelMode, .selectGitRightPanelMode]
+        )
+    }
+
+    func testDefaultKeyboardShortcutsDoNotConflict() {
+        XCTAssertTrue(YAAWConfiguration().keyboardShortcuts.duplicateActions().isEmpty)
+    }
+
+    func testYAMLConfigurationDetectsDuplicateKeyboardShortcutsAcrossCommandScopes() throws {
+        let store = YAMLConfigurationStore(path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
+
+        let configuration = try store.validate(
+            text: """
+            keyboardShortcuts:
+              reloadSettings:
+                key: "r"
+                modifiers: [command]
+            """
+        )
+
+        XCTAssertEqual(
+            configuration.keyboardShortcuts.duplicateActions(),
+            [.refreshFiles, .reloadSettings]
+        )
     }
 
     func testYAMLConfigurationMergesMissingDefaults() throws {

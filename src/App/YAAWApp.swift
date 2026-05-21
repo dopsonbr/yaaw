@@ -5,6 +5,7 @@ import SwiftUI
 @main
 struct YAAWApp: App {
     @StateObject private var model: AppModel
+    @State private var isSettingsOpen = false
     private let startupError: Error?
     private let databasePath: URL
     private let configurationPath: URL
@@ -49,6 +50,9 @@ struct YAAWApp: App {
                     agentCLIBindings: agentCLIBindings,
                     configuration: configuration,
                     diagnosticRecorder: diagnostics,
+                    notificationDispatcher: MacSystemThreadActivityNotificationDispatcher.shared,
+                    badgeUpdater: MacDockThreadActivityBadgeUpdater.shared,
+                    isApplicationActive: { NSApplication.shared.isActive },
                     environment: environment
                 )
             )
@@ -78,6 +82,7 @@ struct YAAWApp: App {
                 } else {
                     RootView(
                         model: model,
+                        isSettingsOpen: $isSettingsOpen,
                         externalOpenWorkspace: externalOpenWorkspace,
                         settingsPath: configurationPath,
                         onLoadSettingsText: loadSettingsText,
@@ -95,48 +100,214 @@ struct YAAWApp: App {
         .restorationBehavior(.disabled)
         .commands {
             if startupError == nil {
-                CommandMenu("Terminal") {
-                    Button("Toggle Bottom Terminal") {
-                        model.toggleBottomTerminal()
+                CommandMenu("App") {
+                    ShortcutCommandButton(model: model, action: .openSettings, title: "Settings...") {
+                        isSettingsOpen = true
                     }
-                    .keyboardShortcut(model.keyEquivalent(for: .toggleBottomTerminal), modifiers: model.eventModifiers(for: .toggleBottomTerminal))
                 }
 
-                CommandMenu("Navigation") {
-                    Button("Back") {
-                        model.navigateBack()
+                CommandMenu("Project") {
+                    ShortcutCommandButton(model: model, action: .newProject, title: "New Project...") {
+                        createProjectFromPanel()
                     }
-                    .keyboardShortcut(model.keyEquivalent(for: .navigateBack), modifiers: model.eventModifiers(for: .navigateBack))
 
-                    Button("Forward") {
-                        model.navigateForward()
+                    ShortcutCommandButton(model: model, action: .toggleSelectedProjectPinned, title: "Pin or Unpin Selected Project") {
+                        model.toggleSelectedProjectPinned()
                     }
-                    .keyboardShortcut(model.keyEquivalent(for: .navigateForward), modifiers: model.eventModifiers(for: .navigateForward))
 
-                    Button("Previous Right Panel Mode") {
+                    ShortcutCommandButton(model: model, action: .moveSelectedProjectUp, title: "Move Selected Project Up") {
+                        model.moveSelectedProject(direction: .up)
+                    }
+
+                    ShortcutCommandButton(model: model, action: .moveSelectedProjectDown, title: "Move Selected Project Down") {
+                        model.moveSelectedProject(direction: .down)
+                    }
+
+                    ShortcutCommandButton(model: model, action: .toggleSelectedProjectExpanded, title: "Expand or Collapse Selected Project") {
+                        model.toggleSelectedProjectExpanded()
+                    }
+
+                    ShortcutCommandButton(
+                        model: model,
+                        action: .toggleSelectedProjectArchiveExpanded,
+                        title: "Expand or Collapse Selected Project Archive"
+                    ) {
+                        model.toggleSelectedProjectArchiveExpanded()
+                    }
+                }
+
+                CommandMenu("Thread") {
+                    ShortcutCommandButton(model: model, action: .newThread, title: "New Thread") {
+                        try? model.createThread(agentCLI: nil)
+                    }
+
+                    ShortcutCommandButton(model: model, action: .toggleSelectedThreadPinned, title: "Pin or Unpin Selected Thread") {
+                        model.toggleSelectedThreadPinned()
+                    }
+
+                    ShortcutCommandButton(model: model, action: .archiveSelectedThread, title: "Archive Selected Thread") {
+                        model.archiveSelectedThread()
+                    }
+
+                    ShortcutCommandButton(model: model, action: .unarchiveSelectedThread, title: "Unarchive Selected Thread") {
+                        model.unarchiveSelectedThread()
+                    }
+                }
+
+                CommandMenu("Right Panel") {
+                    ShortcutCommandButton(model: model, action: .previousRightPanelMode, title: "Previous Right Panel Mode") {
                         model.cycleRightPanelModeBackward()
                     }
-                    .keyboardShortcut(model.keyEquivalent(for: .previousRightPanelMode), modifiers: model.eventModifiers(for: .previousRightPanelMode))
 
-                    Button("Next Right Panel Mode") {
+                    ShortcutCommandButton(model: model, action: .nextRightPanelMode, title: "Next Right Panel Mode") {
                         model.cycleRightPanelModeForward()
                     }
-                    .keyboardShortcut(model.keyEquivalent(for: .nextRightPanelMode), modifiers: model.eventModifiers(for: .nextRightPanelMode))
+
+                    ShortcutCommandButton(model: model, action: .selectFilesRightPanelMode, title: "Files") {
+                        model.selectRightPanelMode(.files)
+                    }
+
+                    ShortcutCommandButton(model: model, action: .selectGitRightPanelMode, title: "Git") {
+                        model.selectRightPanelMode(.git)
+                    }
+
+                    ShortcutCommandButton(model: model, action: .selectNvimRightPanelMode, title: "nvim") {
+                        model.selectRightPanelMode(.nvim)
+                    }
+
+                    ShortcutCommandButton(model: model, action: .openNvimFilePicker, title: "Open File in New nvim Tab...") {
+                        openNvimFileFromPanel()
+                    }
+                }
+
+                CommandMenu("Files") {
+                    ShortcutCommandButton(model: model, action: .refreshFiles, title: "Refresh Files") {
+                        model.refreshSelectedFileBrowser()
+                    }
+
+                    ShortcutCommandButton(model: model, action: .openSelectedFileInNvim, title: "Open Selected File in nvim") {
+                        model.openSelectedFileInNvim()
+                    }
+                    .disabled(model.selectedExternalOpenFileTarget == nil)
+                }
+
+                CommandMenu("External Open") {
+                    ShortcutCommandButton(
+                        model: model,
+                        action: .openSelectedDirectoryExternalDefault,
+                        title: "Open Selected Directory with Default Tool"
+                    ) {
+                        openSelectedDirectoryWithDefaultExternalTool()
+                    }
+                    .disabled(model.selectedExternalOpenDirectoryTarget == nil)
+
+                    ForEach(ExternalOpenToolID.allCases) { tool in
+                        ShortcutCommandButton(
+                            model: model,
+                            action: KeyboardShortcutAction.directoryExternalOpenAction(for: tool),
+                            title: "Open Selected Directory in \(tool.displayName)"
+                        ) {
+                            openSelectedDirectoryExternally(tool)
+                        }
+                        .disabled(model.selectedExternalOpenDirectoryTarget == nil)
+                    }
+
+                    Divider()
+
+                    ShortcutCommandButton(
+                        model: model,
+                        action: .openSelectedFileExternalDefault,
+                        title: "Open Selected File with Default Tool"
+                    ) {
+                        openSelectedFileWithDefaultExternalTool()
+                    }
+                    .disabled(model.selectedExternalOpenFileTarget == nil)
+
+                    ForEach(ExternalOpenToolID.allCases) { tool in
+                        ShortcutCommandButton(
+                            model: model,
+                            action: KeyboardShortcutAction.fileExternalOpenAction(for: tool),
+                            title: "Open Selected File in \(tool.displayName)"
+                        ) {
+                            openSelectedFileExternally(tool)
+                        }
+                        .disabled(model.selectedExternalOpenFileTarget == nil)
+                    }
                 }
 
                 CommandMenu("Layout") {
-                    Button("Toggle Sidebar") {
+                    ShortcutCommandButton(model: model, action: .toggleSidebar, title: "Toggle Sidebar") {
                         model.toggleSidebarCollapsed()
                     }
-                    .keyboardShortcut(model.keyEquivalent(for: .toggleSidebar), modifiers: model.eventModifiers(for: .toggleSidebar))
 
-                    Button("Toggle Right Panel") {
+                    ShortcutCommandButton(model: model, action: .toggleRightPanel, title: "Toggle Right Panel") {
                         model.toggleRightPanelCollapsed()
                     }
-                    .keyboardShortcut(model.keyEquivalent(for: .toggleRightPanel), modifiers: model.eventModifiers(for: .toggleRightPanel))
+                }
+
+                CommandMenu("Navigation") {
+                    ShortcutCommandButton(model: model, action: .navigateBack, title: "Back") {
+                        model.navigateBack()
+                    }
+
+                    ShortcutCommandButton(model: model, action: .navigateForward, title: "Forward") {
+                        model.navigateForward()
+                    }
+                }
+
+                CommandMenu("Terminal") {
+                    ShortcutCommandButton(model: model, action: .toggleBottomTerminal, title: "Toggle Bottom Terminal") {
+                        model.toggleBottomTerminal()
+                    }
                 }
             }
         }
+    }
+
+    private func createProjectFromPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        if panel.runModal() == .OK, let url = panel.url {
+            try? model.createProject(displayName: url.lastPathComponent, rootDirectory: url)
+        }
+    }
+
+    private func openNvimFileFromPanel() {
+        guard let root = model.selectedThread?.workingDirectory else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = root
+        if panel.runModal() == .OK, let url = panel.url {
+            let rootPath = root.standardizedFileURL.path
+            let filePath = url.standardizedFileURL.path
+            guard filePath.hasPrefix(rootPath + "/") else { return }
+            model.openFileInNvim(relativePath: String(filePath.dropFirst(rootPath.count + 1)))
+        }
+    }
+
+    private func openSelectedDirectoryWithDefaultExternalTool() {
+        guard let tool = externalOpenWorkspace.defaultTool(settings: model.configuration.tools.externalOpen) else { return }
+        openSelectedDirectoryExternally(tool)
+    }
+
+    private func openSelectedDirectoryExternally(_ tool: ExternalOpenToolID) {
+        guard let target = model.selectedExternalOpenDirectoryTarget else { return }
+        externalOpenWorkspace.open(target: target, with: tool)
+    }
+
+    private func openSelectedFileWithDefaultExternalTool() {
+        guard let tool = externalOpenWorkspace.defaultTool(settings: model.configuration.tools.externalOpen) else { return }
+        openSelectedFileExternally(tool)
+    }
+
+    private func openSelectedFileExternally(_ tool: ExternalOpenToolID) {
+        guard let target = model.selectedExternalOpenFileTarget else { return }
+        externalOpenWorkspace.open(target: target, with: tool)
     }
 
     private static func envPrefix() -> String {
@@ -220,6 +391,75 @@ private extension AppModel {
             }
         }
         return eventModifiers
+    }
+}
+
+private struct ShortcutCommandButton: View {
+    @ObservedObject var model: AppModel
+    let action: KeyboardShortcutAction
+    let title: String
+    let perform: () -> Void
+
+    var body: some View {
+        commandButton
+    }
+
+    @ViewBuilder
+    private var commandButton: some View {
+        let button = Button(title, action: perform)
+        if model.isKeyboardShortcutEnabled(for: action) {
+            button.keyboardShortcut(model.keyEquivalent(for: action), modifiers: model.eventModifiers(for: action))
+        } else {
+            button
+        }
+    }
+}
+
+private extension KeyboardShortcutAction {
+    static func directoryExternalOpenAction(for tool: ExternalOpenToolID) -> KeyboardShortcutAction {
+        switch tool {
+        case .vscode:
+            .openSelectedDirectoryInVSCode
+        case .vscodeInsiders:
+            .openSelectedDirectoryInVSCodeInsiders
+        case .sublimeText:
+            .openSelectedDirectoryInSublimeText
+        case .zed:
+            .openSelectedDirectoryInZed
+        case .finder:
+            .openSelectedDirectoryInFinder
+        case .terminal:
+            .openSelectedDirectoryInTerminal
+        case .ghostty:
+            .openSelectedDirectoryInGhostty
+        case .xcode:
+            .openSelectedDirectoryInXcode
+        case .webstorm:
+            .openSelectedDirectoryInWebStorm
+        }
+    }
+
+    static func fileExternalOpenAction(for tool: ExternalOpenToolID) -> KeyboardShortcutAction {
+        switch tool {
+        case .vscode:
+            .openSelectedFileInVSCode
+        case .vscodeInsiders:
+            .openSelectedFileInVSCodeInsiders
+        case .sublimeText:
+            .openSelectedFileInSublimeText
+        case .zed:
+            .openSelectedFileInZed
+        case .finder:
+            .openSelectedFileInFinder
+        case .terminal:
+            .openSelectedFileInTerminal
+        case .ghostty:
+            .openSelectedFileInGhostty
+        case .xcode:
+            .openSelectedFileInXcode
+        case .webstorm:
+            .openSelectedFileInWebStorm
+        }
     }
 }
 
