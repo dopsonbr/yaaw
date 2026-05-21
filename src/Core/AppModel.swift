@@ -38,6 +38,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var activeProjectLaunchCommandsByThreadID: [UUID: [String]] = [:]
     private var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
     private var pendingTerminalTitlesByThreadID: [UUID: String] = [:]
+    private var threadIndexByID: [UUID: Int] = [:]
+    private var cachedActiveThreadsByProject: [UUID: [AgentThread]] = [:]
+    private var cachedArchivedThreadsByProject: [UUID: [AgentThread]] = [:]
 
     public init(
         store: YAAWStore = InMemoryYAAWStore.helloWorld(),
@@ -63,6 +66,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.projects = snapshot.projects
         self.threads = snapshot.threads
         self.fileIndexMetadataByThreadID = snapshot.fileIndexMetadataByThreadID
+        for (index, thread) in snapshot.threads.enumerated() {
+            threadIndexByID[thread.id] = index
+            if thread.isArchived {
+                cachedArchivedThreadsByProject[thread.projectID, default: []].append(thread)
+            } else {
+                cachedActiveThreadsByProject[thread.projectID, default: []].append(thread)
+            }
+        }
         let selectedProjectID = snapshot.projects.contains { $0.id == snapshot.selectedProjectID }
             ? snapshot.selectedProjectID
             : snapshot.projects[0].id
@@ -103,12 +114,39 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public var selectedThread: AgentThread? {
-        guard let selectedThreadID else { return nil }
-        return threads.first { $0.id == selectedThreadID }
+        guard let selectedThreadID, let index = threadIndexByID[selectedThreadID] else { return nil }
+        return threads[index]
     }
 
     public var selectedProject: Project? {
         projects.first { $0.id == selectedProjectID }
+    }
+
+    private func rebuildThreadIndexes() {
+        threadIndexByID.removeAll(keepingCapacity: true)
+        cachedActiveThreadsByProject.removeAll(keepingCapacity: true)
+        cachedArchivedThreadsByProject.removeAll(keepingCapacity: true)
+        for (index, thread) in threads.enumerated() {
+            threadIndexByID[thread.id] = index
+            if thread.isArchived {
+                cachedArchivedThreadsByProject[thread.projectID, default: []].append(thread)
+            } else {
+                cachedActiveThreadsByProject[thread.projectID, default: []].append(thread)
+            }
+        }
+    }
+
+    private func mutateThreads(_ block: (inout [AgentThread]) -> Void) {
+        block(&threads)
+        rebuildThreadIndexes()
+    }
+
+    private func thread(withID threadID: UUID) -> AgentThread? {
+        threadIndexByID[threadID].map { threads[$0] }
+    }
+
+    private func firstActiveThreadID(forProject projectID: UUID) -> UUID? {
+        cachedActiveThreadsByProject[projectID]?.first?.id
     }
 
     public var windowTitle: String {
@@ -139,11 +177,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public var activeThreadsForSelectedProject: [AgentThread] {
-        threads.filter { $0.projectID == selectedProjectID && !$0.isArchived }
+        cachedActiveThreadsByProject[selectedProjectID] ?? []
     }
 
     public var archivedThreadsForSelectedProject: [AgentThread] {
-        threads.filter { $0.projectID == selectedProjectID && $0.isArchived }
+        cachedArchivedThreadsByProject[selectedProjectID] ?? []
     }
 
     public var hasArchivedThreadsForSelectedProject: Bool {
@@ -370,7 +408,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         output: String,
         terminalTitle: String? = nil
     ) {
-        guard let index = threads.firstIndex(where: { $0.id == threadID }),
+        guard let index = threadIndexByID[threadID],
               var metadata = agentCLIBindings.metadata(
                 for: threads[index].agentCLI,
                 output: output,
@@ -387,7 +425,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func recordAgentCLITerminalTitle(threadID: UUID, title: String) {
-        guard let index = threads.firstIndex(where: { $0.id == threadID }) else {
+        guard let index = threadIndexByID[threadID] else {
             return
         }
         pendingTerminalTitlesByThreadID[threadID] = title
@@ -504,7 +542,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             createdAt: now,
             lastOpenedAt: now
         )
-        threads.append(thread)
+        mutateThreads { $0.append(thread) }
         selectedThreadID = thread.id
         rightPanelModesByThreadID[thread.id] = .files
         resetFileBrowserForSelectedThread()
@@ -524,7 +562,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func changeAgentCLI(for threadID: UUID, to agentCLI: AgentCLIKind) throws {
-        guard threads.contains(where: { $0.id == threadID }) else {
+        guard threadIndexByID[threadID] != nil else {
             throw AppModelError.threadNotFound
         }
         throw AppModelError.agentCLIChangeNotAllowed
@@ -534,7 +572,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard projects.contains(where: { $0.id == projectID }) else { return }
         guard selectedProjectID != projectID else { return }
         selectedProjectID = projectID
-        selectedThreadID = threads.first { $0.projectID == projectID && !$0.isArchived }?.id
+        selectedThreadID = firstActiveThreadID(forProject: projectID)
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         recordDiagnostic(
@@ -546,7 +584,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func selectThread(id threadID: UUID) {
-        guard let thread = threads.first(where: { $0.id == threadID }) else { return }
+        guard let thread = thread(withID: threadID) else { return }
         selectedProjectID = thread.projectID
         selectedThreadID = thread.id
         resetFileBrowserForSelectedThread()
@@ -563,10 +601,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func archiveThread(id threadID: UUID) {
-        guard let index = threads.firstIndex(where: { $0.id == threadID }) else { return }
-        threads[index].isArchived = true
+        guard let index = threadIndexByID[threadID] else { return }
+        let projectID = threads[index].projectID
+        mutateThreads { $0[index].isArchived = true }
         if selectedThreadID == threadID {
-            selectedThreadID = threads.first { $0.projectID == threads[index].projectID && !$0.isArchived }?.id
+            selectedThreadID = firstActiveThreadID(forProject: projectID)
             resetFileBrowserForSelectedThread()
         }
         pushCurrentSelection()
@@ -575,8 +614,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func unarchiveThread(id threadID: UUID) {
-        guard let index = threads.firstIndex(where: { $0.id == threadID }) else { return }
-        threads[index].isArchived = false
+        guard let index = threadIndexByID[threadID] else { return }
+        mutateThreads { $0[index].isArchived = false }
         selectThread(id: threadID)
     }
 
@@ -604,13 +643,16 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     private func activeThread(id threadID: UUID) -> AgentThread? {
-        threads.first { $0.id == threadID && !$0.isArchived }
+        guard let index = threadIndexByID[threadID], !threads[index].isArchived else { return nil }
+        return threads[index]
     }
 
     private func applyAgentCLIMetadata(_ metadata: AgentCLISessionMetadata, toThreadAt index: Int) {
-        threads[index].sessionIdentity = metadata.identity
-        threads[index].canonicalSessionName = metadata.canonicalName
-        threads[index].displayName = metadata.canonicalName
+        mutateThreads { threads in
+            threads[index].sessionIdentity = metadata.identity
+            threads[index].canonicalSessionName = metadata.canonicalName
+            threads[index].displayName = metadata.canonicalName
+        }
         pendingTerminalTitlesByThreadID.removeValue(forKey: threads[index].id)
         persistThread(threads[index])
     }
