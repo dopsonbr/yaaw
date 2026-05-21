@@ -93,10 +93,10 @@ struct YAAWApp: App {
                     )
                 }
             }
-            .frame(minWidth: 1680, minHeight: 700)
+            .frame(minWidth: 1100, minHeight: 700)
             .toolbar(removing: .title)
         }
-        .defaultSize(width: 1700, height: 900)
+        .defaultSize(width: 1400, height: 900)
         .restorationBehavior(.disabled)
         .commands {
             if startupError == nil {

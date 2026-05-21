@@ -2,7 +2,7 @@
 
 This document describes the first implementation shape for YAAW - Yet Another Agent Wrapper.
 
-The design favors a small, terminal-first desktop wrapper over a full IDE or agent harness. YAAW should make project/thread context, bound local CLI agent session state, file discovery, lightweight `nvim` editing, and `lazygit` Git workflows feel native and reliable while leaving agent behavior inside the user's chosen CLI.
+The design favors a small, terminal-first desktop wrapper over a full IDE or agent harness. YAAW assumes users bring their own preferred agent CLIs or agent CLI harnesses. The app should make project/thread context, bound local CLI agent session state, file discovery, local preview browsing, lightweight `nvim` editing, and `lazygit` Git workflows feel native and reliable while leaving agent behavior inside the user's chosen CLI.
 
 ## Product Principles
 
@@ -10,8 +10,11 @@ The design favors a small, terminal-first desktop wrapper over a full IDE or age
 - Dracula by default, with built-in theme switching.
 - Terminal-first workflow.
 - One agent CLI session terminal per thread.
+- Bring-your-own agent CLI, command-line harness, authentication, and model setup.
+- No telemetry; app-owned state and diagnostics stay local on the user's device.
 - Full-power local CLI agents, starting with `codex` and `claude` and expanding to `copilot` and `opencode`.
 - No prompt orchestration, tool-call mediation, or agent harness behavior.
+- Isolated WebKit helper process for right-panel browser previews and typed URL browsing.
 - `nvim` for file editing in the right panel.
 - `lazygit` for Git workflows in the right panel.
 - Resizeable and collapsible panels.
@@ -113,12 +116,14 @@ All embedded terminal surfaces should use `libghostty`.
 
 The MVP needs four terminal roles:
 
-- **Agent CLI session terminal:** one terminal per thread, launched in the thread working directory and running the bound local CLI agent session.
+- **Agent CLI session terminal:** one terminal per thread, launched in the thread working directory and running the bound user-installed local CLI agent session.
 - **Global terminal:** shared terminal, launched in the user's home directory, collapsed by default.
 - **Editor terminal:** right-panel terminal used to run `nvim` for an opened file.
 - **Git terminal:** right-panel terminal used to run `lazygit` for the active project.
 
 Agent CLI session terminals should remain associated with their thread. Switching threads should restore the matching terminal surface rather than starting a new shell every time.
+
+CLI-specific adapters should be thin launch/resume boundaries around user-owned tools. They may understand how to start or resume a supported CLI session, but they should not own prompt routing, model selection, authentication, approval policy, or tool-call execution.
 
 Live terminal process state is runtime state. It should be kept while the app process is running, but the first version does not need to restore live PTY processes after app restart. Agent CLI resume metadata is durable state and should be stored so reopening a thread resumes the same CLI agent session.
 
@@ -126,13 +131,14 @@ Agent terminal surfaces should forward desktop notification, focus, close, and c
 
 ## Right Tool Panel
 
-The right panel has three modes:
+The right panel has four modes:
 
 - **Browse mode:** shows project files and fuzzy search.
+- **Browser mode:** uses an isolated WebKit helper process for typed URLs and local previews opened from the file browser.
 - **Edit mode:** runs `nvim` for the opened file inside the same right panel.
 - **Git mode:** runs `lazygit` for the active project inside the same right panel.
 
-Users can switch modes by clicking mode icons or cycling the panel tabs. The controls should be visible in the right-panel header and remain available in all three modes.
+Users can switch modes by clicking mode icons or cycling the panel tabs. The controls should be visible in the right-panel header and remain available in all four modes.
 
 The selected right-panel mode and tool context are scoped to the selected thread. Threads may share the same visible right-panel state when they point at the same working directory, but the implementation should not depend on shared state.
 
@@ -143,6 +149,14 @@ Opening a file should:
 3. Start or reuse the editor terminal for the active project/thread.
 4. Launch `nvim <relative-file-path>` in that terminal.
 
+Opening a supported preview file in Browser mode should:
+
+1. Resolve the selected file relative to the active thread working directory.
+2. Confirm the resolved file stays under that working directory.
+3. Switch the right panel to Browser mode.
+4. Load the file URL through the isolated WebKit helper without writing metadata into the repository.
+5. Keep the main app running if the renderer crashes, then show a reload/restart state for that browser tab.
+
 Opening Git mode should:
 
 1. Resolve the active project root.
@@ -150,7 +164,7 @@ Opening Git mode should:
 3. Start or reuse the Git terminal for the active project/thread.
 4. Launch `lazygit` in the active project root.
 
-The MVP does not need a custom text editor, native source control UI, editor tabs, minimap, language server UI, or file decorations beyond basic selection and search.
+The MVP does not need a custom text editor, native source control UI, minimap, language server UI, browser downloads, browser extensions, developer tools, browser profile controls, or file decorations beyond basic selection and search.
 
 ## Fuzzy File Search
 
@@ -181,6 +195,8 @@ Persist panel sizes when practical. If persistence is deferred, runtime resizing
 ## State Persistence
 
 Use app-level local storage for MVP metadata. Avoid writing project metadata into user repositories unless that becomes an explicit product decision.
+
+YAAW should not include telemetry, analytics, crash-report upload, or remote diagnostics for the first version. Local diagnostics are acceptable only when they stay on the user's device. Network behavior belongs to the user's chosen agent CLI or CLI harness, not to YAAW's project/thread organization layer.
 
 Persist:
 
@@ -250,8 +266,9 @@ Add more shortcuts only after the interaction model stabilizes.
 - The sidebar, right panel, and bottom terminal can be resized.
 - The sidebar and right panel can be collapsed.
 - The right panel shows project files and supports fuzzy matching.
+- The right panel can preview supported local files and typed URLs in Browser mode.
 - Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
 - Opening Git mode launches `lazygit` or `git diff` inside the right panel.
-- Users can switch the right panel between file tree, `nvim`, and `lazygit` by cycling tabs or clicking icons.
+- Users can switch the right panel between file tree, Browser, `nvim`, and `lazygit` by cycling tabs or clicking icons.
 - The full app uses the selected built-in theme, defaulting to Dracula.
 - A user can archive inactive threads.

@@ -87,11 +87,25 @@ final class IconSystemTests: XCTestCase {
 
     func testNativeIconRolesResolveToSystemSymbols() {
         XCTAssertEqual(IconRole.settings.icon.systemSymbolName, "gearshape")
+        XCTAssertEqual(IconRole.moreActions.icon.systemSymbolName, "ellipsis")
         XCTAssertEqual(IconRole.rightPanelMode(.files).icon.systemSymbolName, "doc.on.doc")
         XCTAssertEqual(IconRole.rightPanelMode(.git).icon.systemSymbolName, "arrow.triangle.branch")
-        XCTAssertEqual(IconRole.rightPanelMode(.nvim).icon.systemSymbolName, "terminal")
+        XCTAssertEqual(IconRole.rightPanelMode(.nvim).icon.systemSymbolName, "square.and.pencil")
         XCTAssertEqual(IconRole.fileStateOverlay(.modified).icon.systemSymbolName, "circle.fill")
         XCTAssertEqual(IconRole.fileStateOverlay(.conflicted).icon.systemSymbolName, "exclamationmark.triangle.fill")
+    }
+
+    func testAgentCLIKindsExposeBrandIconResourceNamesAndFallbackSymbols() {
+        XCTAssertEqual(AgentCLIKind.codex.brandIconResourceName, "agent-codex")
+        XCTAssertEqual(AgentCLIKind.claude.brandIconResourceName, "agent-claude")
+        XCTAssertEqual(AgentCLIKind.opencode.brandIconResourceName, "agent-opencode")
+        XCTAssertEqual(AgentCLIKind.copilot.brandIconResourceName, "agent-copilot")
+
+        XCTAssertEqual(AgentCLIKind.claude.brandIconResourceExtensions.first, "png")
+        XCTAssertEqual(AgentCLIKind.opencode.brandIconResourceExtensions.first, "png")
+        XCTAssertEqual(AgentCLIKind.codex.brandIconResourceExtensions.first, "svg")
+        XCTAssertEqual(AgentCLIKind.copilot.brandIconResourceExtensions.first, "svg")
+        XCTAssertFalse(AgentCLIKind.allCases.map(\.fallbackSystemSymbolName).contains(""))
     }
 }
 

@@ -23,6 +23,32 @@ public enum AgentCLIKind: String, CaseIterable, Identifiable, Equatable, Sendabl
         }
     }
 
+    public var brandIconResourceName: String {
+        "agent-\(rawValue)"
+    }
+
+    public var brandIconResourceExtensions: [String] {
+        switch self {
+        case .claude, .opencode:
+            ["png", "svg"]
+        case .codex, .copilot:
+            ["svg", "png"]
+        }
+    }
+
+    public var fallbackSystemSymbolName: String {
+        switch self {
+        case .codex:
+            "sparkles"
+        case .claude:
+            "sun.max"
+        case .opencode:
+            "chevron.left.forwardslash.chevron.right"
+        case .copilot:
+            "person.2.wave.2"
+        }
+    }
+
     public func imagePasteText(for imageURL: URL) -> String {
         "Attached image: \(imageURL.path)"
     }

@@ -1,6 +1,6 @@
 # Documentation
 
-YAAW - Yet Another Agent Wrapper is a native macOS desktop wrapper for managing full-power local CLI agent sessions. It is terminal-first, `libghostty` backed, and intentionally not an agent harness.
+YAAW - Yet Another Agent Wrapper is a native macOS desktop wrapper for managing full-power local CLI agent sessions. Users bring their own preferred agent CLIs or agent CLI harnesses; YAAW augments them with project/thread organization, terminal surfaces, local tool panels, and opinionated macOS workflow defaults. It is terminal-first, `libghostty` backed, intentionally not an agent harness itself, and has no telemetry. Everything YAAW stores stays local on the user's device; remote behavior belongs to the user's chosen agent CLI.
 
 Read the documentation in this order:
 

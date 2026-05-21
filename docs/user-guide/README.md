@@ -4,9 +4,11 @@ This guide describes the intended first-version workflow for YAAW - Yet Another 
 
 ## What The App Is For
 
-Use the app to organize CLI agent work by project and thread. Each project is tied to a local directory. Each thread is tied to exactly one local CLI agent session, so work can be resumed without mixing command history, process state, or session identity across unrelated sessions.
+Use the app to organize work done through your preferred local agent CLI or agent CLI harness. Each project is tied to a local directory. Each thread is tied to exactly one local CLI agent session, so work can be resumed without mixing command history, process state, or session identity across unrelated sessions.
 
-YAAW wraps local CLIs; it does not act as an agent harness. Prompts, tool calls, authentication, model behavior, and remote service access stay inside the selected CLI.
+YAAW expects you to bring the agent tools you already use, including their authentication, model configuration, shell setup, and command-line behavior. YAAW wraps those local CLIs; it does not act as an agent harness itself. Prompts, tool calls, authentication, model behavior, and remote service access stay inside the selected CLI.
+
+YAAW has no telemetry. Projects, threads, settings, indexes, activity previews, logs, and diagnostics stay on your device. If network traffic happens, it is between you and the agent CLI or CLI harness you chose to run.
 
 The app uses Dracula by default and supports built-in light, dark, and high-contrast themes across panels, terminals, file browsing, and editing surfaces.
 
@@ -18,7 +20,7 @@ The main screen has three areas:
 
 - **Projects sidebar:** project and thread navigation.
 - **Agent CLI session terminal:** the active local CLI agent terminal for the selected thread.
-- **Right tool panel:** project files, opened files in `nvim`/`vim`/`vi`, and Git workflows in `lazygit` or `git diff`.
+- **Right tool panel:** project files, isolated WebKit browser previews, opened files in `nvim`/`vim`/`vi`, and Git workflows in `lazygit` or `git diff`.
 
 The sidebar nests thread history under each project. Project rows can be expanded or collapsed, pinned, reordered, and used to start a new thread directly in that project. The sidebar and right tool panel can both be collapsed to keep the terminal-focused view clean. Every major panel can also be resized.
 
@@ -45,7 +47,7 @@ Each thread has its own agent CLI session terminal. Switching threads switches t
 
 ## Switch Threads
 
-Use the left sidebar to select a different thread. Expand a project row to see its active thread history, or expand that project's archived area to inspect archived threads.
+Use the left sidebar to select a different thread. Expand a project row to see its active thread history, or use the Archived section at the bottom of the sidebar to inspect archived threads.
 
 When a thread is selected:
 
@@ -58,15 +60,16 @@ Pinned threads appear above unpinned threads inside their project. Unpinned thre
 
 ## Organize Projects
 
-Pin important projects to keep them above unpinned projects. Use project reorder controls to move projects within the pinned or unpinned group. Project order, pin state, and expanded/collapsed state are app-owned metadata and do not write files into project directories.
+Pin important projects to keep them above unpinned projects. Drag project rows to move projects within the pinned or unpinned group. Project order, pin state, and expanded/collapsed state are app-owned metadata and do not write files into project directories.
 
 ## Use The Agent CLI Session Terminal
 
-The agent CLI session terminal is the main working surface. It starts in the selected thread's working directory, runs the thread's bound local CLI agent session, and should behave like a native terminal because it is backed by `libghostty`.
+The agent CLI session terminal is the main working surface. It starts in the selected thread's working directory, runs the thread's bound user-installed local CLI agent session, and should behave like a native terminal because it is backed by `libghostty`.
 
 The MVP expectation is simple:
 
 - One agent CLI session terminal per thread.
+- User-owned agent CLI and harness behavior remains inside that CLI process.
 - The selected CLI family remains associated with the thread.
 - The CLI session name is the source of the visible thread name.
 - Reopening the thread resumes the associated CLI session.
@@ -123,9 +126,10 @@ The default file browser icon pack is `material-file-icons`. To use the softer D
 
 ## Switch Right Panel Modes
 
-The right panel has three modes:
+The right panel has four modes:
 
 - **Files:** browse the project file tree and search with fuzzy matching.
+- **Browser:** preview supported project files or enter a web URL inside the right panel.
 - **nvim:** open and edit a selected file inside the right panel with `nvim`, falling back to `vim` and then `vi`.
 - **Git:** open `lazygit` inside the right panel, falling back to `git diff` when `lazygit` is unavailable.
 
@@ -135,9 +139,15 @@ Switch modes by clicking the right-panel mode icons or by cycling the panel tabs
 
 Use the title-bar external-open control to open the selected thread working directory in an installed external destination. If no thread is selected, YAAW opens the selected project root.
 
-Use a file row's context menu to open that file externally. Editor apps open the file directly, Finder reveals the file, and Terminal or Ghostty opens the file's containing directory.
+Use a file row's context menu to copy either the relative path or full path. The same menu can open supported preview files in Browser, open the item in the configured default external editor, or open files in the built-in right-panel editor.
 
 YAAW detects supported destinations from installed macOS apps and shows them in settings order. Supported destinations are VS Code, VS Code Insiders, Sublime Text, Zed, Finder, Terminal, Ghostty, Xcode, and WebStorm.
+
+## Open A File Or URL In Browser
+
+Use the right-panel new-tab menu and choose Web Browser to open a browser tab. Enter a URL in the address field to navigate inside the right panel. Browser rendering runs in a helper process so a renderer crash should show a recovery state without taking down YAAW.
+
+From Files mode, right-click a supported preview file and choose Open in Browser. Supported first-pass preview types include HTML, SVG, PDF, common images, text, JSON, and XML. The default file-open action still opens `nvim`; Browser preview is an explicit context-menu action.
 
 ## Open A File In nvim
 
@@ -179,7 +189,7 @@ Use resize behavior to make the active work surface larger without closing the o
 
 Archive a thread when it is no longer part of the active project list.
 
-Archived threads move out of the active list for their project but remain available from that project's archived area. Archiving keeps the selected agent CLI and session identity so the thread can be resumed later.
+Archived threads move out of each project's active list but remain available from the single Archived section at the bottom of the sidebar. Archiving keeps the selected agent CLI and session identity so the thread can be resumed later.
 
 ## Keyboard Shortcuts
 
@@ -232,14 +242,15 @@ Use Save to validate, write, and apply YAML changes. Reload re-reads the file fr
 5. Use the agent CLI session terminal for that thread.
 6. Let the thread name mirror the CLI session name once the CLI reports it.
 7. Use the file browser to inspect project files.
-8. Open a file in `nvim` inside the right panel when you need to inspect or edit it.
-9. Use external-open when you need the project or a file in a full editor, Finder, Terminal, or Ghostty.
-10. Switch the right panel to Git when you need `lazygit` or `git diff`.
-11. Resize or collapse panels when you want more terminal or editor space.
-12. Archive the thread when the work is complete.
+8. Open supported preview files or URLs in Browser mode when you need a quick visual check.
+9. Open a file in `nvim` inside the right panel when you need to inspect or edit it.
+10. Use external-open when you need the project or a file in a full editor, Finder, Terminal, or Ghostty.
+11. Switch the right panel to Git when you need `lazygit` or `git diff`.
+12. Resize or collapse panels when you want more terminal or editor space.
+13. Archive the thread when the work is complete.
 
 ## MVP Boundaries
 
-The first version should stay focused. Expect terminal-first CLI agent workflows, simple project/thread management, lightweight file browsing, terminal-backed editor fallback through `nvim`, `vim`, or `vi`, external-open handoff to installed macOS apps, and Git workflows through `lazygit` or `git diff`. Current implementation paths cover `codex`, `claude`, `opencode`, and `copilot`.
+The first version should stay focused. Expect terminal-first CLI agent workflows, simple project/thread management, lightweight file browsing, isolated right-panel WebKit previews, terminal-backed editor fallback through `nvim`, `vim`, or `vi`, external-open handoff to installed macOS apps, and Git workflows through `lazygit` or `git diff`. Current implementation paths cover `codex`, `claude`, `opencode`, and `copilot`, but YAAW treats them as user-provided tools rather than bundled agent runtimes.
 
 Use a full editor or external tools for advanced editing, source control management, debugging, or deep project analysis until those features are intentionally added.

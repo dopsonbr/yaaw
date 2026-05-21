@@ -1,8 +1,10 @@
 # YAAW - Yet Another Agent Wrapper
 
-YAAW is an opinionated native macOS desktop app for managing CLI agent sessions. It is inspired by Codex Desktop, but it keeps the agent CLIs in charge: users run `codex`, `claude`, `copilot`, and `opencode` with their full terminal power inside `libghostty` surfaces.
+YAAW is an opinionated native macOS desktop app for people who already have a preferred local agent CLI or agent CLI harness. It is inspired by Codex Desktop, but it keeps the user's chosen agents in charge: users bring their own installed `codex`, `claude`, `copilot`, `opencode`, or compatible command-line harnesses and run them with their full terminal power inside `libghostty` surfaces.
 
-YAAW is not an agent harness. It does not orchestrate agents, rewrite prompts, proxy tool calls, or hide the underlying CLI. It is a focused desktop wrapper for organizing projects, threads, terminals, and terminal-backed tools around local CLI agents.
+YAAW is not an agent harness itself. It does not orchestrate agents, rewrite prompts, proxy tool calls, replace authentication, or hide the underlying CLI. It augments the user's preferred CLI workflow with project/thread organization, session binding and resume, local terminal surfaces, right-panel tools, and a few macOS-native product opinions.
+
+YAAW has no telemetry. App state, settings, indexes, activity previews, and diagnostics stay local on the user's device. Anything that leaves the device is between the user and the agent CLI or CLI harness they chose to run.
 
 The first implementation stays small: it gives users a project list, one active thread at a time, one managed agent CLI session terminal per thread, and a collapsible right tool panel for files, `nvim`/`vim`/`vi`, and `lazygit`/`git diff`. Current code paths cover `codex`, `claude`, `opencode`, and `copilot`.
 
@@ -11,6 +13,8 @@ The first implementation stays small: it gives users a project list, one active 
 - Keep the app native, fast, and minimal.
 - Make projects and threads easy to switch from a single sidebar.
 - Scope every project to a local directory.
+- Assume users bring their own agent CLIs, command-line harnesses, authentication, and model configuration.
+- Keep app metadata and diagnostics local with no telemetry.
 - Provide one full-power CLI agent session terminal per thread.
 - Treat `codex`, `claude`, `opencode`, and `copilot` as supported CLI families.
 - Provide a selected-thread bottom terminal that starts collapsed and can be toggled with `Cmd+J`.
@@ -92,7 +96,7 @@ Closing and reopening a thread resumes the same bound agent CLI session. A threa
 
 ### Agent CLI Session Terminal
 
-Each thread owns one agent CLI session terminal. The terminal starts in the thread's working directory, launches the selected local CLI, and is backed by `libghostty`.
+Each thread owns one agent CLI session terminal. The terminal starts in the thread's working directory, launches the selected user-installed local CLI or CLI harness, and is backed by `libghostty`.
 
 Runtime terminal process state is kept while the app is open. Durable thread metadata stores the selected CLI and session identity needed to resume the same CLI session after the thread or app is reopened.
 
@@ -160,6 +164,7 @@ Generated Dracula-themed example pages are available under `docs/examples/screen
 - Use SwiftUI for high-level layout where it fits naturally.
 - Use AppKit where lower-level windowing, focus, terminal embedding, or split-view behavior needs more control.
 - Embed terminals through `libghostty`.
+- Treat agent CLIs and CLI harnesses as user-owned executables resolved from settings or `PATH`; YAAW should launch and resume them, not reimplement them.
 - Launch `nvim`, `vim`, or `vi` in the right panel for file editing rather than building a custom editor for the MVP.
 - Launch `lazygit`, with `git diff` fallback, in the right panel for Git workflows rather than building a custom source control UI for the MVP.
 - Persist project, thread, selected agent CLI, and CLI session identity metadata locally.
@@ -170,6 +175,7 @@ Generated Dracula-themed example pages are available under `docs/examples/screen
 ## Non-Goals For The First Version
 
 - Agent harness behavior.
+- Bundled agent runtime, hosted agent service, or replacement agent CLI.
 - Multi-agent orchestration.
 - Prompt or tool-call mediation.
 - Full code editor features.

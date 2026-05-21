@@ -1,5 +1,6 @@
 public enum RightPanelMode: String, CaseIterable, Identifiable, Equatable, Sendable {
     case files
+    case browser
     case nvim
     case git
 
@@ -11,6 +12,8 @@ public enum RightPanelMode: String, CaseIterable, Identifiable, Equatable, Senda
         switch self {
         case .files:
             "Files"
+        case .browser:
+            "Browser"
         case .nvim:
             "nvim"
         case .git:
@@ -21,6 +24,8 @@ public enum RightPanelMode: String, CaseIterable, Identifiable, Equatable, Senda
     public var next: RightPanelMode {
         switch self {
         case .files:
+            .browser
+        case .browser:
             .git
         case .git:
             .nvim
@@ -33,8 +38,10 @@ public enum RightPanelMode: String, CaseIterable, Identifiable, Equatable, Senda
         switch self {
         case .files:
             .nvim
-        case .git:
+        case .browser:
             .files
+        case .git:
+            .browser
         case .nvim:
             .git
         }

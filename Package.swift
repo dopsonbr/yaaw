@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "YAAW", targets: ["YAAW"]),
+        .executable(name: "YAAWToolHost", targets: ["YAAWToolHost"]),
         .executable(name: "YAAWE2E", targets: ["YAAWE2E"]),
         .library(name: "YAAWKit", targets: ["YAAWKit"])
     ],
@@ -23,7 +24,16 @@ let package = Package(
                 "YAAWKit",
                 .product(name: "GhosttyTerminal", package: "libghostty-spm")
             ],
-            path: "src/App"
+            path: "src/App",
+            resources: [
+                .process("Resources")
+            ]
+        ),
+        .executableTarget(
+            name: "YAAWToolHost",
+            dependencies: ["YAAWKit"],
+            path: "src/ToolHost",
+            sources: ["main.swift"]
         ),
         .target(
             name: "YAAWKit",
@@ -35,7 +45,8 @@ let package = Package(
                 "AGENTS.md",
                 "App",
                 "E2E",
-                "Tests"
+                "Tests",
+                "ToolHost"
             ],
             sources: [
                 "AgentCLI",
@@ -43,6 +54,7 @@ let package = Package(
                 "Diagnostics",
                 "FileBrowser",
                 "Icons",
+                "IsolatedTools",
                 "Layout",
                 "Persistence",
                 "Projects",

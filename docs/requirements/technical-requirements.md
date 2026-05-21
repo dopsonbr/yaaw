@@ -26,7 +26,9 @@ Requirements use:
 - The app MUST keep project metadata in app-owned storage rather than writing metadata into project directories.
 - The app MUST keep live terminal process state in memory while running and MUST NOT require restoring live PTY processes after restart.
 - The app MUST persist the agent CLI session metadata needed to resume each thread's bound CLI agent session after the app or thread is reopened.
+- The app MUST assume agent CLIs, agent CLI harnesses, authentication, and model configuration are user-owned external tools.
 - The app MUST remain a desktop wrapper around local CLIs and MUST NOT become an agent harness, prompt orchestrator, or tool-call proxy.
+- The app MUST NOT include telemetry, analytics upload, crash-report upload, or remote diagnostics.
 
 ## Storage
 
@@ -89,7 +91,7 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - A project MAY have multiple threads.
 - A project MAY have threads that point at different worktrees.
 - Pinned projects MUST sort before unpinned projects.
-- Users MUST be able to manually reorder projects within pinned and unpinned groups.
+- Users MUST be able to drag and drop projects to manually reorder them within pinned and unpinned groups.
 
 ## Threads
 
@@ -113,6 +115,7 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - Live thread terminal sessions MUST NOT be required to persist after app restart.
 - Thread terminal/session state MUST be preserved while the app process is running.
 - Archived threads MUST move out of the primary active thread list.
+- Archived threads MUST remain reachable from one global sidebar archive entry at the bottom of the sidebar.
 - Archived threads MUST retain the agent CLI selection and CLI session identity required for later resume.
 - Thread lists MUST sort pinned threads before unpinned threads, then sort by most recently opened.
 - Each active thread SHOULD show whether the bound CLI is working, needs input, complete, or inactive.
@@ -144,9 +147,12 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - The app MUST have a right tool panel.
 - The app MUST have a selected-thread bottom terminal.
 - The left sidebar MUST be collapsible.
-- The left sidebar MUST show project rows with nested active and archived thread history.
+- The left sidebar MUST show project rows with nested active thread history.
 - Each project row MUST expose a new-thread action that targets that project.
-- Project and archived-thread disclosure state SHOULD persist across app restarts.
+- Project rows SHOULD hide pin actions behind an actions menu.
+- Thread rows SHOULD hide pin and archive actions behind an actions menu.
+- Agent CLI identity SHOULD use accessible icon-only labels in dense sidebar rows.
+- Project disclosure state SHOULD persist across app restarts.
 - The right tool panel MUST be collapsible.
 - The bottom terminal MUST be collapsed by default per thread.
 - The bottom terminal MUST toggle with `Cmd+J`.
@@ -165,9 +171,10 @@ Resizeable panels:
 
 The right tool panel MUST be scoped to the selected thread.
 
-The right tool panel MUST provide three modes:
+The right tool panel MUST provide four modes:
 
 - Files.
+- Browser.
 - `nvim`.
 - Git.
 
@@ -195,8 +202,30 @@ If two threads happen to share the same panel state because they point at the sa
 - File search SHOULD prefer exact filename matches, then prefix matches, then fuzzy path matches.
 - Opening a file through the default row action MUST switch the right panel to `nvim` mode.
 - Opening a file through the default row action MUST launch `nvim <relative-file-path>` in the right-panel terminal.
-- Files mode MUST also offer an external-open action for files without replacing the default `nvim` behavior.
-- External file-open actions MUST use the selected thread's working directory for relative file targets.
+- Supported preview files MUST offer an `Open in Browser` context-menu action without replacing the default `nvim` behavior.
+- Files mode MUST offer `Copy Relative Path` and `Copy Full Path` context-menu actions for files and folders.
+- Files mode MUST offer exactly two editor context-menu actions: the configured default external editor and the built-in right-panel editor.
+- The built-in editor action MUST use the existing `nvim` right-panel flow and MUST be omitted for folders.
+- External file-open actions MUST use the selected thread's working directory for relative file targets and MUST reject escaping paths.
+
+## Browser Mode
+
+- Browser mode MUST appear inside the right panel through a native WebKit surface.
+- Browser mode MUST run WebKit in an isolated helper process, not in the main app process.
+- A browser renderer crash MUST NOT terminate the main app.
+- A browser renderer crash MUST show an inline recovery state with a reload or restart path.
+- Browser mode MUST support typed web URLs and local preview files opened from Files mode.
+- Browser local preview files MUST resolve under the selected thread working directory.
+- Browser local preview support MUST include `html`, `htm`, `svg`, `pdf`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `txt`, `json`, and `xml`.
+- Browser mode MUST NOT write app metadata into user project directories.
+- Browser mode SHOULD keep new-window requests inside right-panel browser tabs.
+- Browser mode MAY omit downloads, extensions, developer tools, and profile controls for the first version.
+
+## Isolated Tool Hosts
+
+- Risky or heavyweight right-panel tools SHOULD use a reusable isolated helper-process runtime.
+- Isolated tool hosts MUST communicate with the main app through a versioned command/event protocol.
+- Isolated tool runtime state, helper process ids, viewport frames, and crash counters MUST remain runtime-only and MUST NOT be written into user project directories.
 
 ## nvim Mode
 
@@ -231,19 +260,21 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 
 - The app MUST default to the Dracula theme across all app surfaces.
 - The app MUST support built-in theme switching from Settings.
-- Terminals, sidebar, right panel, modal sheets, split-view handles, icons, file tree, `nvim`, and `lazygit` surfaces MUST use the selected built-in visual system.
+- Terminals, sidebar, right panel, modal sheets, split-view handles, icons, file tree, browser chrome, `nvim`, and `lazygit` surfaces MUST use the selected built-in visual system.
 - The implementation SHOULD use shared theme tokens rather than hardcoding colors throughout the app.
 
 ## Agent CLI Scope
 
 - The first version MUST manage thread sessions through terminal-backed local CLI agent processes.
 - Each thread MUST be tied to exactly one CLI agent session.
+- The app MUST treat the selected agent CLI or CLI harness as a user-installed executable resolved from settings or `PATH`.
 - The app MUST ask which agent CLI to invoke when starting a new thread.
 - The app MUST use the selected CLI session's reported name, title, or id as the canonical thread display name.
 - Closing and reopening a thread MUST resume the associated agent CLI session.
 - The app MUST NOT require users to manually run the selected CLI or resume commands for normal thread creation or reopening.
 - The app MUST NOT orchestrate multiple agent CLI sessions inside one thread for the first version.
 - The app MUST NOT mediate prompts, tool calls, model behavior, or agent decisions beyond launching and resuming the user's selected local CLI.
+- The app MUST NOT replace, bundle, or reimplement the selected agent CLI's harness, authentication flow, model policy, approval behavior, or tool execution.
 - The app MAY surface CLI-agent activity notifications, but MUST keep that behavior status-oriented rather than prompt orchestration.
 
 ## External Tools
@@ -253,6 +284,7 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - `lazygit` MUST be detected from the user's `PATH`.
 - External project/file open destinations SHOULD include VS Code, VS Code Insiders, Sublime Text, Zed, Finder, Terminal, Ghostty, Xcode, and WebStorm when installed.
 - The default external-open destination MUST be configurable in app-owned YAML settings.
+- File context-menu default editor actions MUST use the configured external-open default when it is an editor, otherwise the first available configured editor.
 - The title bar MUST provide an external-open control for the selected thread working directory, falling back to the selected project root when no thread is selected.
 - External file-open actions MUST reveal files in Finder, open containing directories in Terminal/Ghostty, and open files directly in editor apps.
 - External tool failures MUST be visible in the embedded terminal surface.
@@ -277,6 +309,7 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes.
 - `Cmd+[` and `Cmd+]` perform global back/forward navigation.
 - Hidden files appear in the file browser by default.
+- Supported local preview files can be opened in Browser mode from the file browser context menu.
 - Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
 - A user can open the selected project or selected file in an installed external editor, Finder, or terminal destination.
 - Opening Git mode launches `lazygit` or `git diff` inside the right panel.

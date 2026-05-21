@@ -96,6 +96,7 @@ public final class InMemoryYAAWStore: YAAWStore {
     private var cachedFileIndexesByKey: [String: CachedFileIndex] = [:]
     private var projectIndexByID: [UUID: Int] = [:]
     private var threadIndexByID: [UUID: Int] = [:]
+    private(set) var layoutStateWriteCount = 0
 
     public init(snapshot: YAAWSnapshot) {
         self.snapshot = snapshot
@@ -168,6 +169,7 @@ public final class InMemoryYAAWStore: YAAWStore {
     }
 
     public func setLayoutState(_ state: LayoutState) {
+        layoutStateWriteCount += 1
         snapshot.layoutState = state
     }
 

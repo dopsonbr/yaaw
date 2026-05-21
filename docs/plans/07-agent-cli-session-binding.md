@@ -2,7 +2,7 @@
 
 ## Summary
 
-Bind every thread to exactly one `codex` or `claude` CLI session inside the embedded terminal. This plan owns launching the chosen CLI in the thread working directory, capturing the canonical session identity and display name the CLI reports, persisting that identity, and resuming the same session when the thread is reopened.
+Bind every thread to exactly one user-provided `codex` or `claude` CLI session inside the embedded terminal. This plan owns YAAW's thin launch/resume adapter boundary: launching the chosen CLI in the thread working directory, capturing the canonical session identity and display name the CLI reports, persisting that identity, and resuming the same session when the thread is reopened. It does not make YAAW an agent harness.
 
 ## Requirements
 
@@ -13,15 +13,15 @@ Bind every thread to exactly one `codex` or `claude` CLI session inside the embe
 
 ## Implementation
 
-- Add an agent CLI binding service under `src/Threads/` (or a dedicated `src/AgentCLI/` module) that owns `codex` and `claude` launch, session-id capture, and resume invocation.
+- Add an agent CLI binding service under `src/Threads/` (or a dedicated `src/AgentCLI/` module) that owns YAAW-side `codex` and `claude` launch, session-id capture, and resume invocation.
 - Define a small `AgentCLIAdapter` boundary with one implementation per CLI kind so adding new kinds later does not touch UI or persistence code.
-- Resolve `codex` and `claude` from the user's `PATH`. Treat missing binaries as a launch failure surfaced through raw terminal output.
+- Resolve `codex` and `claude` from settings or the user's `PATH`. Treat missing user-installed binaries as a launch failure surfaced through raw terminal output.
 - Launch the chosen CLI in the thread working directory through the terminal abstraction (Plan 05) backed by libghostty (Plan 06).
 - Capture the CLI session's reported name, title, or id from CLI output at the adapter boundary so the capture strategy is replaceable per CLI.
 - Persist the captured canonical name and session identity on the thread record through the SQLite store (additive migration on top of Plan 03's `agent_cli` column).
 - Update the thread display name when the CLI reports it. Prefer the CLI-reported name, fall back to title, fall back to session id.
 - Invoke the CLI resume path (e.g. `codex resume <id>` / `claude resume <id>`) when reopening a thread with a stored identity. If resume fails, surface the raw CLI error in the thread terminal and offer no silent fallback to a fresh session — the user decides whether to start over.
-- Keep CLI-specific concerns isolated. UI code never references `codex` or `claude` directly; it talks to the adapter boundary.
+- Keep CLI-specific concerns isolated. UI code never references `codex` or `claude` directly; it talks to the adapter boundary. The adapter MUST NOT own prompt routing, authentication, model policy, approval behavior, or tool execution.
 
 ## Tests
 

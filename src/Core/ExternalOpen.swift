@@ -174,4 +174,23 @@ public enum ExternalOpenToolResolver {
         }
         return available.first
     }
+
+    public static func availableEditorTools(
+        settings: ExternalOpenSettings,
+        detectedTools: Set<ExternalOpenToolID>
+    ) -> [ExternalOpenToolID] {
+        availableTools(settings: settings, detectedTools: detectedTools).filter(\.isEditor)
+    }
+
+    public static func defaultEditorTool(
+        settings: ExternalOpenSettings,
+        detectedTools: Set<ExternalOpenToolID>
+    ) -> ExternalOpenToolID? {
+        let available = availableEditorTools(settings: settings, detectedTools: detectedTools)
+        let configuredDefault = settings.defaultToolID
+        if configuredDefault.isEditor, available.contains(configuredDefault) {
+            return configuredDefault
+        }
+        return available.first
+    }
 }

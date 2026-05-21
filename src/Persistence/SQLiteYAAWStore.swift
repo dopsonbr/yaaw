@@ -19,7 +19,7 @@ private struct SidebarProjectStateRow {
 }
 
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 12
+    public static let schemaVersion = 13
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -210,14 +210,15 @@ public final class SQLiteYAAWStore: YAAWStore {
             try stepDone(deleteStatement)
             sqlite3_finalize(deleteStatement)
 
-            let tabs = RightPanelState.normalizedTabs(state.tabs)
+            let persistedState = state.persistenceSnapshot
+            let tabs = RightPanelState.normalizedTabs(persistedState.tabs)
             for (index, tab) in tabs.enumerated() {
                 let insertStatement = try prepare(
                     """
                     INSERT INTO right_panel_tabs (
-                        thread_id, tab_id, kind, title, relative_path, tab_order
+                        thread_id, tab_id, kind, title, relative_path, url_string, tab_order
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """
                 )
                 defer { sqlite3_finalize(insertStatement) }
@@ -226,7 +227,8 @@ public final class SQLiteYAAWStore: YAAWStore {
                 bind(tab.kind.rawValue, at: 3, in: insertStatement)
                 bind(tab.title, at: 4, in: insertStatement)
                 bindOptional(tab.relativePath, at: 5, in: insertStatement)
-                sqlite3_bind_int(insertStatement, 6, Int32(index))
+                bindOptional(tab.urlString, at: 6, in: insertStatement)
+                sqlite3_bind_int(insertStatement, 7, Int32(index))
                 try stepDone(insertStatement)
             }
 
@@ -238,7 +240,7 @@ public final class SQLiteYAAWStore: YAAWStore {
             )
             defer { sqlite3_finalize(stateStatement) }
             bind(threadID.uuidString, at: 1, in: stateStatement)
-            bind(state.selectedTabID, at: 2, in: stateStatement)
+            bind(persistedState.selectedTabID, at: 2, in: stateStatement)
             try stepDone(stateStatement)
         }
     }
@@ -493,6 +495,12 @@ private extension SQLiteYAAWStore {
                 try execute("PRAGMA user_version = 12")
             }
         }
+        if currentVersion < 13 {
+            try transaction {
+                try migrateToVersionThirteen()
+                try execute("PRAGMA user_version = 13")
+            }
+        }
     }
 
     func migrateToVersionNine() throws {
@@ -546,6 +554,70 @@ private extension SQLiteYAAWStore {
                 isArchiveExpanded: false
             )
         }
+    }
+
+    func migrateToVersionThirteen() throws {
+        if try tableColumns("right_panel_modes").isEmpty {
+            try execute(
+                """
+                CREATE TABLE IF NOT EXISTS right_panel_modes (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    mode TEXT NOT NULL CHECK (mode IN ('files', 'browser', 'nvim', 'git'))
+                )
+                """
+            )
+        } else {
+            try execute(
+                """
+                CREATE TABLE right_panel_modes_v13 (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    mode TEXT NOT NULL CHECK (mode IN ('files', 'browser', 'nvim', 'git'))
+                )
+                """
+            )
+            try execute(
+                """
+                INSERT INTO right_panel_modes_v13 (thread_id, mode)
+                SELECT thread_id, mode FROM right_panel_modes
+                WHERE mode IN ('files', 'browser', 'nvim', 'git')
+                """
+            )
+            try execute("DROP TABLE right_panel_modes")
+            try execute("ALTER TABLE right_panel_modes_v13 RENAME TO right_panel_modes")
+        }
+
+        let tabColumns = try tableColumns("right_panel_tabs")
+        guard !tabColumns.isEmpty else {
+            try createRightPanelTabStateSchema()
+            return
+        }
+        let urlSelect = tabColumns.contains("url_string") ? "url_string" : "NULL"
+        try execute(
+            """
+            CREATE TABLE right_panel_tabs_v13 (
+                thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                tab_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('files', 'browser', 'git', 'nvim')),
+                title TEXT NOT NULL,
+                relative_path TEXT,
+                url_string TEXT,
+                tab_order INTEGER NOT NULL,
+                PRIMARY KEY (thread_id, tab_id)
+            )
+            """
+        )
+        try execute(
+            """
+            INSERT INTO right_panel_tabs_v13 (
+                thread_id, tab_id, kind, title, relative_path, url_string, tab_order
+            )
+            SELECT thread_id, tab_id, kind, title, relative_path, \(urlSelect), tab_order
+            FROM right_panel_tabs
+            WHERE kind IN ('files', 'browser', 'git', 'nvim')
+            """
+        )
+        try execute("DROP TABLE right_panel_tabs")
+        try execute("ALTER TABLE right_panel_tabs_v13 RENAME TO right_panel_tabs")
     }
 
     func createThreadActivityStateSchema() throws {
@@ -602,7 +674,7 @@ private extension SQLiteYAAWStore {
             """
             CREATE TABLE IF NOT EXISTS right_panel_modes (
                 thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-                mode TEXT NOT NULL CHECK (mode IN ('files', 'nvim', 'git'))
+                mode TEXT NOT NULL CHECK (mode IN ('files', 'browser', 'nvim', 'git'))
             )
             """
         )
@@ -777,9 +849,10 @@ private extension SQLiteYAAWStore {
             CREATE TABLE IF NOT EXISTS right_panel_tabs (
                 thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
                 tab_id TEXT NOT NULL,
-                kind TEXT NOT NULL CHECK (kind IN ('files', 'git', 'nvim')),
+                kind TEXT NOT NULL CHECK (kind IN ('files', 'browser', 'git', 'nvim')),
                 title TEXT NOT NULL,
                 relative_path TEXT,
+                url_string TEXT,
                 tab_order INTEGER NOT NULL,
                 PRIMARY KEY (thread_id, tab_id)
             )
@@ -1085,7 +1158,8 @@ private extension SQLiteYAAWStore {
     }
 
     func insertRightPanelState(threadID: UUID, state: RightPanelState) throws {
-        let tabs = RightPanelState.normalizedTabs(state.tabs)
+        let persistedState = state.persistenceSnapshot
+        let tabs = RightPanelState.normalizedTabs(persistedState.tabs)
         for (index, tab) in tabs.enumerated() {
             let statement = try prepare(
                 """
@@ -1095,9 +1169,10 @@ private extension SQLiteYAAWStore {
                     kind,
                     title,
                     relative_path,
+                    url_string,
                     tab_order
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """
             )
             defer { sqlite3_finalize(statement) }
@@ -1106,7 +1181,8 @@ private extension SQLiteYAAWStore {
             bind(tab.kind.rawValue, at: 3, in: statement)
             bind(tab.title, at: 4, in: statement)
             bindOptional(tab.relativePath, at: 5, in: statement)
-            sqlite3_bind_int(statement, 6, Int32(index))
+            bindOptional(tab.urlString, at: 6, in: statement)
+            sqlite3_bind_int(statement, 7, Int32(index))
             try stepDone(statement)
         }
 
@@ -1115,7 +1191,7 @@ private extension SQLiteYAAWStore {
         )
         defer { sqlite3_finalize(stateStatement) }
         bind(threadID.uuidString, at: 1, in: stateStatement)
-        bind(state.selectedTabID, at: 2, in: stateStatement)
+        bind(persistedState.selectedTabID, at: 2, in: stateStatement)
         try stepDone(stateStatement)
     }
 
@@ -1565,7 +1641,7 @@ private extension SQLiteYAAWStore {
     func loadRightPanelStates(fallbackModes: [UUID: RightPanelMode]) throws -> [UUID: RightPanelState] {
         let tabsStatement = try prepare(
             """
-            SELECT thread_id, tab_id, kind, title, relative_path
+            SELECT thread_id, tab_id, kind, title, relative_path, url_string
             FROM right_panel_tabs
             ORDER BY thread_id, tab_order, title
             """
@@ -1582,7 +1658,8 @@ private extension SQLiteYAAWStore {
                     id: text(at: 1, in: tabsStatement),
                     kind: kind,
                     title: text(at: 3, in: tabsStatement),
-                    relativePath: optionalText(at: 4, in: tabsStatement)
+                    relativePath: optionalText(at: 4, in: tabsStatement),
+                    urlString: optionalText(at: 5, in: tabsStatement)
                 )
             )
         }
@@ -1601,7 +1678,7 @@ private extension SQLiteYAAWStore {
             let selectedTabID = selectedTabIDsByThreadID[thread.id]
                 ?? fallbackModes[thread.id]?.defaultTabID
                 ?? RightPanelTab.filesID
-            states[thread.id] = RightPanelState(tabs: tabs, selectedTabID: selectedTabID)
+            states[thread.id] = RightPanelState.restoredState(tabs: tabs, selectedTabID: selectedTabID)
         }
         return states
     }

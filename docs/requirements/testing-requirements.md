@@ -38,6 +38,8 @@ E2E tests MUST cover the primary user workflows:
 - Collapse and expand the right tool panel.
 - Use the right panel in Files mode.
 - Search files with fuzzy matching.
+- Open a supported local preview file in Browser mode.
+- Navigate to a typed URL in Browser mode.
 - Open a file in editor mode and verify `nvim` fallback behavior.
 - Open Git mode and verify `lazygit` or `git diff`.
 - Paste an image into each supported CLI terminal and verify the inserted path points to app-owned storage.
@@ -64,14 +66,15 @@ This test MUST:
 10. Verify reopening resumes the stored Codex session identity.
 11. Open the right panel in Files mode.
 12. Search for a file.
-13. Open that file in editor mode.
-14. Switch to Git mode.
-15. Launch `lazygit` or `git diff`.
-16. Toggle the selected-thread bottom terminal.
-17. Resize or collapse panels.
-18. Archive the thread.
-19. Quit and relaunch the app.
-20. Verify durable app state is restored where required.
+13. Open a supported preview file in Browser mode.
+14. Open that file in editor mode.
+15. Switch to Git mode.
+16. Launch `lazygit` or `git diff`.
+17. Toggle the selected-thread bottom terminal.
+18. Resize or collapse panels.
+19. Archive the thread.
+20. Quit and relaunch the app.
+21. Verify durable app state is restored where required.
 
 The full user journey test MUST NOT mock app storage, terminal surfaces, file browser behavior, or right-panel mode switching.
 
@@ -105,6 +108,7 @@ Examples of valid outputs:
 - Visible active right-panel mode.
 - Visible terminal output.
 - Visible file search results.
+- Visible browser preview or URL navigation state.
 - Visible `nvim` state.
 - Visible `lazygit` or `git diff` fallback output.
 - Persisted project/thread records after relaunch.
@@ -122,6 +126,7 @@ Screenshots MUST be captured:
 - After the app launches.
 - After project creation.
 - In Files mode.
+- In Browser mode.
 - In `nvim` mode.
 - In Git mode.
 - With the selected-thread bottom terminal expanded.
@@ -158,13 +163,15 @@ Recommended tests:
 | Thread resume | Closing and reopening a thread resumes the stored CLI session identity. |
 | Thread switching | Switching threads changes the active agent CLI session terminal and right-panel context. |
 | Thread activity | Agent helper and OSC notifications update the selected thread status, preview, unread state, focus-based read clearing, and persisted latest activity after relaunch. |
-| Right-panel modes | Files, `nvim`, and Git modes can be selected by icon/tab. |
+| Right-panel modes | Files, Browser, `nvim`, and Git modes can be selected by icon/tab. |
 | Right-panel shortcuts | `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes. |
 | Settings key bindings | Settings exposes a searchable key binding list, edits write through to YAML, unbound actions remain unbound, and duplicate active bindings in a scope are reported. |
 | Native shortcut defaults | `Cmd+,`, `Cmd+N`, `Cmd+Shift+N`, `Cmd+1`, `Cmd+2`, `Cmd+3`, and `Cmd+R` route to their documented app or Settings-scope actions. |
 | Global navigation | `Cmd+[` and `Cmd+]` move through app navigation history. |
 | Bottom terminal | `Cmd+J` expands and collapses the selected-thread bottom terminal. |
 | File search | Hidden files are visible and fuzzy search returns expected matches. |
+| Browser preview | Supported local preview files open in Browser mode from the file browser context menu. |
+| Browser URL | A typed URL opens inside the right panel without a separate app window. |
 | nvim open | Opening a file launches `nvim` in the right panel. |
 | External open | The selected project and file external-open actions use detected destinations and configured defaults without depending on real installed editors. |
 | Git open | Git mode launches `lazygit` or falls back to `git diff`. |
@@ -263,7 +270,7 @@ Artifacts MUST NOT include sensitive terminal output unless explicitly enabled f
 - The E2E harness can capture screenshots.
 - The E2E harness covers opening the settings editor, editing YAML, saving, and returning to the workspace.
 - The suite includes one full no-mock user journey test.
-- The suite includes focused E2E tests for project/thread creation, agent CLI selection, session naming, session resume, panel behavior, file search, `nvim`, external-open settings/actions, `lazygit`, shortcuts, and persistence.
+- The suite includes focused E2E tests for project/thread creation, agent CLI selection, session naming, session resume, panel behavior, file search, Browser mode, `nvim`, external-open settings/actions, `lazygit`, shortcuts, and persistence.
 - Persistence tests verify agent kind and CLI session identity survive relaunch.
 - Tests verify visible inputs and outputs instead of private implementation details.
 - Unit tests are limited to high-value public behavior or deterministic input/output logic.

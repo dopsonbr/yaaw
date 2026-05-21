@@ -68,6 +68,20 @@ private final class E2ERunner {
             atomically: true,
             encoding: .utf8
         )
+        try "<!doctype html><title>YAAW Preview</title><h1>Browser Preview</h1>\n".write(
+            to: paths.projectDirectory.appendingPathComponent("index.html"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+          <text x="8" y="25">YAAW</text>
+        </svg>
+        """.write(
+            to: paths.projectDirectory.appendingPathComponent("diagram.svg"),
+            atomically: true,
+            encoding: .utf8
+        )
         try "print(\"fixture\")\n".write(
             to: paths.projectDirectory.appendingPathComponent("src/App/RootView.swift"),
             atomically: true,
@@ -351,11 +365,29 @@ private final class E2ERunner {
             model.fileBrowserState.visibleEntries.first?.relativePath == "src/App/RootView.swift",
             "fuzzy search preferred RootView.swift"
         )
+        try assert(model.openFileInBrowser(relativePath: "index.html"), "HTML fixture opened in Browser mode")
+        try assert(model.selectedRightPanelMode == .browser, "browser preview selected Browser mode")
+        try assert(model.selectedRightPanelTab.relativePath == "index.html", "browser tab tracked HTML relative path")
+        try assert(
+            model.selectedRightPanelTab.urlString
+                == paths.projectDirectory.appendingPathComponent("index.html").standardizedFileURL.absoluteString,
+            "browser tab loaded HTML fixture file URL"
+        )
+        try assert(model.openFileInBrowser(relativePath: "diagram.svg"), "SVG fixture opened in Browser mode")
+        try assert(model.selectedRightPanelTab.relativePath == "diagram.svg", "browser tab tracked SVG relative path")
+        let browserTabIDs = model.selectedRightPanelState.tabs.filter { $0.kind == .browser }.map(\.id)
+        try assert(
+            browserTabIDs.contains(RightPanelTab.browserTabID(urlString: nil, relativePath: "index.html"))
+                && browserTabIDs.contains(RightPanelTab.browserTabID(urlString: nil, relativePath: "diagram.svg")),
+            "browser tabs included HTML and SVG preview files"
+        )
+        model.openBrowserTab(urlString: "example.com")
+        try assert(model.selectedRightPanelTab.urlString == "https://example.com", "typed browser URL normalized")
         model.openFileInNvim(relativePath: "src/App/RootView.swift")
         try assert(
             model.externalOpenFileTarget(relativePath: "src/App/RootView.swift")
                 == ExternalOpenTarget(
-                    url: paths.projectDirectory.appendingPathComponent("src/App/RootView.swift"),
+                    url: paths.projectDirectory.appendingPathComponent("src/App/RootView.swift").standardizedFileURL,
                     kind: .file
                 ),
             "external-open file target uses the selected thread working directory"
@@ -383,8 +415,9 @@ private final class E2ERunner {
         try assertMissingDirectoryRecovery()
 
         model.toggleBottomTerminal()
-        model.setRightPanelWidth(420)
-        model.setSidebarWidth(280)
+        model.setRightPanelWidth(560)
+        model.setSidebarWidth(320)
+        model.setGlobalTerminalHeight(240)
         model.toggleRightPanelCollapsed()
         model.toggleRightPanelCollapsed()
         model.archiveThread(id: claudeThreadID)
@@ -431,6 +464,12 @@ private final class E2ERunner {
         let reloadedModel = try makeModel(databasePath: databasePath)
         try assert(reloadedModel.selectedThread?.id == codexThreadID, "relaunch preserved selected codex thread")
         try assert(reloadedModel.selectedThread?.sessionIdentity == "codex-e2e-001", "relaunch preserved codex session identity")
+        try assert(reloadedModel.layoutState.sidebarWidth == 320, "relaunch preserved resized sidebar width")
+        try assert(reloadedModel.layoutState.rightPanelWidth == 560, "relaunch preserved resized right panel width")
+        try assert(
+            reloadedModel.layoutState.globalTerminalHeight == 240,
+            "relaunch preserved resized bottom terminal height"
+        )
         let resumedRequest = try unwrap(reloadedModel.activateSelectedProjectTerminal(), "resumed project terminal exists")
         let resumedCommand = resumedRequest.request.command.joined(separator: " ")
         try assert(
@@ -481,6 +520,11 @@ private final class E2ERunner {
             case .missingTool:
                 model.selectRightPanelMode(.git)
             case .bottomTerminal:
+                model.toggleBottomTerminal()
+            case .panelResize:
+                model.setSidebarWidth(360)
+                model.setRightPanelWidth(620)
+                model.setGlobalTerminalHeight(260)
                 model.toggleBottomTerminal()
             case .panelCollapse:
                 model.toggleSidebarCollapsed()
@@ -831,6 +875,7 @@ private enum VisualState: String, CaseIterable {
     case missingDirectory = "missing-directory"
     case missingTool = "missing-tool"
     case bottomTerminal = "bottom-terminal"
+    case panelResize = "panel-resize"
     case panelCollapse = "panel-collapse"
     case keyboardInput = "keyboard-input"
 }

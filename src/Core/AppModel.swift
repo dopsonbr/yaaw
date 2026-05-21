@@ -21,6 +21,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var layoutState: LayoutState
     @Published public private(set) var fileBrowserState: FileBrowserState
     @Published public private(set) var selectedFileRelativePath: String?
+    @Published public private(set) var browserUnavailableMessagesByThreadID: [UUID: String]
     @Published public private(set) var configuration: YAAWConfiguration
     @Published public private(set) var expandedProjectIDs: Set<UUID>
     @Published public private(set) var expandedArchivedProjectIDs: Set<UUID>
@@ -137,6 +138,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             metadata: selectedThreadID.flatMap { snapshot.fileIndexMetadataByThreadID[$0] }
         )
         self.selectedFileRelativePath = nil
+        self.browserUnavailableMessagesByThreadID = [:]
         self.navigationHistory = NavigationHistory(
             initial: AppSelection(projectID: selectedProjectID, threadID: selectedThreadID)
         )
@@ -367,16 +369,30 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func externalOpenFileTarget(relativePath: String) -> ExternalOpenTarget? {
+        fileBrowserExternalOpenTarget(relativePath: relativePath, isDirectory: false)
+    }
+
+    public func fileBrowserExternalOpenTarget(relativePath: String, isDirectory: Bool) -> ExternalOpenTarget? {
+        guard let url = fileBrowserURL(relativePath: relativePath) else { return nil }
+        return ExternalOpenTarget(
+            url: url,
+            kind: isDirectory ? .directory : .file
+        )
+    }
+
+    public func fileBrowserURL(relativePath: String) -> URL? {
         guard let thread = selectedThread,
               isExistingDirectory(thread.workingDirectory) else {
             return nil
         }
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         guard !normalizedPath.isEmpty else { return nil }
-        return ExternalOpenTarget(
-            url: thread.workingDirectory.appendingPathComponent(normalizedPath),
-            kind: .file
-        )
+        let root = thread.workingDirectory.standardizedFileURL
+        let url = root.appendingPathComponent(normalizedPath).standardizedFileURL
+        let rootPath = root.path
+        let path = url.path
+        guard path == rootPath || path.hasPrefix(rootPath + "/") else { return nil }
+        return url
     }
 
     public var selectedExternalOpenFileTarget: ExternalOpenTarget? {
@@ -400,6 +416,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public var selectedRightPanelTab: RightPanelTab {
         selectedRightPanelState.selectedTab
+    }
+
+    public var selectedBrowserUnavailableMessage: String? {
+        selectedThreadID.flatMap { browserUnavailableMessagesByThreadID[$0] }
     }
 
     public var isBottomTerminalExpanded: Bool {
@@ -426,6 +446,16 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         cachedArchivedThreadsByProject[projectID] ?? []
     }
 
+    public var archivedThreads: [AgentThread] {
+        projects.flatMap { project in
+            cachedArchivedThreadsByProject[project.id] ?? []
+        }
+    }
+
+    public func projectDisplayName(for projectID: UUID) -> String {
+        projects.first { $0.id == projectID }?.displayName ?? "Unknown Project"
+    }
+
     public var unreadThreadActivityCount: Int {
         threadActivityByThreadID.values.filter(\.isUnread).count
     }
@@ -436,6 +466,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public var hasArchivedThreadsForSelectedProject: Bool {
         !archivedThreadsForSelectedProject.isEmpty
+    }
+
+    public var hasArchivedThreads: Bool {
+        !archivedThreads.isEmpty
     }
 
     public func isProjectExpanded(_ projectID: UUID) -> Bool {
@@ -510,30 +544,64 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         persistLayout()
     }
 
-    public func setSidebarWidth(_ width: Double) {
+    public func setSidebarWidth(_ width: Double, persist: Bool = true) {
         layoutState.sidebarWidth = LayoutState.clamp(
             width,
             minimum: LayoutState.minimumSidebarWidth,
             maximum: LayoutState.maximumSidebarWidth
         )
-        persistLayout()
+        if persist {
+            persistLayout()
+        }
     }
 
-    public func setRightPanelWidth(_ width: Double) {
+    public func setRightPanelWidth(_ width: Double, persist: Bool = true) {
         layoutState.rightPanelWidth = LayoutState.clamp(
             width,
             minimum: LayoutState.minimumRightPanelWidth,
             maximum: LayoutState.maximumRightPanelWidth
         )
-        persistLayout()
+        if persist {
+            persistLayout()
+        }
     }
 
-    public func setGlobalTerminalHeight(_ height: Double) {
-        layoutState.globalTerminalHeight = LayoutState.clamp(
+    public func setGlobalTerminalHeight(
+        _ height: Double,
+        availableWindowHeight: Double? = nil,
+        persist: Bool = true
+    ) {
+        layoutState.globalTerminalHeight = LayoutState.clampedGlobalTerminalHeight(
             height,
-            minimum: LayoutState.minimumGlobalTerminalHeight,
-            maximum: LayoutState.maximumGlobalTerminalHeight
+            availableWindowHeight: availableWindowHeight
         )
+        if persist {
+            persistLayout()
+        }
+    }
+
+    public func resetSidebarWidth(persist: Bool = true) {
+        layoutState.resetSidebarWidth()
+        if persist {
+            persistLayout()
+        }
+    }
+
+    public func resetRightPanelWidth(persist: Bool = true) {
+        layoutState.resetRightPanelWidth()
+        if persist {
+            persistLayout()
+        }
+    }
+
+    public func resetGlobalTerminalHeight(persist: Bool = true) {
+        layoutState.resetGlobalTerminalHeight()
+        if persist {
+            persistLayout()
+        }
+    }
+
+    public func commitLayoutResize() {
         persistLayout()
     }
 
@@ -687,7 +755,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard let selectedThreadID else { return nil }
         let tab = selectedRightPanelTab
         switch tab.kind {
-        case .files:
+        case .files, .browser:
             return nil
         case .git:
             return activateTerminal(role: .lazygit(threadID: selectedThreadID))
@@ -879,6 +947,23 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         return completeOutput
     }
 
+    private func setBrowserUnavailableMessage(_ message: String, threadID: UUID) {
+        browserUnavailableMessagesByThreadID[threadID] = message
+    }
+
+    private static func normalizedBrowserURLString(_ urlString: String?) -> String? {
+        guard let urlString = urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !urlString.isEmpty else {
+            return nil
+        }
+        if urlString.contains("://") || urlString.hasPrefix("file:") {
+            return urlString
+        }
+        if urlString.hasPrefix("localhost") || urlString.hasPrefix("127.0.0.1") || urlString.hasPrefix("[::1]") {
+            return "http://\(urlString)"
+        }
+        return "https://\(urlString)"
+    }
+
     public func refreshSelectedFileBrowser() {
         guard let thread = selectedThread else {
             fileBrowserState = FileBrowserState()
@@ -950,6 +1035,79 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         nvimRelaunchTokensByThreadID[selectedThreadID] = UUID()
         persistRightPanelMode(threadID: selectedThreadID)
         persistRightPanelState(threadID: selectedThreadID)
+    }
+
+    public func openBrowserTab(urlString: String? = nil) {
+        guard let selectedThreadID else { return }
+        var state = selectedRightPanelState
+        _ = state.openBrowserTab(urlString: Self.normalizedBrowserURLString(urlString))
+        rightPanelStatesByThreadID[selectedThreadID] = state
+        rightPanelModesByThreadID[selectedThreadID] = .browser
+        browserUnavailableMessagesByThreadID.removeValue(forKey: selectedThreadID)
+        persistRightPanelMode(threadID: selectedThreadID)
+        persistRightPanelState(threadID: selectedThreadID)
+    }
+
+    public func updateSelectedBrowserTab(urlString: String) {
+        guard let selectedThreadID else { return }
+        var state = selectedRightPanelState
+        guard state.selectedTab.kind == .browser else { return }
+        state.updateBrowserTab(id: state.selectedTabID, urlString: Self.normalizedBrowserURLString(urlString))
+        rightPanelStatesByThreadID[selectedThreadID] = state
+        rightPanelModesByThreadID[selectedThreadID] = .browser
+        browserUnavailableMessagesByThreadID.removeValue(forKey: selectedThreadID)
+        persistRightPanelMode(threadID: selectedThreadID)
+        persistRightPanelState(threadID: selectedThreadID)
+    }
+
+    @discardableResult
+    public func openFileInBrowser(relativePath: String) -> Bool {
+        guard let selectedThreadID, let thread = selectedThread else { return false }
+        let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
+        guard !normalizedPath.isEmpty else {
+            setBrowserUnavailableMessage("Browser preview requires a file path.", threadID: selectedThreadID)
+            return false
+        }
+        guard Self.isBrowserPreviewSupported(relativePath: normalizedPath) else {
+            setBrowserUnavailableMessage("Unsupported browser preview type: \(normalizedPath)", threadID: selectedThreadID)
+            return false
+        }
+        guard !normalizedPath.split(separator: "/").contains("..") else {
+            setBrowserUnavailableMessage("Browser preview is limited to files under the selected thread.", threadID: selectedThreadID)
+            return false
+        }
+
+        let root = thread.workingDirectory.standardizedFileURL
+        let fileURL = root.appendingPathComponent(normalizedPath).standardizedFileURL
+        let rootPath = root.path.hasSuffix("/") ? root.path : "\(root.path)/"
+        guard fileURL.path.hasPrefix(rootPath) else {
+            setBrowserUnavailableMessage("Browser preview is limited to files under the selected thread.", threadID: selectedThreadID)
+            return false
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            setBrowserUnavailableMessage("Browser preview file does not exist: \(normalizedPath)", threadID: selectedThreadID)
+            return false
+        }
+
+        selectedFileRelativePath = normalizedPath
+        var state = selectedRightPanelState
+        _ = state.openBrowserTab(urlString: fileURL.absoluteString, relativePath: normalizedPath)
+        rightPanelStatesByThreadID[selectedThreadID] = state
+        rightPanelModesByThreadID[selectedThreadID] = .browser
+        browserUnavailableMessagesByThreadID.removeValue(forKey: selectedThreadID)
+        persistRightPanelMode(threadID: selectedThreadID)
+        persistRightPanelState(threadID: selectedThreadID)
+        return true
+    }
+
+    public static func isBrowserPreviewSupported(relativePath: String) -> Bool {
+        let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
+        let supportedExtensions: Set<String> = [
+            "html", "htm", "svg", "pdf", "png", "jpg", "jpeg", "gif", "webp", "txt", "json", "xml"
+        ]
+        return supportedExtensions.contains(URL(fileURLWithPath: normalizedPath).pathExtension.lowercased())
     }
 
     @discardableResult
@@ -1108,6 +1266,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return
         }
         projects.swapAt(index, candidateIndex)
+        normalizeProjectSortOrders(preservingCurrentOrder: true)
+    }
+
+    public func reorderProject(id projectID: UUID, before targetProjectID: UUID) {
+        guard projectID != targetProjectID else { return }
+        projects = Self.sortedProjects(projects)
+        guard let sourceIndex = projects.firstIndex(where: { $0.id == projectID }),
+              let targetIndex = projects.firstIndex(where: { $0.id == targetProjectID }),
+              projects[sourceIndex].isPinned == projects[targetIndex].isPinned else {
+            return
+        }
+        let project = projects.remove(at: sourceIndex)
+        let insertionIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+        projects.insert(project, at: insertionIndex)
         normalizeProjectSortOrders(preservingCurrentOrder: true)
     }
 

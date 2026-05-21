@@ -29,6 +29,13 @@ final class ExternalOpenWorkspace {
         )
     }
 
+    func defaultEditorTool(settings: ExternalOpenSettings) -> ExternalOpenToolID? {
+        ExternalOpenToolResolver.defaultEditorTool(
+            settings: settings,
+            detectedTools: detectedTools()
+        )
+    }
+
     func icon(for tool: ExternalOpenToolID) -> NSImage? {
         guard let applicationURL = applicationURL(for: tool) else { return nil }
         let icon = workspace.icon(forFile: applicationURL.path)

@@ -48,9 +48,12 @@ Requirements use:
 - The app MUST keep all first-version project and thread metadata local.
 - The app MUST keep thread agent CLI selection and CLI session identity local.
 - The app MUST keep thread activity status and notification previews local.
+- The app MUST NOT collect telemetry or analytics.
+- The app MUST NOT upload crash reports, diagnostics, logs, settings, indexes, activity previews, or usage events.
 - The app MUST NOT send project paths, file names, terminal output, agent CLI session metadata, or repository content to a remote service outside of the user's chosen local CLI process.
 - The app MUST sanitize notification previews before storing or displaying them and MUST NOT treat notification support as permission to persist full terminal scrollback.
 - The app itself MUST NOT require network access for core first-version workflows outside of any network behavior performed by the user's chosen local CLI process.
+- The app MUST leave agent authentication, model configuration, approval behavior, and tool execution inside the user's chosen local CLI process.
 - The app MUST use the user's local shell and local tools.
 - The app SHOULD avoid storing terminal scrollback unless explicitly added in a later plan.
 
@@ -107,15 +110,17 @@ Detailed testing expectations are defined in [Testing Requirements](testing-requ
 
 - The app SHOULD provide local diagnostic logs for app lifecycle, project/thread state changes, agent CLI launch or resume failures, terminal launch failures, indexing failures, and SQLite errors.
 - Logs MUST remain local.
+- Diagnostics MUST remain local and MUST NOT be uploaded automatically.
 - Logs MUST avoid capturing sensitive terminal content unless explicitly enabled in a later implementation plan.
 - External tool failures SHOULD preserve the original command and exit status where practical.
 
 ## Packaging
 
 - The app SHOULD package as a standard macOS `.app`.
-- The first version SHOULD assume supported agent CLIs and preferred terminal tools are user-installed tools resolved from `PATH`, while falling back to `vim`/`vi` and `git diff` where specified.
+- The first version SHOULD assume supported agent CLIs, agent CLI harnesses, and preferred terminal tools are user-installed tools resolved from settings or `PATH`, while falling back to `vim`/`vi` and `git diff` where specified.
 - The app SHOULD make missing tool failures visible in the relevant terminal panel.
 - The app itself MUST NOT require network setup or cloud authentication for core workflows outside of any authentication required by the user's chosen local CLI process.
+- The app package MUST NOT include a telemetry SDK or analytics endpoint configuration.
 
 ## Non-Goals
 
@@ -123,9 +128,11 @@ Detailed testing expectations are defined in [Testing Requirements](testing-requ
 - Intel Mac support.
 - Remote development.
 - Cloud sync.
+- Telemetry, analytics collection, or remote diagnostic upload.
 - Multi-user collaboration.
 - Built-in source control UI.
 - Built-in text editor.
 - Persistent live PTY sessions after app restart.
 - Agent orchestration beyond one bound CLI agent session per thread.
 - Agent harness behavior, prompt orchestration, or tool-call mediation.
+- Bundled agent runtime or hosted agent service.

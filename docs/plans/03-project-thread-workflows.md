@@ -2,7 +2,7 @@
 
 ## Summary
 
-Build the first real user workflows on top of persisted state: create project, create thread (with the `codex` / `claude` choice prompt), select thread, and archive thread. This plan owns the user-facing CLI choice and persists `agent_cli` per thread. The actual CLI launch, session identity capture, and resume behavior land in [Plan 07](07-agent-cli-session-binding.md).
+Build the first real user workflows on top of persisted state: create project, create thread (with the `codex` / `claude` choice prompt), select thread, and archive thread. This plan owns the user-facing CLI choice and persists `agent_cli` per thread. The YAAW-side launch, session identity capture, and resume adapter behavior for user-provided CLIs land in [Plan 07](07-agent-cli-session-binding.md).
 
 ## Requirements
 

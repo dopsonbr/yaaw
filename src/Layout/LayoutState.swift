@@ -5,11 +5,12 @@ public struct LayoutState: Equatable, Sendable {
     public static let defaultRightPanelWidth = 360.0
     public static let defaultGlobalTerminalHeight = 140.0
     public static let minimumSidebarWidth = 180.0
-    public static let maximumSidebarWidth = 420.0
-    public static let minimumRightPanelWidth = 300.0
-    public static let maximumRightPanelWidth = 420.0
+    public static let maximumSidebarWidth = 520.0
+    public static let minimumRightPanelWidth = 280.0
+    public static let maximumRightPanelWidth = 720.0
+    public static let minimumMainWorkspaceWidth = 420.0
     public static let minimumGlobalTerminalHeight = 96.0
-    public static let maximumGlobalTerminalHeight = 320.0
+    public static let maximumGlobalTerminalHeight = 420.0
 
     public var sidebarWidth: Double
     public var rightPanelWidth: Double
@@ -52,5 +53,38 @@ public struct LayoutState: Equatable, Sendable {
 
     public static func clamp(_ value: Double, minimum: Double, maximum: Double) -> Double {
         min(max(value, minimum), maximum)
+    }
+
+    public static func maximumGlobalTerminalHeight(for availableWindowHeight: Double?) -> Double {
+        guard let availableWindowHeight, availableWindowHeight > 0 else {
+            return maximumGlobalTerminalHeight
+        }
+        return max(
+            minimumGlobalTerminalHeight,
+            min(maximumGlobalTerminalHeight, availableWindowHeight * 0.45)
+        )
+    }
+
+    public static func clampedGlobalTerminalHeight(
+        _ value: Double,
+        availableWindowHeight: Double? = nil
+    ) -> Double {
+        clamp(
+            value,
+            minimum: minimumGlobalTerminalHeight,
+            maximum: maximumGlobalTerminalHeight(for: availableWindowHeight)
+        )
+    }
+
+    public mutating func resetSidebarWidth() {
+        sidebarWidth = Self.defaultSidebarWidth
+    }
+
+    public mutating func resetRightPanelWidth() {
+        rightPanelWidth = Self.defaultRightPanelWidth
+    }
+
+    public mutating func resetGlobalTerminalHeight() {
+        globalTerminalHeight = Self.defaultGlobalTerminalHeight
     }
 }

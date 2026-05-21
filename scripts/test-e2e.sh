@@ -8,6 +8,8 @@ APP_NAME="YAAW-E2E"
 
 cd "$ROOT_DIR"
 
+printf 'YAAW E2E pasteboard sentinel' | /usr/bin/pbcopy >/dev/null 2>&1 || true
+
 ./script/build_and_run.sh --build-only --variant=e2e >/dev/null
 APP_BUNDLE="$ROOT_DIR/dist/$APP_NAME.app"
 if [[ ! -d "$APP_BUNDLE" ]]; then
@@ -213,6 +215,17 @@ launch_state() {
   else
     sleep 1
   fi
+  if [[ "$state" == "panel-resize" ]]; then
+    osascript <<APPLESCRIPT >/dev/null
+tell application "System Events"
+  tell process "$APP_NAME"
+    perform action "AXRaise" of window 1
+    set size of window 1 to {1100, 760}
+  end tell
+end tell
+APPLESCRIPT
+    sleep 1
+  fi
   assert_no_privacy_prompts "$state"
   capture_window "$screenshot_path"
   assert_no_terminal_launch_failure "$screenshot_path"
@@ -240,8 +253,10 @@ run_keyboard_input_probe() {
 
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
-  set frontmost of process "$APP_NAME" to true
   tell process "$APP_NAME"
+    try
+      set frontmost to true
+    end try
     perform action "AXRaise" of window 1
     set position of window 1 to {0, 25}
     set size of window 1 to {1100, 732}
@@ -327,8 +342,10 @@ on findTextArea(rootElement)
 end findTextArea
 
 tell application "System Events"
-  set frontmost of process "$APP_NAME" to true
   tell process "$APP_NAME"
+    try
+      set frontmost to true
+    end try
     perform action "AXRaise" of window 1
     set openButton to my findByIdentifier(window 1, "open-settings-button")
     if openButton is missing value then error "settings button not found"
@@ -350,7 +367,9 @@ tell application "System Events"
 
     set replacementText to "version: 1" & linefeed & "agent:" & linefeed & "  default: claude" & linefeed
     click editorArea
-    set value of editorArea to replacementText
+    keystroke "a" using command down
+    delay 0.1
+    keystroke replacementText
     delay 0.4
     set updatedText to value of editorArea as text
     if updatedText does not contain "default: claude" then error "settings YAML editor did not accept edited text"
@@ -402,7 +421,7 @@ fi
 run_keyboard_input_probe
 run_settings_editor_probe
 
-for state in launch project-creation files nvim git missing-directory bottom-terminal panel-collapse; do
+for state in launch project-creation files nvim git missing-directory bottom-terminal panel-resize panel-collapse; do
   launch_state "$state"
 done
 

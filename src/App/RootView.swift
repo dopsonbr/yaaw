@@ -2,6 +2,11 @@ import YAAWKit
 import AppKit
 import SwiftUI
 
+private enum FileBrowserCopyPathStyle {
+    case relative
+    case full
+}
+
 struct RootView: View {
     @ObservedObject var model: AppModel
     @Binding var isSettingsOpen: Bool
@@ -53,7 +58,7 @@ struct RootView: View {
                         onBack: { isSettingsOpen = false }
                     )
                 } else {
-                    workspaceContent(windowWidth: geometry.size.width)
+                    workspaceContent()
                 }
             }
         }
@@ -81,6 +86,10 @@ struct RootView: View {
         externalOpenWorkspace.defaultTool(settings: model.configuration.tools.externalOpen)
     }
 
+    private var defaultExternalEditorTool: ExternalOpenToolID? {
+        externalOpenWorkspace.defaultEditorTool(settings: model.configuration.tools.externalOpen)
+    }
+
     private func openSelectedDirectoryWithDefaultExternalTool() {
         guard let tool = defaultExternalOpenTool else { return }
         openSelectedDirectoryExternally(tool)
@@ -92,42 +101,52 @@ struct RootView: View {
     }
 
     private func openFileExternally(_ entry: FileBrowserEntry, tool: ExternalOpenToolID) {
-        guard let target = model.externalOpenFileTarget(relativePath: entry.relativePath) else { return }
+        guard let target = model.fileBrowserExternalOpenTarget(
+            relativePath: entry.relativePath,
+            isDirectory: entry.isDirectory
+        ) else { return }
         externalOpenWorkspace.open(target: target, with: tool)
     }
 
-    private func workspaceContent(windowWidth: Double) -> some View {
-        HStack(spacing: 0) {
+    private func copyFileBrowserPath(_ entry: FileBrowserEntry, style: FileBrowserCopyPathStyle) {
+        let value: String?
+        switch style {
+        case .relative:
+            value = entry.relativePath
+        case .full:
+            value = model.fileBrowserURL(relativePath: entry.relativePath)?.path
+        }
+        guard let value else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func workspaceContent() -> some View {
+        WorkspaceSplitView(
+            layoutState: model.layoutState,
+            isSidebarCollapsed: model.layoutState.isSidebarCollapsed,
+            isRightPanelCollapsed: model.layoutState.isRightPanelCollapsed,
+            isBottomTerminalExpanded: model.isBottomTerminalExpanded,
+            theme: model.configuration.resolvedTheme,
+            onResize: updateLayoutFromSplitView,
+            onReset: resetSplitDivider
+        ) {
             sidebarRegion
-
-            Divider()
-                .overlay(dracula(.currentLine))
-
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    MainWorkspaceView(model: model)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    Divider()
-                        .overlay(dracula(.currentLine))
-
-                    rightPanelRegion(windowWidth: windowWidth)
+        } main: {
+            MainWorkspaceView(model: model)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } right: {
+            rightPanelRegion
+        } bottom: {
+            BottomTerminalBar(
+                isExpanded: model.isBottomTerminalExpanded,
+                request: selectedBottomTerminalRequest,
+                fonts: model.configuration.fonts,
+                onToggle: model.toggleBottomTerminal,
+                onAppearExpanded: {
+                    model.activateSelectedBottomTerminal()
                 }
-
-                BottomTerminalBar(
-                    isExpanded: model.isBottomTerminalExpanded,
-                    height: model.layoutState.globalTerminalHeight,
-                    request: selectedBottomTerminalRequest,
-                    fonts: model.configuration.fonts,
-                    onToggle: model.toggleBottomTerminal,
-                    onResize: { delta in
-                        model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
-                    },
-                    onAppearExpanded: {
-                        model.activateSelectedBottomTerminal()
-                    }
-                )
-            }
+            )
         }
     }
 
@@ -142,29 +161,12 @@ struct RootView: View {
             .frame(width: 44)
         } else {
             SidebarView(model: model)
-                .frame(width: model.layoutState.sidebarWidth)
-
-            VerticalResizeHandle(
-                accessibilityLabel: "Resize sidebar",
-                onDrag: { delta in
-                    model.setSidebarWidth(model.layoutState.sidebarWidth + delta)
-                }
-            )
         }
     }
 
     @ViewBuilder
-    private func rightPanelRegion(windowWidth: Double) -> some View {
-        if !model.layoutState.isRightPanelCollapsed && windowWidth < rightPanelAdaptiveMinimumWidth {
-            CollapsedPanelRail(
-                systemImage: IconRole.rightSidebar.icon.systemSymbolName,
-                accessibilityLabel: "Right panel hidden until the window is wider",
-                action: {}
-            )
-            .frame(width: 44)
-            .disabled(true)
-            .opacity(0.65)
-        } else if model.layoutState.isRightPanelCollapsed {
+    private var rightPanelRegion: some View {
+        if model.layoutState.isRightPanelCollapsed {
             CollapsedPanelRail(
                 systemImage: IconRole.rightSidebar.icon.systemSymbolName,
                 accessibilityLabel: "Expand right panel",
@@ -172,24 +174,40 @@ struct RootView: View {
             )
             .frame(width: 44)
         } else {
-            VerticalResizeHandle(
-                accessibilityLabel: "Resize right panel",
-                onDrag: { delta in
-                    model.setRightPanelWidth(model.layoutState.rightPanelWidth - delta)
-                }
-            )
-
             RightPanelView(
                 model: model,
-                externalOpenTools: availableExternalOpenTools,
-                onOpenFileExternally: openFileExternally
+                defaultExternalEditorTool: defaultExternalEditorTool,
+                onOpenFileExternally: openFileExternally,
+                onCopyPath: copyFileBrowserPath
             )
-                .frame(width: model.layoutState.rightPanelWidth)
+        }
+    }
+
+    private func updateLayoutFromSplitView(_ layout: WorkspaceSplitLayout, phase: WorkspaceSplitResizePhase) {
+        let shouldPersist = phase == .ended
+        model.setSidebarWidth(layout.sidebarWidth, persist: false)
+        model.setRightPanelWidth(layout.rightPanelWidth, persist: false)
+        model.setGlobalTerminalHeight(
+            layout.globalTerminalHeight,
+            availableWindowHeight: layout.availableWindowHeight,
+            persist: false
+        )
+        if shouldPersist {
+            model.commitLayoutResize()
+        }
+    }
+
+    private func resetSplitDivider(_ divider: WorkspaceSplitDivider) {
+        switch divider {
+        case .sidebar:
+            model.resetSidebarWidth()
+        case .rightPanel:
+            model.resetRightPanelWidth()
+        case .bottomTerminal:
+            model.resetGlobalTerminalHeight()
         }
     }
 }
-
-private let rightPanelAdaptiveMinimumWidth = 1_680.0
 
 private struct AppChromeHeader: View {
     let title: String
@@ -351,6 +369,36 @@ private struct ExternalOpenToolIcon: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(dracula(.comment))
         }
+    }
+}
+
+private struct AgentCLIIcon: View {
+    let agentCLI: AgentCLIKind
+
+    var body: some View {
+        if let image = bundledImage {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        } else {
+            Image(systemName: agentCLI.fallbackSystemSymbolName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(dracula(.cyan))
+        }
+    }
+
+    private var bundledImage: NSImage? {
+        for fileExtension in agentCLI.brandIconResourceExtensions {
+            guard let url = Bundle.module.url(
+                forResource: agentCLI.brandIconResourceName,
+                withExtension: fileExtension,
+                subdirectory: "AgentIcons"
+            ), let image = NSImage(contentsOf: url) else {
+                continue
+            }
+            return image
+        }
+        return nil
     }
 }
 
@@ -956,6 +1004,7 @@ private struct SidebarView: View {
     @ObservedObject var model: AppModel
     @State private var isProjectSheetPresented = false
     @State private var threadSheetProject: Project?
+    @State private var isArchiveExpanded = false
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
@@ -991,6 +1040,11 @@ private struct SidebarView: View {
             }
 
             Spacer(minLength: 0)
+
+            GlobalArchivedThreadsSection(
+                model: model,
+                isExpanded: $isArchiveExpanded
+            )
 
             Button {
                 model.toggleSidebarCollapsed()
@@ -1057,36 +1111,34 @@ private struct ProjectSidebarSection: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Project \(project.displayName)")
 
-                SidebarIconButton(
-                    systemImage: (project.isPinned ? IconRole.unpin : IconRole.pin).icon.systemSymbolName,
-                    help: project.isPinned ? "Unpin project" : "Pin project"
-                ) {
-                    model.toggleProjectPinned(id: project.id)
-                }
-
-                SidebarIconButton(systemImage: IconRole.moveUp.icon.systemSymbolName, help: "Move project up") {
-                    model.moveProject(id: project.id, direction: .up)
-                }
-
-                SidebarIconButton(systemImage: IconRole.moveDown.icon.systemSymbolName, help: "Move project down") {
-                    model.moveProject(id: project.id, direction: .down)
-                }
-
                 SidebarIconButton(systemImage: IconRole.newThread.icon.systemSymbolName, help: "New thread") {
                     onNewThread()
+                }
+
+                SidebarActionsMenu(help: "Project actions") {
+                    Button(project.isPinned ? "Unpin Project" : "Pin Project") {
+                        model.toggleProjectPinned(id: project.id)
+                    }
                 }
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 4)
             .background(model.selectedProjectID == project.id ? dracula(.currentLine) : dracula(.background))
+            .draggable(project.id.uuidString)
+            .dropDestination(for: String.self) { items, _ in
+                guard let rawID = items.first,
+                      let draggedProjectID = UUID(uuidString: rawID) else {
+                    return false
+                }
+                model.reorderProject(id: draggedProjectID, before: project.id)
+                return true
+            }
 
             if model.isProjectExpanded(project.id) {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(model.activeThreads(for: project.id)) { thread in
                         ActiveThreadRow(model: model, thread: thread)
                     }
-
-                    ArchivedThreadDisclosure(model: model, project: project)
                 }
                 .padding(.leading, 20)
             }
@@ -1133,25 +1185,24 @@ private struct ActiveThreadRow: View {
                     ThreadActivityIndicator(activity: activity)
                         .frame(width: 16, height: 16)
 
-                    Text(thread.agentCLI.displayName)
-                        .font(fonts.interfaceFont(sizeOffset: -1))
-                        .foregroundStyle(activity.isUnread ? dracula(.yellow) : dracula(.cyan))
-                        .lineLimit(1)
+                    AgentCLIIcon(agentCLI: thread.agentCLI)
+                        .frame(width: 18, height: 18)
+                        .help(thread.agentCLI.displayName)
+                        .accessibilityLabel(thread.agentCLI.displayName)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Thread \(thread.displayName), \(thread.agentCLI.displayName), \(activity.status.rawValue)")
 
-            SidebarIconButton(
-                systemImage: (thread.isPinned ? IconRole.unpin : IconRole.pin).icon.systemSymbolName,
-                help: thread.isPinned ? "Unpin thread" : "Pin thread"
-            ) {
-                model.toggleThreadPinned(id: thread.id)
-            }
+            SidebarActionsMenu(help: "Thread actions") {
+                Button(thread.isPinned ? "Unpin Thread" : "Pin Thread") {
+                    model.toggleThreadPinned(id: thread.id)
+                }
 
-            SidebarIconButton(systemImage: IconRole.archive.icon.systemSymbolName, help: "Archive thread") {
-                model.archiveThread(id: thread.id)
+                Button("Archive Thread") {
+                    model.archiveThread(id: thread.id)
+                }
             }
         }
         .font(fonts.interfaceFont())
@@ -1186,58 +1237,6 @@ private struct ThreadActivityIndicator: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(dracula(.comment))
                 .help("Inactive")
-        }
-    }
-}
-
-private struct ArchivedThreadDisclosure: View {
-    @ObservedObject var model: AppModel
-    let project: Project
-    @Environment(\.fontSettings) private var fonts
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Button {
-                model.setProjectArchiveExpanded(
-                    project.id,
-                    isExpanded: !model.isProjectArchiveExpanded(project.id)
-                )
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: (
-                        model.isProjectArchiveExpanded(project.id) ? IconRole.disclosureExpanded : IconRole.disclosureCollapsed
-                    ).icon.systemSymbolName)
-                        .frame(width: 12)
-
-                    Label("Archived", systemImage: IconRole.archive.icon.systemSymbolName)
-                        .labelStyle(.titleAndIcon)
-
-                    Spacer()
-
-                    Text("\(model.archivedThreads(for: project.id).count)")
-                        .font(fonts.interfaceFont(sizeOffset: -2))
-                        .foregroundStyle(dracula(.comment))
-                }
-                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
-                .foregroundStyle(dracula(.orange))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 4)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Archived threads for \(project.displayName)")
-
-            if model.isProjectArchiveExpanded(project.id) {
-                if model.archivedThreads(for: project.id).isEmpty {
-                    Text("No archived threads")
-                        .font(fonts.interfaceFont(sizeOffset: -1))
-                        .foregroundStyle(dracula(.comment))
-                        .padding(.vertical, 4)
-                } else {
-                    ForEach(model.archivedThreads(for: project.id)) { thread in
-                        ArchivedThreadRow(model: model, thread: thread)
-                    }
-                }
-            }
         }
     }
 }
@@ -1288,9 +1287,83 @@ private struct SidebarIconButton: View {
     }
 }
 
+private struct SidebarActionsMenu<Content: View>: View {
+    let help: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Menu {
+            content()
+        } label: {
+            Image(systemName: IconRole.moreActions.icon.systemSymbolName)
+                .frame(width: 18, height: 18)
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(dracula(.cyan))
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+private struct GlobalArchivedThreadsSection: View {
+    @ObservedObject var model: AppModel
+    @Binding var isExpanded: Bool
+    @Environment(\.fontSettings) private var fonts
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: (isExpanded ? IconRole.disclosureExpanded : IconRole.disclosureCollapsed).icon.systemSymbolName)
+                        .frame(width: 12)
+
+                    Label("Archived", systemImage: IconRole.archive.icon.systemSymbolName)
+                        .labelStyle(.titleAndIcon)
+
+                    Spacer()
+
+                    Text("\(model.archivedThreads.count)")
+                        .font(fonts.interfaceFont(sizeOffset: -2))
+                        .foregroundStyle(dracula(.comment))
+                }
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+                .foregroundStyle(dracula(.orange))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Archived threads")
+
+            if isExpanded {
+                if model.archivedThreads.isEmpty {
+                    Text("No archived threads")
+                        .font(fonts.interfaceFont(sizeOffset: -1))
+                        .foregroundStyle(dracula(.comment))
+                        .padding(.vertical, 4)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(model.archivedThreads) { thread in
+                                ArchivedThreadRow(model: model, thread: thread)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                    .scrollIndicators(.hidden)
+                }
+            }
+        }
+    }
+}
+
 private struct ArchivedThreadRow: View {
     @ObservedObject var model: AppModel
     let thread: AgentThread
+    @Environment(\.fontSettings) private var fonts
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1306,24 +1379,31 @@ private struct ArchivedThreadRow: View {
 
                     Text(thread.displayName)
                         .lineLimit(1)
+
+                    Spacer()
+
+                    AgentCLIIcon(agentCLI: thread.agentCLI)
+                        .frame(width: 16, height: 16)
+                        .help(thread.agentCLI.displayName)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Archived thread \(thread.displayName)")
 
-            SidebarIconButton(
-                systemImage: (thread.isPinned ? IconRole.unpin : IconRole.pin).icon.systemSymbolName,
-                help: thread.isPinned ? "Unpin thread" : "Pin thread"
-            ) {
-                model.toggleThreadPinned(id: thread.id)
-            }
+            SidebarActionsMenu(help: "Archived thread actions") {
+                Button(thread.isPinned ? "Unpin Thread" : "Pin Thread") {
+                    model.toggleThreadPinned(id: thread.id)
+                }
 
-            SidebarIconButton(systemImage: IconRole.unarchive.icon.systemSymbolName, help: "Unarchive \(thread.displayName)") {
-                model.unarchiveThread(id: thread.id)
+                Button("Unarchive Thread") {
+                    model.unarchiveThread(id: thread.id)
+                }
             }
         }
+        .font(fonts.interfaceFont(sizeOffset: -1))
         .padding(.vertical, 6)
+        .help(model.projectDisplayName(for: thread.projectID))
     }
 }
 
@@ -1462,8 +1542,14 @@ private struct ThreadChoiceSheet: View {
 
             HStack(spacing: 12) {
                 ForEach(AgentCLIKind.allCases) { agentCLI in
-                    Button(agentCLI.displayName) {
+                    Button {
                         createThread(agentCLI: agentCLI)
+                    } label: {
+                        HStack(spacing: 6) {
+                            AgentCLIIcon(agentCLI: agentCLI)
+                                .frame(width: 16, height: 16)
+                            Text(agentCLI.displayName)
+                        }
                     }
                     .keyboardShortcut(agentCLI == model.defaultAgentCLI ? .defaultAction : nil)
                     .accessibilityLabel("Create \(agentCLI.displayName) thread")
@@ -1573,8 +1659,10 @@ private struct MainWorkspaceView: View {
 
 private struct RightPanelView: View {
     @ObservedObject var model: AppModel
-    let externalOpenTools: [ExternalOpenToolID]
+    let defaultExternalEditorTool: ExternalOpenToolID?
     let onOpenFileExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
+    let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
+    @StateObject private var isolatedToolRuntime = IsolatedToolRuntime()
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
@@ -1582,33 +1670,49 @@ private struct RightPanelView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(model.selectedRightPanelState.tabs) { tab in
-                        Button {
-                            model.selectRightPanelTab(id: tab.id)
-                        } label: {
-                            Label(tab.title, systemImage: IconRole.rightPanelMode(mode(for: tab.kind)).icon.systemSymbolName)
-                                .labelStyle(.titleAndIcon)
-                                .font(fonts.interfaceFont(weight: .semibold))
-                                .lineLimit(1)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(model.selectedRightPanelTab.id == tab.id ? dracula(.currentLine) : dracula(.background))
-                        .foregroundStyle(model.selectedRightPanelTab.id == tab.id ? dracula(.pink) : dracula(.foreground))
-                        .accessibilityLabel("\(tab.title) right panel tab")
+                        rightPanelTabButton(tab)
                     }
 
-                    Button {
-                        chooseNvimFile()
+                    Menu {
+                        Button {
+                            model.selectRightPanelTab(id: RightPanelTab.filesID)
+                        } label: {
+                            Label("Files", systemImage: IconRole.rightPanelMode(.files).icon.systemSymbolName)
+                        }
+
+                        Button {
+                            model.openBrowserTab()
+                        } label: {
+                            Label("Web Browser", systemImage: IconRole.rightPanelMode(.browser).icon.systemSymbolName)
+                        }
+
+                        Button {
+                            chooseNvimFile()
+                        } label: {
+                            Label("nvim File...", systemImage: IconRole.rightPanelMode(.nvim).icon.systemSymbolName)
+                        }
+
+                        Button {
+                            model.selectRightPanelTab(id: RightPanelTab.gitID)
+                        } label: {
+                            Label("Git", systemImage: IconRole.rightPanelMode(.git).icon.systemSymbolName)
+                        }
                     } label: {
-                        Image(systemName: IconRole.add.icon.systemSymbolName)
-                            .font(.system(size: 13, weight: .bold))
-                            .frame(width: 24, height: 24)
+                        HStack(spacing: 5) {
+                            Image(systemName: IconRole.add.icon.systemSymbolName)
+                            Image(systemName: IconRole.disclosureExpanded.icon.systemSymbolName)
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 38, height: 32)
+                        .contentShape(Rectangle())
                     }
+                    .menuStyle(.borderlessButton)
                     .buttonStyle(.plain)
-                    .foregroundStyle(dracula(.cyan))
-                    .help("Open file in a new nvim tab")
-                    .accessibilityLabel("Open file in a new nvim tab")
+                    .foregroundStyle(dracula(.foreground))
+                    .background(dracula(.background))
+                    .help("Open a new right panel tab")
+                    .accessibilityLabel("Open a new right panel tab")
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 7)
@@ -1631,8 +1735,12 @@ private struct RightPanelView: View {
                     onOpenFile: { entry in
                         model.openFileInNvim(relativePath: entry.relativePath)
                     },
-                    externalOpenTools: externalOpenTools,
-                    onOpenExternally: onOpenFileExternally
+                    onOpenInBrowser: { entry in
+                        model.openFileInBrowser(relativePath: entry.relativePath)
+                    },
+                    defaultExternalEditorTool: defaultExternalEditorTool,
+                    onOpenExternally: onOpenFileExternally,
+                    onCopyPath: onCopyPath
                 )
                 .onAppear {
                     model.refreshSelectedFileBrowser()
@@ -1640,6 +1748,19 @@ private struct RightPanelView: View {
                 .onChange(of: model.selectedThreadID) {
                     model.refreshSelectedFileBrowser()
                 }
+
+            case .browser:
+                BrowserPanel(
+                    tab: model.selectedRightPanelTab,
+                    threadID: model.selectedThreadID,
+                    runtime: isolatedToolRuntime,
+                    unavailableMessage: model.selectedBrowserUnavailableMessage,
+                    onNavigate: model.updateSelectedBrowserTab(urlString:),
+                    onOpenNewWindow: { urlString in
+                        model.openBrowserTab(urlString: urlString)
+                    }
+                )
+                .id(browserInstanceID(threadID: model.selectedThreadID, tabID: model.selectedRightPanelTab.id))
 
             case .nvim:
                 TerminalPlaceholderView(
@@ -1665,12 +1786,81 @@ private struct RightPanelView: View {
             }
         }
         .background(dracula(.background))
+        .onAppear {
+            syncIsolatedToolVisibility()
+        }
+        .onChange(of: activeBrowserInstanceID) {
+            syncIsolatedToolVisibility()
+        }
+        .onChange(of: model.selectedThreadID) {
+            syncIsolatedToolVisibility()
+        }
+        .onDisappear {
+            isolatedToolRuntime.shutdownAll()
+        }
+    }
+
+    private var activeBrowserInstanceID: String? {
+        guard model.selectedRightPanelTab.kind == .browser else { return nil }
+        return browserInstanceID(threadID: model.selectedThreadID, tabID: model.selectedRightPanelTab.id)
+    }
+
+    private func browserInstanceID(threadID: UUID?, tabID: String) -> String {
+        "\(threadID?.uuidString ?? "no-thread"):\(tabID)"
+    }
+
+    private func syncIsolatedToolVisibility() {
+        guard let activeBrowserInstanceID else {
+            isolatedToolRuntime.shutdownAll()
+            return
+        }
+        isolatedToolRuntime.hideAll(except: activeBrowserInstanceID)
+    }
+
+    private func rightPanelTabButton(_ tab: RightPanelTab) -> some View {
+        let isSelected = model.selectedRightPanelTab.id == tab.id
+        return Button {
+            model.selectRightPanelTab(id: tab.id)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: IconRole.rightPanelMode(mode(for: tab.kind)).icon.systemSymbolName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 22, height: 32)
+
+                if isSelected, shouldShowTabTitle(tab) {
+                    Text(tab.title)
+                        .font(fonts.interfaceFont(sizeOffset: -2, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 150, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, isSelected && shouldShowTabTitle(tab) ? 8 : 6)
+            .frame(height: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(isSelected ? dracula(.currentLine) : dracula(.background))
+        .foregroundStyle(isSelected ? dracula(.pink) : dracula(.foreground))
+        .help(tab.title)
+        .accessibilityLabel("\(tab.title) right panel tab")
+    }
+
+    private func shouldShowTabTitle(_ tab: RightPanelTab) -> Bool {
+        switch tab.kind {
+        case .browser:
+            return tab.title != RightPanelTab.defaultBrowser.title
+        case .nvim:
+            return tab.title != RightPanelTab.defaultNvim.title
+        case .files, .git:
+            return false
+        }
     }
 
     private var selectedRightPanelRequest: TerminalLaunchRequest? {
         guard let selectedThreadID = model.selectedThreadID else { return nil }
         switch model.selectedRightPanelTab.kind {
-        case .files:
+        case .files, .browser:
             return nil
         case .git:
             return model.terminalLaunchRequest(for: .lazygit(threadID: selectedThreadID))
@@ -1692,6 +1882,8 @@ private struct RightPanelView: View {
         switch kind {
         case .files:
             .files
+        case .browser:
+            .browser
         case .git:
             .git
         case .nvim:
@@ -1712,6 +1904,206 @@ private struct RightPanelView: View {
             guard filePath.hasPrefix(rootPath + "/") else { return }
             model.openFileInNvim(relativePath: String(filePath.dropFirst(rootPath.count + 1)))
         }
+    }
+}
+
+private struct BrowserPanel: View {
+    let tab: RightPanelTab
+    let threadID: UUID?
+    @ObservedObject var runtime: IsolatedToolRuntime
+    let unavailableMessage: String?
+    let onNavigate: (String) -> Void
+    let onOpenNewWindow: (String) -> Void
+    @State private var addressText = ""
+    @FocusState private var isAddressFocused: Bool
+    @Environment(\.fontSettings) private var fonts
+
+    private var instanceID: String {
+        Self.instanceID(threadID: threadID, tabID: tab.id)
+    }
+
+    private static func instanceID(threadID: UUID?, tabID: String) -> String {
+        "\(threadID?.uuidString ?? "no-thread"):\(tabID)"
+    }
+
+    private var snapshot: IsolatedToolRuntimeSnapshot {
+        runtime.snapshot(for: instanceID)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button {
+                    runtime.browserBack(instanceID: instanceID)
+                } label: {
+                    Image(systemName: IconRole.navigateBack.icon.systemSymbolName)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(!snapshot.canGoBack)
+                .help("Back")
+                .accessibilityLabel("Browser back")
+
+                Button {
+                    runtime.browserForward(instanceID: instanceID)
+                } label: {
+                    Image(systemName: IconRole.navigateForward.icon.systemSymbolName)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(!snapshot.canGoForward)
+                .help("Forward")
+                .accessibilityLabel("Browser forward")
+
+                Button {
+                    if snapshot.isLoading {
+                        runtime.browserStop(instanceID: instanceID)
+                    } else {
+                        runtime.browserReload(instanceID: instanceID, urlString: tab.urlString)
+                    }
+                } label: {
+                    Image(systemName: snapshot.isLoading ? "xmark" : IconRole.reload.icon.systemSymbolName)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help(snapshot.isLoading ? "Stop loading" : "Reload")
+                .accessibilityLabel(snapshot.isLoading ? "Stop browser loading" : "Reload browser")
+
+                TextField("Search or enter website", text: $addressText)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(dracula(.currentLine))
+                    .foregroundStyle(dracula(.foreground))
+                    .focused($isAddressFocused)
+                    .onSubmit {
+                        onNavigate(addressText)
+                    }
+                    .accessibilityLabel("Browser address")
+
+                if !snapshot.title.isEmpty {
+                    Text(snapshot.title)
+                        .font(fonts.interfaceFont(sizeOffset: -1))
+                        .foregroundStyle(dracula(.comment))
+                        .lineLimit(1)
+                        .frame(maxWidth: 120, alignment: .trailing)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .foregroundStyle(dracula(.foreground))
+
+            Divider()
+                .overlay(dracula(.currentLine))
+
+            if let unavailableMessage {
+                MissingDirectoryBanner(
+                    title: "Browser preview unavailable",
+                    path: tab.relativePath ?? tab.urlString ?? "Browser",
+                    message: unavailableMessage
+                )
+                Spacer()
+            } else if let urlString = tab.urlString, !urlString.isEmpty {
+                ZStack(alignment: .top) {
+                    Color.white
+
+                    IsolatedToolViewportReporter { frame, visible in
+                        runtime.setViewport(instanceID: instanceID, frame: frame, visible: visible)
+                    }
+                    .allowsHitTesting(false)
+
+                    if let errorMessage = snapshot.errorMessage {
+                        isolatedToolMessage(
+                            title: snapshot.phase == .crashed ? "Browser renderer crashed" : "Browser unavailable",
+                            message: errorMessage,
+                            urlString: urlString
+                        )
+                    } else if snapshot.phase == .idle || snapshot.phase == .launching {
+                        isolatedToolMessage(
+                            title: "Starting browser renderer",
+                            message: "The browser is running in an isolated helper process.",
+                            urlString: urlString,
+                            showActions: false
+                        )
+                    }
+                }
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: IconRole.rightPanelMode(.browser).icon.systemSymbolName)
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(dracula(.cyan))
+                    Text("Enter a URL")
+                        .font(fonts.interfaceFont(weight: .semibold))
+                        .foregroundStyle(dracula(.foreground))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(dracula(.background))
+            }
+        }
+        .background(dracula(.background))
+        .onAppear {
+            syncAddressText()
+            runtime.onNewSurfaceRequested = onOpenNewWindow
+            if let urlString = tab.urlString, !urlString.isEmpty {
+                runtime.loadBrowser(instanceID: instanceID, urlString: urlString)
+            } else {
+                runtime.shutdown(instanceID: instanceID)
+            }
+            if tab.urlString?.isEmpty ?? true {
+                isAddressFocused = true
+            }
+        }
+        .onDisappear {
+            runtime.shutdown(instanceID: instanceID)
+        }
+        .onChange(of: tab.id) {
+            syncAddressText()
+        }
+        .onChange(of: tab.urlString) {
+            syncAddressText()
+            if let urlString = tab.urlString, !urlString.isEmpty {
+                runtime.loadBrowser(instanceID: instanceID, urlString: urlString)
+            } else {
+                runtime.shutdown(instanceID: instanceID)
+            }
+        }
+    }
+
+    private func syncAddressText() {
+        addressText = tab.urlString ?? ""
+    }
+
+    private func isolatedToolMessage(
+        title: String,
+        message: String,
+        urlString: String,
+        showActions: Bool = true
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: IconRole.warning.icon.systemSymbolName)
+                .font(fonts.interfaceFont(weight: .semibold))
+                .foregroundStyle(dracula(.orange))
+            Text(message)
+                .font(fonts.interfaceFont(sizeOffset: -1))
+                .foregroundStyle(dracula(.foreground))
+            if showActions {
+                HStack {
+                    Button("Reload") {
+                        runtime.browserReload(instanceID: instanceID, urlString: urlString)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Restart Tool") {
+                        runtime.restart(kind: .browser, instanceID: instanceID)
+                        runtime.loadBrowser(instanceID: instanceID, urlString: urlString)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(dracula(.currentLine))
     }
 }
 
@@ -1753,8 +2145,10 @@ private struct FileBrowserPanel: View {
     let onRefresh: () -> Void
     let onSelectFile: (FileBrowserEntry) -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
-    let externalOpenTools: [ExternalOpenToolID]
+    let onOpenInBrowser: (FileBrowserEntry) -> Void
+    let defaultExternalEditorTool: ExternalOpenToolID?
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
+    let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
     @State private var expandedFolders: Set<String> = []
     @State private var typedQuery: String = ""
     @State private var debounceTask: Task<Void, Never>?
@@ -1828,8 +2222,10 @@ private struct FileBrowserPanel: View {
                                 fileIconPack: fileIconPack,
                                 onSelectFile: onSelectFile,
                                 onOpenFile: onOpenFile,
-                                externalOpenTools: externalOpenTools,
-                                onOpenExternally: onOpenExternally
+                                onOpenInBrowser: onOpenInBrowser,
+                                defaultExternalEditorTool: defaultExternalEditorTool,
+                                onOpenExternally: onOpenExternally,
+                                onCopyPath: onCopyPath
                             )
                         }
                     } else {
@@ -1840,8 +2236,10 @@ private struct FileBrowserPanel: View {
                                 fileIconPack: fileIconPack,
                                 onSelectFile: onSelectFile,
                                 onOpenFile: onOpenFile,
-                                externalOpenTools: externalOpenTools,
-                                onOpenExternally: onOpenExternally
+                                onOpenInBrowser: onOpenInBrowser,
+                                defaultExternalEditorTool: defaultExternalEditorTool,
+                                onOpenExternally: onOpenExternally,
+                                onCopyPath: onCopyPath
                             )
                         }
                     }
@@ -1881,8 +2279,10 @@ private struct FileBrowserTreeRow: View {
     let fileIconPack: FileIconPack
     let onSelectFile: (FileBrowserEntry) -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
-    let externalOpenTools: [ExternalOpenToolID]
+    let onOpenInBrowser: (FileBrowserEntry) -> Void
+    let defaultExternalEditorTool: ExternalOpenToolID?
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
+    let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1919,8 +2319,10 @@ private struct FileBrowserTreeRow: View {
                         fileIconPack: fileIconPack,
                         onSelectFile: onSelectFile,
                         onOpenFile: onOpenFile,
-                        externalOpenTools: externalOpenTools,
-                        onOpenExternally: onOpenExternally
+                        onOpenInBrowser: onOpenInBrowser,
+                        defaultExternalEditorTool: defaultExternalEditorTool,
+                        onOpenExternally: onOpenExternally,
+                        onCopyPath: onCopyPath
                     )
                 }
             }
@@ -1941,11 +2343,31 @@ private struct FileBrowserTreeRow: View {
 
     @ViewBuilder
     private func externalOpenMenuItems(for entry: FileBrowserEntry) -> some View {
+        Button("Copy Relative Path") {
+            onCopyPath(entry, .relative)
+        }
+
+        Button("Copy Full Path") {
+            onCopyPath(entry, .full)
+        }
+
         if !entry.isDirectory {
-            ForEach(externalOpenTools) { tool in
-                Button("Open in \(tool.displayName)") {
-                    onOpenExternally(entry, tool)
+            if AppModel.isBrowserPreviewSupported(relativePath: entry.relativePath) {
+                Button("Open in Browser") {
+                    onOpenInBrowser(entry)
                 }
+            }
+        }
+
+        if let defaultExternalEditorTool {
+            Button("Open in Default Editor") {
+                onOpenExternally(entry, defaultExternalEditorTool)
+            }
+        }
+
+        if !entry.isDirectory {
+            Button("Open in Built-in Editor") {
+                onOpenFile(entry)
             }
         }
     }
@@ -1957,8 +2379,10 @@ private struct FileBrowserSearchRow: View {
     let fileIconPack: FileIconPack
     let onSelectFile: (FileBrowserEntry) -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
-    let externalOpenTools: [ExternalOpenToolID]
+    let onOpenInBrowser: (FileBrowserEntry) -> Void
+    let defaultExternalEditorTool: ExternalOpenToolID?
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
+    let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
 
     var body: some View {
         if entry.isDirectory {
@@ -1972,6 +2396,9 @@ private struct FileBrowserSearchRow: View {
             .background(isSelected ? dracula(.currentLine) : dracula(.background))
             .onTapGesture {
                 onSelectFile(entry)
+            }
+            .contextMenu {
+                fileMenuItems(for: entry)
             }
         } else {
             Button {
@@ -1990,11 +2417,36 @@ private struct FileBrowserSearchRow: View {
             .background(isSelected ? dracula(.currentLine) : dracula(.background))
             .help("Open in nvim")
             .contextMenu {
-                ForEach(externalOpenTools) { tool in
-                    Button("Open in \(tool.displayName)") {
-                        onOpenExternally(entry, tool)
-                    }
-                }
+                fileMenuItems(for: entry)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fileMenuItems(for entry: FileBrowserEntry) -> some View {
+        Button("Copy Relative Path") {
+            onCopyPath(entry, .relative)
+        }
+
+        Button("Copy Full Path") {
+            onCopyPath(entry, .full)
+        }
+
+        if !entry.isDirectory, AppModel.isBrowserPreviewSupported(relativePath: entry.relativePath) {
+            Button("Open in Browser") {
+                onOpenInBrowser(entry)
+            }
+        }
+
+        if let defaultExternalEditorTool {
+            Button("Open in Default Editor") {
+                onOpenExternally(entry, defaultExternalEditorTool)
+            }
+        }
+
+        if !entry.isDirectory {
+            Button("Open in Built-in Editor") {
+                onOpenFile(entry)
             }
         }
     }
@@ -2080,22 +2532,13 @@ private struct TerminalPlaceholderView: View {
 
 private struct BottomTerminalBar: View {
     let isExpanded: Bool
-    let height: Double
     let request: TerminalLaunchRequest?
     let fonts: FontSettings
     let onToggle: () -> Void
-    let onResize: (Double) -> Void
     let onAppearExpanded: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if isExpanded {
-                HorizontalResizeHandle(
-                    accessibilityLabel: "Resize bottom terminal",
-                    onDrag: onResize
-                )
-            }
-
             Button(action: onToggle) {
                 HStack {
                     Text("Bottom Terminal")
@@ -2118,12 +2561,12 @@ private struct BottomTerminalBar: View {
                     unavailableMessage: "Terminal unavailable for the selected thread",
                     fonts: fonts
                 )
-                    .frame(height: height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onAppear(perform: onAppearExpanded)
             }
         }
         .padding(.horizontal, 18)
-        .padding(.top, isExpanded ? 0 : 10)
+        .padding(.top, 10)
         .padding(.bottom, 10)
         .background(dracula(.currentLine))
     }
@@ -2150,58 +2593,6 @@ private struct CollapsedPanelRail: View {
         }
         .padding(.vertical, 14)
         .background(dracula(.background))
-    }
-}
-
-private struct VerticalResizeHandle: View {
-    let accessibilityLabel: String
-    let onDrag: (Double) -> Void
-    @State private var previousTranslation = 0.0
-
-    var body: some View {
-        Rectangle()
-            .fill(dracula(.currentLine))
-            .frame(width: 6)
-            .overlay(Rectangle().fill(dracula(.comment)).frame(width: 1))
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        let current = value.translation.width
-                        onDrag(current - previousTranslation)
-                        previousTranslation = current
-                    }
-                    .onEnded { _ in
-                        previousTranslation = 0
-                    }
-            )
-            .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-private struct HorizontalResizeHandle: View {
-    let accessibilityLabel: String
-    let onDrag: (Double) -> Void
-    @State private var previousTranslation = 0.0
-
-    var body: some View {
-        Rectangle()
-            .fill(dracula(.currentLine))
-            .frame(height: 6)
-            .overlay(Rectangle().fill(dracula(.comment)).frame(height: 1))
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        let current = value.translation.height
-                        onDrag(current - previousTranslation)
-                        previousTranslation = current
-                    }
-                    .onEnded { _ in
-                        previousTranslation = 0
-                    }
-            )
-            .accessibilityLabel(accessibilityLabel)
     }
 }
 

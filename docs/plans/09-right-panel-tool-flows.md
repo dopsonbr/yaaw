@@ -2,11 +2,11 @@
 
 ## Summary
 
-Wire the right panel into real terminal-backed tool flows for Files, `nvim`, and Git mode.
+Wire the right panel into real tool flows for Files, Browser, `nvim`, and Git mode.
 
 ## Requirements
 
-- Technical Requirements: Right Tool Panel, File Browser, nvim Mode, Git Mode, External Tools, Global Navigation.
+- Technical Requirements: Right Tool Panel, File Browser, Browser Mode, nvim Mode, Git Mode, External Tools, Global Navigation.
 - Non-Functional Requirements: Usability, Reliability, Accessibility.
 - Testing Requirements: E2E Scope, Inputs And Outputs.
 - Standards: nvim Standard, lazygit Standard, libghostty Standard.
@@ -15,6 +15,8 @@ Wire the right panel into real terminal-backed tool flows for Files, `nvim`, and
 
 - Keep right-panel state scoped to the selected thread.
 - Switch modes through visible mode controls and `Cmd+Shift+[` / `Cmd+Shift+]`.
+- Opening a supported preview file from Files mode switches to Browser mode and loads the local file through an isolated WebKit helper process.
+- Browser renderer crashes leave the main app running and show a reload/restart recovery state.
 - Opening a file switches to `nvim` mode and launches `nvim <relative-file-path>` in the right-panel terminal.
 - Opening Git mode launches `lazygit` in the selected thread working directory.
 - Resolve `nvim` and `lazygit` from the user's `PATH`.
@@ -30,9 +32,11 @@ Wire the right panel into real terminal-backed tool flows for Files, `nvim`, and
 
 ## Acceptance Criteria
 
-- Files, `nvim`, and Git modes are selectable in the right panel.
+- Files, Browser, `nvim`, and Git modes are selectable in the right panel.
 - Right-panel mode persists per thread.
 - `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes.
+- Supported local preview files open in Browser mode from the file browser context menu.
+- Browser mode is process-isolated from the main app.
 - Opening a file launches `nvim <relative-file-path>` inside the right panel.
 - Git mode launches `lazygit` inside the right panel.
 - Missing or failing tools show raw terminal error output.

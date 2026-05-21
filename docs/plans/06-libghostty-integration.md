@@ -14,7 +14,7 @@ Implement embedded terminal rendering with `libghostty` behind the terminal abst
 
 - Add the `libghostty` bridge behind the terminal abstraction without changing public app-state APIs.
 - Embed project terminal and global terminal surfaces first.
-- Embed right-panel `nvim` and `lazygit` terminal surfaces after project/global terminals are stable. The actual `codex` / `claude` launch behavior on the project terminal is owned by [Plan 07](07-agent-cli-session-binding.md); this plan only renders the surface.
+- Embed right-panel `nvim` and `lazygit` terminal surfaces after project/global terminals are stable. YAAW-side `codex` / `claude` launch and resume behavior for user-provided CLIs is owned by [Plan 07](07-agent-cli-session-binding.md); this plan only renders the surface.
 - Launch project terminals in the selected thread working directory.
 - Launch the global terminal in the user's home directory.
 - Preserve terminal runtime state while the app process is open.

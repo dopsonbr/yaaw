@@ -57,6 +57,7 @@ public enum IconRole: Equatable, Sendable {
     case newThread
     case archive
     case unarchive
+    case moreActions
     case add
     case warning
     case bottomTerminal
@@ -103,6 +104,8 @@ public enum IconRole: Equatable, Sendable {
             .systemSymbol("archivebox")
         case .unarchive:
             .systemSymbol("arrow.uturn.backward")
+        case .moreActions:
+            .systemSymbol("ellipsis")
         case .add:
             .systemSymbol("plus")
         case .warning:
@@ -113,10 +116,12 @@ public enum IconRole: Equatable, Sendable {
             switch mode {
             case .files:
                 .systemSymbol("doc.on.doc")
+            case .browser:
+                .systemSymbol("globe")
             case .git:
                 .systemSymbol("arrow.triangle.branch")
             case .nvim:
-                .systemSymbol("terminal")
+                .systemSymbol("square.and.pencil")
             }
         case .fileStateOverlay(let overlay):
             .systemSymbol(overlay.systemSymbolName)

@@ -17,6 +17,7 @@ set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 MODE="${1:-run}"
 BUILD_PRODUCT="YAAW"
+HELPER_PRODUCT="YAAWToolHost"
 case "$VARIANT" in
   production)
     APP_NAME="YAAW"
@@ -40,8 +41,10 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
+APP_HELPERS="$APP_CONTENTS/Helpers"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
+HELPER_BINARY="$APP_HELPERS/$HELPER_PRODUCT"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON="$ROOT_DIR/resources/YAAW.icns"
 
@@ -51,15 +54,19 @@ cd "$ROOT_DIR"
 if [[ "$BUILD_CONFIGURATION" != "debug" ]]; then
   swift build -c "$BUILD_CONFIGURATION"
   BUILD_BINARY="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)/$BUILD_PRODUCT"
+  BUILD_HELPER="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)/$HELPER_PRODUCT"
 else
   swift build
   BUILD_BINARY="$(swift build --show-bin-path)/$BUILD_PRODUCT"
+  BUILD_HELPER="$(swift build --show-bin-path)/$HELPER_PRODUCT"
 fi
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
+mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_HELPERS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
+cp "$BUILD_HELPER" "$HELPER_BINARY"
 chmod +x "$APP_BINARY"
+chmod +x "$HELPER_BINARY"
 
 if [[ -f "$APP_ICON" ]]; then
   cp "$APP_ICON" "$APP_RESOURCES/YAAW.icns"

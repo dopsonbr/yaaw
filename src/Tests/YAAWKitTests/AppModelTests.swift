@@ -213,6 +213,62 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.layoutState.globalTerminalHeight, LayoutState.maximumGlobalTerminalHeight)
     }
 
+    func testPanelResizeActionsUseExpandedPanelLimits() {
+        let model = AppModel()
+
+        model.setSidebarWidth(600)
+        model.setRightPanelWidth(650)
+        model.setGlobalTerminalHeight(400)
+
+        XCTAssertEqual(model.layoutState.sidebarWidth, 520)
+        XCTAssertEqual(model.layoutState.rightPanelWidth, 650)
+        XCTAssertEqual(model.layoutState.globalTerminalHeight, 400)
+    }
+
+    func testBottomTerminalHeightClampsToWindowRatioWhenProvided() {
+        let model = AppModel()
+
+        model.setGlobalTerminalHeight(300, availableWindowHeight: 600)
+
+        XCTAssertEqual(model.layoutState.globalTerminalHeight, 270)
+    }
+
+    func testPanelResizeCanUpdateLiveWithoutPersistingEveryDragTick() {
+        let store = InMemoryYAAWStore.helloWorld()
+        let model = AppModel(store: store)
+
+        model.setSidebarWidth(300, persist: false)
+        model.setRightPanelWidth(500, persist: false)
+        model.setGlobalTerminalHeight(220, persist: false)
+
+        XCTAssertEqual(store.layoutStateWriteCount, 0)
+        XCTAssertEqual(model.layoutState.sidebarWidth, 300)
+        XCTAssertEqual(model.layoutState.rightPanelWidth, 500)
+        XCTAssertEqual(model.layoutState.globalTerminalHeight, 220)
+
+        model.commitLayoutResize()
+
+        XCTAssertEqual(store.layoutStateWriteCount, 1)
+    }
+
+    func testPanelSizeResetActionsPersistDefaults() {
+        let store = InMemoryYAAWStore.helloWorld()
+        let model = AppModel(store: store)
+        model.setSidebarWidth(400)
+        model.setRightPanelWidth(600)
+        model.setGlobalTerminalHeight(260)
+        let writesAfterResize = store.layoutStateWriteCount
+
+        model.resetSidebarWidth()
+        model.resetRightPanelWidth()
+        model.resetGlobalTerminalHeight()
+
+        XCTAssertEqual(model.layoutState.sidebarWidth, LayoutState.defaultSidebarWidth)
+        XCTAssertEqual(model.layoutState.rightPanelWidth, LayoutState.defaultRightPanelWidth)
+        XCTAssertEqual(model.layoutState.globalTerminalHeight, LayoutState.defaultGlobalTerminalHeight)
+        XCTAssertEqual(store.layoutStateWriteCount, writesAfterResize + 3)
+    }
+
     func testRightPanelModeSelectionIsPublicBehavior() {
         let model = AppModel()
 
@@ -325,6 +381,8 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.activeThreadsForSelectedProject.map(\.id), [secondThreadID])
         XCTAssertEqual(model.archivedThreadsForSelectedProject.map(\.id), [archivedThreadID])
+        XCTAssertEqual(model.archivedThreads.map(\.id), [archivedThreadID])
+        XCTAssertEqual(model.projectDisplayName(for: secondProjectID), "Second")
     }
 
     func testReselectingCurrentProjectPreservesSelectedThread() {
@@ -633,6 +691,36 @@ final class AppModelTests: XCTestCase {
 
         model.moveProject(id: firstID, direction: .up)
         XCTAssertEqual(model.projects.map(\.id), [thirdID, firstID, secondID])
+    }
+
+    func testProjectDragReorderUsesPinnedFirstGroups() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let thirdID = UUID()
+        let root = FileManager.default.temporaryDirectory
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [
+                        Project(id: firstID, displayName: "First", rootDirectory: root, sortOrder: 0),
+                        Project(id: secondID, displayName: "Second", rootDirectory: root, sortOrder: 1),
+                        Project(id: thirdID, displayName: "Third", rootDirectory: root, isPinned: true, sortOrder: 0)
+                    ],
+                    threads: [],
+                    selectedProjectID: firstID,
+                    selectedThreadID: nil,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            )
+        )
+
+        model.reorderProject(id: secondID, before: firstID)
+        XCTAssertEqual(model.projects.map(\.id), [thirdID, secondID, firstID])
+        XCTAssertEqual(model.projects.filter { !$0.isPinned }.map(\.sortOrder), [0, 1])
+
+        model.reorderProject(id: firstID, before: thirdID)
+        XCTAssertEqual(model.projects.map(\.id), [thirdID, secondID, firstID])
     }
 
     func testAgentCLIChoiceCannotChangeAfterCreate() throws {
@@ -951,12 +1039,56 @@ final class AppModelTests: XCTestCase {
             model.selectedRightPanelState.tabs.map(\.id),
             [
                 RightPanelTab.filesID,
+                RightPanelTab.defaultBrowserID,
                 RightPanelTab.gitID,
                 RightPanelTab.defaultNvimID,
                 RightPanelTab.nvimTabID(relativePath: "README.md"),
                 RightPanelTab.nvimTabID(relativePath: "src/App/RootView.swift")
             ]
         )
+    }
+
+    func testOpeningSupportedFileInBrowserUsesFileURLAndStaysInWorkingDirectory() throws {
+        let root = try temporaryDirectory()
+        let preview = root.appendingPathComponent("index.html")
+        try "<h1>Preview</h1>".write(to: preview, atomically: true, encoding: .utf8)
+        let projectID = UUID()
+        let threadID = UUID()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(store: store)
+
+        XCTAssertTrue(model.openFileInBrowser(relativePath: "index.html"))
+
+        XCTAssertEqual(model.selectedRightPanelMode, .browser)
+        XCTAssertEqual(model.selectedRightPanelTab.id, RightPanelTab.browserTabID(urlString: nil, relativePath: "index.html"))
+        XCTAssertEqual(model.selectedRightPanelTab.relativePath, "index.html")
+        XCTAssertEqual(model.selectedRightPanelTab.urlString, preview.standardizedFileURL.absoluteString)
+        XCTAssertNil(model.selectedBrowserUnavailableMessage)
+    }
+
+    func testBrowserRejectsUnsupportedAndEscapingFilePathsWithoutChangingTab() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+        let originalTab = model.selectedRightPanelTab
+
+        XCTAssertFalse(model.openFileInBrowser(relativePath: "../secret.html"))
+        XCTAssertEqual(model.selectedRightPanelTab, originalTab)
+        XCTAssertNotNil(model.selectedBrowserUnavailableMessage)
+
+        XCTAssertFalse(model.openFileInBrowser(relativePath: "Package.swift"))
+        XCTAssertEqual(model.selectedRightPanelTab, originalTab)
     }
 
     func testMissingRightPanelToolFallsBackToRawCommandName() throws {
@@ -1155,6 +1287,18 @@ final class AppModelTests: XCTestCase {
                 kind: .file
             )
         )
+    }
+
+    func testFileBrowserPathResolutionRejectsEscapingRelativePaths() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        XCTAssertEqual(
+            model.fileBrowserURL(relativePath: "src/App/RootView.swift"),
+            fixture.root.appendingPathComponent("src/App/RootView.swift").standardizedFileURL
+        )
+        XCTAssertNil(model.fileBrowserURL(relativePath: "../outside.swift"))
+        XCTAssertNil(model.fileBrowserExternalOpenTarget(relativePath: "../outside.swift", isDirectory: false))
     }
 
     func testSelectedContextProjectAndThreadCommandsUpdateCurrentSelection() throws {
