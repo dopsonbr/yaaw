@@ -64,6 +64,17 @@ public struct YAAWSnapshot: Equatable, Sendable {
 public protocol YAAWStore: AnyObject {
     func load() -> YAAWSnapshot
     func save(_ snapshot: YAAWSnapshot)
+
+    func upsertProject(_ project: Project)
+    func upsertThread(_ thread: AgentThread)
+    func deleteThread(id: UUID)
+    func setRightPanelMode(threadID: UUID, mode: RightPanelMode)
+    func setRightPanelState(threadID: UUID, state: RightPanelState)
+    func setBottomTerminalExpanded(threadID: UUID, isExpanded: Bool)
+    func setSelectedProject(_ projectID: UUID)
+    func setSelectedThread(_ threadID: UUID?)
+    func setLayoutState(_ state: LayoutState)
+    func upsertFileIndexMetadata(_ metadata: FileIndexMetadata)
 }
 
 public final class InMemoryYAAWStore: YAAWStore {
@@ -79,6 +90,65 @@ public final class InMemoryYAAWStore: YAAWStore {
 
     public func save(_ snapshot: YAAWSnapshot) {
         self.snapshot = snapshot
+    }
+
+    public func upsertProject(_ project: Project) {
+        if let index = snapshot.projects.firstIndex(where: { $0.id == project.id }) {
+            snapshot.projects[index] = project
+        } else {
+            snapshot.projects.append(project)
+        }
+    }
+
+    public func upsertThread(_ thread: AgentThread) {
+        if let index = snapshot.threads.firstIndex(where: { $0.id == thread.id }) {
+            snapshot.threads[index] = thread
+        } else {
+            snapshot.threads.append(thread)
+        }
+    }
+
+    public func deleteThread(id: UUID) {
+        snapshot.threads.removeAll { $0.id == id }
+        snapshot.rightPanelModesByThreadID.removeValue(forKey: id)
+        snapshot.rightPanelStatesByThreadID.removeValue(forKey: id)
+        snapshot.bottomTerminalExpandedThreadIDs.remove(id)
+        snapshot.fileIndexMetadataByThreadID.removeValue(forKey: id)
+        if snapshot.selectedThreadID == id {
+            snapshot.selectedThreadID = nil
+        }
+    }
+
+    public func setRightPanelMode(threadID: UUID, mode: RightPanelMode) {
+        snapshot.rightPanelModesByThreadID[threadID] = mode
+    }
+
+    public func setRightPanelState(threadID: UUID, state: RightPanelState) {
+        snapshot.rightPanelStatesByThreadID[threadID] = state
+    }
+
+    public func setBottomTerminalExpanded(threadID: UUID, isExpanded: Bool) {
+        if isExpanded {
+            snapshot.bottomTerminalExpandedThreadIDs.insert(threadID)
+        } else {
+            snapshot.bottomTerminalExpandedThreadIDs.remove(threadID)
+        }
+    }
+
+    public func setSelectedProject(_ projectID: UUID) {
+        snapshot.selectedProjectID = projectID
+    }
+
+    public func setSelectedThread(_ threadID: UUID?) {
+        snapshot.selectedThreadID = threadID
+    }
+
+    public func setLayoutState(_ state: LayoutState) {
+        snapshot.layoutState = state
+    }
+
+    public func upsertFileIndexMetadata(_ metadata: FileIndexMetadata) {
+        snapshot.fileIndexMetadataByThreadID[metadata.threadID] = metadata
     }
 
     public static func helloWorld() -> InMemoryYAAWStore {

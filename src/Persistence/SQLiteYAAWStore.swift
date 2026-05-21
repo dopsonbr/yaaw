@@ -9,7 +9,7 @@ public enum SQLiteStoreError: Error, Equatable {
 }
 
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 8
+    public static let schemaVersion = 9
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -139,6 +139,164 @@ public final class SQLiteYAAWStore: YAAWStore {
             recordSQLiteError(name: "sqlite_save_failed", error: error)
         }
     }
+
+    public func upsertProject(_ project: Project) {
+        runIncremental(name: "upsert_project") {
+            try upsertProjectStatement(project)
+        }
+    }
+
+    public func upsertThread(_ thread: AgentThread) {
+        runIncremental(name: "upsert_thread") {
+            try upsertThreadStatement(thread)
+        }
+    }
+
+    public func deleteThread(id: UUID) {
+        runIncremental(name: "delete_thread") {
+            let statement = try prepare("DELETE FROM threads WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            bind(id.uuidString, at: 1, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func setRightPanelMode(threadID: UUID, mode: RightPanelMode) {
+        runIncremental(name: "set_right_panel_mode") {
+            let statement = try prepare(
+                """
+                INSERT INTO right_panel_modes (thread_id, mode) VALUES (?, ?)
+                ON CONFLICT(thread_id) DO UPDATE SET mode = excluded.mode
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+            bind(threadID.uuidString, at: 1, in: statement)
+            bind(mode.rawValue, at: 2, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func setRightPanelState(threadID: UUID, state: RightPanelState) {
+        runIncremental(name: "set_right_panel_state") {
+            let deleteStatement = try prepare("DELETE FROM right_panel_tabs WHERE thread_id = ?")
+            bind(threadID.uuidString, at: 1, in: deleteStatement)
+            try stepDone(deleteStatement)
+            sqlite3_finalize(deleteStatement)
+
+            let tabs = RightPanelState.normalizedTabs(state.tabs)
+            for (index, tab) in tabs.enumerated() {
+                let insertStatement = try prepare(
+                    """
+                    INSERT INTO right_panel_tabs (
+                        thread_id, tab_id, kind, title, relative_path, tab_order
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """
+                )
+                defer { sqlite3_finalize(insertStatement) }
+                bind(threadID.uuidString, at: 1, in: insertStatement)
+                bind(tab.id, at: 2, in: insertStatement)
+                bind(tab.kind.rawValue, at: 3, in: insertStatement)
+                bind(tab.title, at: 4, in: insertStatement)
+                bindOptional(tab.relativePath, at: 5, in: insertStatement)
+                sqlite3_bind_int(insertStatement, 6, Int32(index))
+                try stepDone(insertStatement)
+            }
+
+            let stateStatement = try prepare(
+                """
+                INSERT INTO right_panel_tab_state (thread_id, selected_tab_id) VALUES (?, ?)
+                ON CONFLICT(thread_id) DO UPDATE SET selected_tab_id = excluded.selected_tab_id
+                """
+            )
+            defer { sqlite3_finalize(stateStatement) }
+            bind(threadID.uuidString, at: 1, in: stateStatement)
+            bind(state.selectedTabID, at: 2, in: stateStatement)
+            try stepDone(stateStatement)
+        }
+    }
+
+    public func setBottomTerminalExpanded(threadID: UUID, isExpanded: Bool) {
+        runIncremental(name: "set_bottom_terminal_expanded") {
+            if isExpanded {
+                let statement = try prepare(
+                    """
+                    INSERT INTO bottom_terminal_state (thread_id, is_expanded) VALUES (?, 1)
+                    ON CONFLICT(thread_id) DO UPDATE SET is_expanded = 1
+                    """
+                )
+                defer { sqlite3_finalize(statement) }
+                bind(threadID.uuidString, at: 1, in: statement)
+                try stepDone(statement)
+            } else {
+                let statement = try prepare("DELETE FROM bottom_terminal_state WHERE thread_id = ?")
+                defer { sqlite3_finalize(statement) }
+                bind(threadID.uuidString, at: 1, in: statement)
+                try stepDone(statement)
+            }
+        }
+    }
+
+    public func setSelectedProject(_ projectID: UUID) {
+        runIncremental(name: "set_selected_project") {
+            try upsertAppStateStatement(key: "selected_project_id", value: projectID.uuidString)
+        }
+    }
+
+    public func setSelectedThread(_ threadID: UUID?) {
+        runIncremental(name: "set_selected_thread") {
+            if let threadID {
+                try upsertAppStateStatement(key: "selected_thread_id", value: threadID.uuidString)
+            } else {
+                let statement = try prepare("DELETE FROM app_state WHERE key = ?")
+                defer { sqlite3_finalize(statement) }
+                bind("selected_thread_id", at: 1, in: statement)
+                try stepDone(statement)
+            }
+        }
+    }
+
+    public func setLayoutState(_ state: LayoutState) {
+        runIncremental(name: "set_layout_state") {
+            try upsertLayoutStateValue(key: "sidebar_width", value: "\(state.sidebarWidth)")
+            try upsertLayoutStateValue(key: "right_panel_width", value: "\(state.rightPanelWidth)")
+            try upsertLayoutStateValue(key: "global_terminal_height", value: "\(state.globalTerminalHeight)")
+            try upsertLayoutStateValue(key: "sidebar_collapsed", value: state.isSidebarCollapsed ? "true" : "false")
+            try upsertLayoutStateValue(
+                key: "right_panel_collapsed",
+                value: state.isRightPanelCollapsed ? "true" : "false"
+            )
+            try upsertLayoutStateValue(
+                key: "global_terminal_expanded",
+                value: state.isGlobalTerminalExpanded ? "true" : "false"
+            )
+        }
+    }
+
+    public func upsertFileIndexMetadata(_ metadata: FileIndexMetadata) {
+        runIncremental(name: "upsert_file_index_metadata") {
+            let statement = try prepare(
+                """
+                INSERT INTO file_index_metadata (
+                    thread_id, root_path, indexed_at, file_count, ignored_directory_count
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(thread_id) DO UPDATE SET
+                    root_path = excluded.root_path,
+                    indexed_at = excluded.indexed_at,
+                    file_count = excluded.file_count,
+                    ignored_directory_count = excluded.ignored_directory_count
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+            bind(metadata.threadID.uuidString, at: 1, in: statement)
+            bind(metadata.rootPath, at: 2, in: statement)
+            sqlite3_bind_double(statement, 3, metadata.indexedAt.timeIntervalSince1970)
+            sqlite3_bind_int(statement, 4, Int32(metadata.fileCount))
+            sqlite3_bind_int(statement, 5, Int32(metadata.ignoredDirectoryCount))
+            try stepDone(statement)
+        }
+    }
 }
 
 private extension SQLiteYAAWStore {
@@ -220,6 +378,21 @@ private extension SQLiteYAAWStore {
                 try execute("PRAGMA user_version = 8")
             }
         }
+        if currentVersion < 9 {
+            try transaction {
+                try migrateToVersionNine()
+                try execute("PRAGMA user_version = 9")
+            }
+        }
+    }
+
+    func migrateToVersionNine() throws {
+        try execute(
+            "CREATE INDEX IF NOT EXISTS idx_threads_project_archived ON threads(project_id, is_archived)"
+        )
+        try execute(
+            "CREATE INDEX IF NOT EXISTS idx_threads_last_opened ON threads(last_opened_at)"
+        )
     }
 
     func createVersionOneSchema() throws {
@@ -489,6 +662,103 @@ private extension SQLiteYAAWStore {
     var errorMessage: String {
         guard let database else { return "Missing SQLite database" }
         return String(cString: sqlite3_errmsg(database))
+    }
+
+    func runIncremental(name: String, _ work: () throws -> Void) {
+        do {
+            try transaction(work)
+        } catch {
+            recordSQLiteError(name: "sqlite_\(name)_failed", error: error)
+        }
+    }
+
+    func upsertProjectStatement(_ project: Project) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO projects (id, display_name, root_directory, created_at, last_opened_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                display_name = excluded.display_name,
+                root_directory = excluded.root_directory,
+                created_at = excluded.created_at,
+                last_opened_at = excluded.last_opened_at
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(project.id.uuidString, at: 1, in: statement)
+        bind(project.displayName, at: 2, in: statement)
+        bind(project.rootDirectory.path, at: 3, in: statement)
+        sqlite3_bind_double(statement, 4, project.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 5, project.lastOpenedAt.timeIntervalSince1970)
+        try stepDone(statement)
+    }
+
+    func upsertThreadStatement(_ thread: AgentThread) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO threads (
+                id,
+                display_name,
+                project_id,
+                working_directory,
+                created_at,
+                last_opened_at,
+                is_archived,
+                agent_cli,
+                session_identity,
+                canonical_session_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                display_name = excluded.display_name,
+                project_id = excluded.project_id,
+                working_directory = excluded.working_directory,
+                created_at = excluded.created_at,
+                last_opened_at = excluded.last_opened_at,
+                is_archived = excluded.is_archived,
+                agent_cli = excluded.agent_cli,
+                session_identity = excluded.session_identity,
+                canonical_session_name = excluded.canonical_session_name
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(thread.id.uuidString, at: 1, in: statement)
+        bind(thread.displayName, at: 2, in: statement)
+        bind(thread.projectID.uuidString, at: 3, in: statement)
+        bind(thread.workingDirectory.path, at: 4, in: statement)
+        sqlite3_bind_double(statement, 5, thread.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 6, thread.lastOpenedAt.timeIntervalSince1970)
+        sqlite3_bind_int(statement, 7, thread.isArchived ? 1 : 0)
+        bind(thread.agentCLI.rawValue, at: 8, in: statement)
+        bindOptional(thread.sessionIdentity, at: 9, in: statement)
+        bindOptional(thread.canonicalSessionName, at: 10, in: statement)
+        try stepDone(statement)
+    }
+
+    func upsertAppStateStatement(key: String, value: String) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO app_state (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(key, at: 1, in: statement)
+        bind(value, at: 2, in: statement)
+        try stepDone(statement)
+    }
+
+    func upsertLayoutStateValue(key: String, value: String) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO layout_state (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(key, at: 1, in: statement)
+        bind(value, at: 2, in: statement)
+        try stepDone(statement)
     }
 
     func insertProject(_ project: Project) throws {

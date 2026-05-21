@@ -868,17 +868,34 @@ private struct FileBrowserPanel: View {
     let onRefresh: () -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
     @State private var expandedFolders: Set<String> = []
+    @State private var typedQuery: String = ""
+    @State private var debounceTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                TextField("Search files", text: $searchQuery)
+                TextField("Search files", text: $typedQuery)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
                     .background(dracula(.currentLine))
                     .foregroundStyle(dracula(.foreground))
                     .accessibilityLabel("Search files")
+                    .onAppear { typedQuery = searchQuery }
+                    .onChange(of: searchQuery) { _, new in
+                        if new != typedQuery { typedQuery = new }
+                    }
+                    .onChange(of: typedQuery) { _, new in
+                        debounceTask?.cancel()
+                        let captured = new
+                        debounceTask = Task {
+                            try? await Task.sleep(nanoseconds: 250_000_000)
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                if searchQuery != captured { searchQuery = captured }
+                            }
+                        }
+                    }
 
                 Button(action: onRefresh) {
                     Image(systemName: "arrow.clockwise")
@@ -958,80 +975,6 @@ private struct FileBrowserPanel: View {
                 .filter { $0.isDirectory && !$0.relativePath.contains("/") }
                 .map(\.relativePath)
         )
-    }
-}
-
-private struct FileBrowserTreeNode: Identifiable {
-    let entry: FileBrowserEntry
-    let displayName: String
-    let children: [FileBrowserTreeNode]
-
-    var id: String {
-        entry.id
-    }
-}
-
-private enum FileBrowserTreeBuilder {
-    static func roots(from entries: [FileBrowserEntry]) -> [FileBrowserTreeNode] {
-        var boxesByPath: [String: FileBrowserTreeNodeBox] = [:]
-        var rootBoxes: [FileBrowserTreeNodeBox] = []
-
-        for entry in entries {
-            let components = entry.relativePath.split(separator: "/").map(String.init)
-            guard !components.isEmpty else { continue }
-            var currentPath = ""
-            var parent: FileBrowserTreeNodeBox?
-
-            for (index, component) in components.enumerated() {
-                currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
-                let isLeaf = index == components.count - 1
-                let isDirectory = isLeaf ? entry.isDirectory : true
-                let box = boxesByPath[currentPath] ?? FileBrowserTreeNodeBox(
-                    entry: FileBrowserEntry(relativePath: currentPath, isDirectory: isDirectory),
-                    name: component
-                )
-                boxesByPath[currentPath] = box
-
-                if let parent {
-                    parent.addChildIfNeeded(box)
-                } else if !rootBoxes.contains(where: { $0.entry.relativePath == box.entry.relativePath }) {
-                    rootBoxes.append(box)
-                }
-                parent = box
-            }
-        }
-
-        return rootBoxes
-            .sorted(by: sortBoxes)
-            .map { node(from: $0) }
-    }
-
-    private static func node(from box: FileBrowserTreeNodeBox) -> FileBrowserTreeNode {
-        let children = box.children.sorted(by: sortBoxes).map { node(from: $0) }
-        return FileBrowserTreeNode(entry: box.entry, displayName: box.name, children: children)
-    }
-
-    private static func sortBoxes(_ left: FileBrowserTreeNodeBox, _ right: FileBrowserTreeNodeBox) -> Bool {
-        if left.entry.isDirectory != right.entry.isDirectory {
-            return left.entry.isDirectory && !right.entry.isDirectory
-        }
-        return left.name.localizedStandardCompare(right.name) == .orderedAscending
-    }
-}
-
-private final class FileBrowserTreeNodeBox {
-    let entry: FileBrowserEntry
-    let name: String
-    private(set) var children: [FileBrowserTreeNodeBox] = []
-
-    init(entry: FileBrowserEntry, name: String) {
-        self.entry = entry
-        self.name = name
-    }
-
-    func addChildIfNeeded(_ child: FileBrowserTreeNodeBox) {
-        guard !children.contains(where: { $0.entry.relativePath == child.entry.relativePath }) else { return }
-        children.append(child)
     }
 }
 
