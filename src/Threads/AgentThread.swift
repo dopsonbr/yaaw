@@ -11,6 +11,7 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
     public var createdAt: Date
     public var lastOpenedAt: Date
     public var isArchived: Bool
+    public var isPinned: Bool
 
     public init(
         id: UUID = UUID(),
@@ -22,7 +23,8 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
         canonicalSessionName: String? = nil,
         createdAt: Date = Date(),
         lastOpenedAt: Date = Date(),
-        isArchived: Bool = false
+        isArchived: Bool = false,
+        isPinned: Bool = false
     ) {
         self.id = id
         self.displayName = displayName
@@ -34,5 +36,6 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
         self.lastOpenedAt = lastOpenedAt
         self.isArchived = isArchived
+        self.isPinned = isPinned
     }
 }

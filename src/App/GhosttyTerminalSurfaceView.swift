@@ -6,6 +6,8 @@ import SwiftUI
 @available(macOS 14.0, *)
 struct GhosttyTerminalSurfaceView: NSViewRepresentable {
     let request: TerminalLaunchRequest
+    let theme: ThemeDefinition
+    let fonts: FontSettings
     var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
 
     func makeNSView(context: Context) -> NSView {
@@ -59,6 +61,8 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
         GhosttyTerminalStateRegistry.shared.configure(
             entry,
             for: request,
+            theme: theme,
+            fonts: fonts,
             onTitleChange: onTitleChange
         )
     }
@@ -212,30 +216,33 @@ private final class GhosttyTerminalStateRegistry {
         }
 
         let state = TerminalViewState(
-            theme: draculaTerminalTheme,
-            terminalConfiguration: terminalConfiguration(for: request)
+            theme: terminalTheme(for: ThemeCatalog.defaultTheme),
+            terminalConfiguration: terminalConfiguration(for: request, theme: ThemeCatalog.defaultTheme)
         )
         let view = TerminalView(frame: .zero)
         view.delegate = state
         let entry = Entry(request: request, state: state, view: view)
         entriesByRole[request.role] = entry
-        configure(entry, for: request, onTitleChange: { _, _ in })
+        configure(entry, for: request, theme: ThemeCatalog.defaultTheme, fonts: FontSettings(), onTitleChange: { _, _ in })
         return entry
     }
 
     func configure(
         _ entry: Entry,
         for request: TerminalLaunchRequest,
+        theme: ThemeDefinition,
+        fonts: FontSettings,
         onTitleChange: @escaping (TerminalRole, String) -> Void
     ) {
         let options = TerminalSurfaceOptions(
             backend: .exec,
-            fontSize: 12,
+            fontSize: Float(fonts.terminalSize),
             workingDirectory: request.workingDirectory.path,
             context: .split
         )
         entry.state.configuration = options
-        entry.state.controller.setTerminalConfiguration(terminalConfiguration(for: request))
+        entry.state.setTheme(terminalTheme(for: theme))
+        entry.state.setTerminalConfiguration(terminalConfiguration(for: request, theme: theme, fonts: fonts))
         entry.delegate.onTitleChange = { title in
             onTitleChange(request.role, title)
         }
@@ -252,9 +259,38 @@ private final class GhosttyTerminalStateRegistry {
         entriesByRole.removeAll()
     }
 
-    private func terminalConfiguration(for request: TerminalLaunchRequest) -> TerminalConfiguration {
-        guard !request.command.isEmpty else { return draculaTerminalConfiguration }
-        return draculaTerminalConfiguration.custom("command", shellCommandLine(for: request.command))
+    private func terminalTheme(for theme: ThemeDefinition) -> TerminalTheme {
+        let configuration = baseTerminalConfiguration(for: theme)
+        return TerminalTheme(light: configuration, dark: configuration)
+    }
+
+    private func terminalConfiguration(
+        for request: TerminalLaunchRequest,
+        theme: ThemeDefinition,
+        fonts: FontSettings = FontSettings()
+    ) -> TerminalConfiguration {
+        var configuration = baseTerminalConfiguration(for: theme).fontSize(Float(fonts.terminalSize))
+        let terminalFamily = fonts.terminalFamily.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !terminalFamily.isEmpty {
+            configuration = configuration.fontFamily(terminalFamily)
+        }
+        guard !request.command.isEmpty else { return configuration }
+        return configuration.custom("command", shellCommandLine(for: request.command))
+    }
+
+    private func baseTerminalConfiguration(for theme: ThemeDefinition) -> TerminalConfiguration {
+        TerminalConfiguration { config in
+            config.withBackground(themeHex(.background, in: theme))
+            config.withForeground(themeHex(.foreground, in: theme))
+            config.withSelectionBackground(themeHex(.currentLine, in: theme))
+            config.withSelectionForeground(themeHex(.foreground, in: theme))
+            config.withCursorColor(themeHex(.pink, in: theme))
+            config.withCursorText(themeHex(.background, in: theme))
+            config.withBoldColor(themeHex(.yellow, in: theme))
+            config.withFontSize(12)
+            config.withWindowPaddingX(0)
+            config.withWindowPaddingY(0)
+        }
     }
 
     private func shellCommandLine(for command: [String]) -> String {
@@ -344,26 +380,6 @@ private final class YAAWTerminalDelegate:
     }
 }
 
-@available(macOS 14.0, *)
-private let draculaTerminalTheme = TerminalTheme(
-    light: draculaTerminalConfiguration,
-    dark: draculaTerminalConfiguration
-)
-
-@available(macOS 14.0, *)
-private let draculaTerminalConfiguration = TerminalConfiguration { config in
-    config.withBackground(draculaHex(.background))
-    config.withForeground(draculaHex(.foreground))
-    config.withSelectionBackground(draculaHex(.currentLine))
-    config.withSelectionForeground(draculaHex(.foreground))
-    config.withCursorColor(draculaHex(.pink))
-    config.withCursorText(draculaHex(.background))
-    config.withBoldColor(draculaHex(.yellow))
-    config.withFontSize(12)
-    config.withWindowPaddingX(0)
-    config.withWindowPaddingY(0)
-}
-
-private func draculaHex(_ role: DraculaRole) -> String {
-    DraculaTheme.hex(for: role).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+private func themeHex(_ role: ThemeRole, in theme: ThemeDefinition) -> String {
+    theme.hex(for: role).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
 }

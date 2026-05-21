@@ -8,8 +8,18 @@ public enum SQLiteStoreError: Error, Equatable {
     case missingDatabase
 }
 
+private struct SidebarProjectStateSnapshot {
+    var expandedProjectIDs: Set<UUID>
+    var expandedArchivedProjectIDs: Set<UUID>
+}
+
+private struct SidebarProjectStateRow {
+    var isExpanded: Bool
+    var isArchiveExpanded: Bool
+}
+
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 10
+    public static let schemaVersion = 11
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -70,6 +80,7 @@ public final class SQLiteYAAWStore: YAAWStore {
             )
             let fileIndexMetadata = try loadFileIndexMetadata()
             let bottomTerminalExpandedThreadIDs = try loadBottomTerminalExpandedThreadIDs()
+            let sidebarProjectState = try loadSidebarProjectState()
 
             return YAAWSnapshot(
                 projects: projects,
@@ -82,7 +93,9 @@ public final class SQLiteYAAWStore: YAAWStore {
                 bottomTerminalExpandedThreadIDs: bottomTerminalExpandedThreadIDs,
                 isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
                 layoutState: layoutState,
-                fileIndexMetadataByThreadID: fileIndexMetadata
+                fileIndexMetadataByThreadID: fileIndexMetadata,
+                expandedProjectIDs: sidebarProjectState.expandedProjectIDs,
+                expandedArchivedProjectIDs: sidebarProjectState.expandedArchivedProjectIDs
             )
         } catch {
             recordSQLiteError(name: "sqlite_load_failed", error: error)
@@ -98,6 +111,7 @@ public final class SQLiteYAAWStore: YAAWStore {
                 try execute("DELETE FROM right_panel_tabs")
                 try execute("DELETE FROM bottom_terminal_state")
                 try execute("DELETE FROM file_index_metadata")
+                try execute("DELETE FROM sidebar_project_state")
                 try execute("DELETE FROM layout_state")
                 try execute("DELETE FROM app_state")
                 try execute("DELETE FROM threads")
@@ -124,6 +138,13 @@ public final class SQLiteYAAWStore: YAAWStore {
                 }
                 for metadata in snapshot.fileIndexMetadataByThreadID.values {
                     try insertFileIndexMetadata(metadata)
+                }
+                for project in snapshot.projects {
+                    try insertSidebarProjectState(
+                        projectID: project.id,
+                        isExpanded: snapshot.expandedProjectIDs.contains(project.id),
+                        isArchiveExpanded: snapshot.expandedArchivedProjectIDs.contains(project.id)
+                    )
                 }
                 try insertAppState(key: "selected_project_id", value: snapshot.selectedProjectID.uuidString)
                 if let selectedThreadID = snapshot.selectedThreadID {
@@ -269,6 +290,28 @@ public final class SQLiteYAAWStore: YAAWStore {
             try upsertLayoutStateValue(
                 key: "global_terminal_expanded",
                 value: state.isGlobalTerminalExpanded ? "true" : "false"
+            )
+        }
+    }
+
+    public func setProjectExpanded(_ projectID: UUID, isExpanded: Bool) {
+        runIncremental(name: "set_project_expanded") {
+            let currentArchiveState = try loadSidebarProjectState(projectID: projectID)?.isArchiveExpanded ?? false
+            try upsertSidebarProjectState(
+                projectID: projectID,
+                isExpanded: isExpanded,
+                isArchiveExpanded: currentArchiveState
+            )
+        }
+    }
+
+    public func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool) {
+        runIncremental(name: "set_project_archive_expanded") {
+            let currentExpandedState = try loadSidebarProjectState(projectID: projectID)?.isExpanded ?? false
+            try upsertSidebarProjectState(
+                projectID: projectID,
+                isExpanded: currentExpandedState,
+                isArchiveExpanded: isExpanded
             )
         }
     }
@@ -426,6 +469,12 @@ private extension SQLiteYAAWStore {
                 try execute("PRAGMA user_version = 10")
             }
         }
+        if currentVersion < 11 {
+            try transaction {
+                try migrateToVersionEleven()
+                try execute("PRAGMA user_version = 11")
+            }
+        }
     }
 
     func migrateToVersionNine() throws {
@@ -454,6 +503,31 @@ private extension SQLiteYAAWStore {
             )
         }
         try createFileIndexCacheSchema()
+    }
+
+    func migrateToVersionEleven() throws {
+        let projectColumns = try tableColumns("projects")
+        if !projectColumns.contains("is_pinned") {
+            try execute("ALTER TABLE projects ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+        }
+        if !projectColumns.contains("sort_order") {
+            try execute("ALTER TABLE projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+            try seedProjectSortOrder()
+        }
+
+        let threadColumns = try tableColumns("threads")
+        if !threadColumns.contains("is_pinned") {
+            try execute("ALTER TABLE threads ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+        }
+
+        try createSidebarProjectStateSchema()
+        if let selectedProjectID = try loadUUID(key: "selected_project_id") {
+            try insertSidebarProjectState(
+                projectID: selectedProjectID,
+                isExpanded: true,
+                isArchiveExpanded: false
+            )
+        }
     }
 
     func createVersionOneSchema() throws {
@@ -686,6 +760,36 @@ private extension SQLiteYAAWStore {
         )
     }
 
+    func createSidebarProjectStateSchema() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS sidebar_project_state (
+                project_id TEXT PRIMARY KEY NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                is_expanded INTEGER NOT NULL CHECK (is_expanded IN (0, 1)),
+                is_archive_expanded INTEGER NOT NULL CHECK (is_archive_expanded IN (0, 1))
+            )
+            """
+        )
+    }
+
+    func seedProjectSortOrder() throws {
+        let statement = try prepare(
+            "SELECT id FROM projects ORDER BY created_at, display_name"
+        )
+        defer { sqlite3_finalize(statement) }
+        var projectIDs: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            projectIDs.append(text(at: 0, in: statement))
+        }
+        for (index, projectID) in projectIDs.enumerated() {
+            let updateStatement = try prepare("UPDATE projects SET sort_order = ? WHERE id = ?")
+            defer { sqlite3_finalize(updateStatement) }
+            sqlite3_bind_int(updateStatement, 1, Int32(index))
+            bind(projectID, at: 2, in: updateStatement)
+            try stepDone(updateStatement)
+        }
+    }
+
     func seedBottomTerminalStateFromLegacyLayout() throws {
         let isExpanded = try loadLayoutBool(key: "global_terminal_expanded")
             ?? (try loadBool(key: "is_global_terminal_expanded") ?? false)
@@ -698,10 +802,13 @@ private extension SQLiteYAAWStore {
 
     func seedRightPanelTabStateFromLegacyModes() throws {
         let modes = try loadRightPanelModes()
-        for thread in try loadThreads() {
+        let statement = try prepare("SELECT id FROM threads")
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let threadID = UUID(uuidString: text(at: 0, in: statement)) else { continue }
             try insertRightPanelState(
-                threadID: thread.id,
-                state: RightPanelState.defaultState(selectedMode: modes[thread.id] ?? .files)
+                threadID: threadID,
+                state: RightPanelState.defaultState(selectedMode: modes[threadID] ?? .files)
             )
         }
     }
@@ -771,13 +878,23 @@ private extension SQLiteYAAWStore {
     func upsertProjectStatement(_ project: Project) throws {
         let statement = try prepare(
             """
-            INSERT INTO projects (id, display_name, root_directory, created_at, last_opened_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO projects (
+                id,
+                display_name,
+                root_directory,
+                created_at,
+                last_opened_at,
+                is_pinned,
+                sort_order
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
                 root_directory = excluded.root_directory,
                 created_at = excluded.created_at,
-                last_opened_at = excluded.last_opened_at
+                last_opened_at = excluded.last_opened_at,
+                is_pinned = excluded.is_pinned,
+                sort_order = excluded.sort_order
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -786,6 +903,8 @@ private extension SQLiteYAAWStore {
         bind(project.rootDirectory.path, at: 3, in: statement)
         sqlite3_bind_double(statement, 4, project.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(statement, 5, project.lastOpenedAt.timeIntervalSince1970)
+        sqlite3_bind_int(statement, 6, project.isPinned ? 1 : 0)
+        sqlite3_bind_int(statement, 7, Int32(project.sortOrder))
         try stepDone(statement)
     }
 
@@ -802,9 +921,10 @@ private extension SQLiteYAAWStore {
                 is_archived,
                 agent_cli,
                 session_identity,
-                canonical_session_name
+                canonical_session_name,
+                is_pinned
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
                 project_id = excluded.project_id,
@@ -814,7 +934,8 @@ private extension SQLiteYAAWStore {
                 is_archived = excluded.is_archived,
                 agent_cli = excluded.agent_cli,
                 session_identity = excluded.session_identity,
-                canonical_session_name = excluded.canonical_session_name
+                canonical_session_name = excluded.canonical_session_name,
+                is_pinned = excluded.is_pinned
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -828,6 +949,7 @@ private extension SQLiteYAAWStore {
         bind(thread.agentCLI.rawValue, at: 8, in: statement)
         bindOptional(thread.sessionIdentity, at: 9, in: statement)
         bindOptional(thread.canonicalSessionName, at: 10, in: statement)
+        sqlite3_bind_int(statement, 11, thread.isPinned ? 1 : 0)
         try stepDone(statement)
     }
 
@@ -860,8 +982,16 @@ private extension SQLiteYAAWStore {
     func insertProject(_ project: Project) throws {
         let statement = try prepare(
             """
-            INSERT INTO projects (id, display_name, root_directory, created_at, last_opened_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO projects (
+                id,
+                display_name,
+                root_directory,
+                created_at,
+                last_opened_at,
+                is_pinned,
+                sort_order
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -870,6 +1000,8 @@ private extension SQLiteYAAWStore {
         bind(project.rootDirectory.path, at: 3, in: statement)
         sqlite3_bind_double(statement, 4, project.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(statement, 5, project.lastOpenedAt.timeIntervalSince1970)
+        sqlite3_bind_int(statement, 6, project.isPinned ? 1 : 0)
+        sqlite3_bind_int(statement, 7, Int32(project.sortOrder))
         try stepDone(statement)
     }
 
@@ -886,9 +1018,10 @@ private extension SQLiteYAAWStore {
                 is_archived,
                 agent_cli,
                 session_identity,
-                canonical_session_name
+                canonical_session_name,
+                is_pinned
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -902,6 +1035,7 @@ private extension SQLiteYAAWStore {
         bind(thread.agentCLI.rawValue, at: 8, in: statement)
         bindOptional(thread.sessionIdentity, at: 9, in: statement)
         bindOptional(thread.canonicalSessionName, at: 10, in: statement)
+        sqlite3_bind_int(statement, 11, thread.isPinned ? 1 : 0)
         try stepDone(statement)
     }
 
@@ -957,6 +1091,45 @@ private extension SQLiteYAAWStore {
         defer { sqlite3_finalize(statement) }
         bind(threadID.uuidString, at: 1, in: statement)
         sqlite3_bind_int(statement, 2, isExpanded ? 1 : 0)
+        try stepDone(statement)
+    }
+
+    func insertSidebarProjectState(projectID: UUID, isExpanded: Bool, isArchiveExpanded: Bool) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO sidebar_project_state (
+                project_id,
+                is_expanded,
+                is_archive_expanded
+            )
+            VALUES (?, ?, ?)
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(projectID.uuidString, at: 1, in: statement)
+        sqlite3_bind_int(statement, 2, isExpanded ? 1 : 0)
+        sqlite3_bind_int(statement, 3, isArchiveExpanded ? 1 : 0)
+        try stepDone(statement)
+    }
+
+    func upsertSidebarProjectState(projectID: UUID, isExpanded: Bool, isArchiveExpanded: Bool) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO sidebar_project_state (
+                project_id,
+                is_expanded,
+                is_archive_expanded
+            )
+            VALUES (?, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                is_expanded = excluded.is_expanded,
+                is_archive_expanded = excluded.is_archive_expanded
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(projectID.uuidString, at: 1, in: statement)
+        sqlite3_bind_int(statement, 2, isExpanded ? 1 : 0)
+        sqlite3_bind_int(statement, 3, isArchiveExpanded ? 1 : 0)
         try stepDone(statement)
     }
 
@@ -1099,9 +1272,55 @@ private extension SQLiteYAAWStore {
         return threadIDs
     }
 
+    func loadSidebarProjectState() throws -> SidebarProjectStateSnapshot {
+        let statement = try prepare(
+            "SELECT project_id, is_expanded, is_archive_expanded FROM sidebar_project_state"
+        )
+        defer { sqlite3_finalize(statement) }
+        var expandedProjectIDs = Set<UUID>()
+        var expandedArchivedProjectIDs = Set<UUID>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = UUID(uuidString: text(at: 0, in: statement)) else { continue }
+            if sqlite3_column_int(statement, 1) == 1 {
+                expandedProjectIDs.insert(id)
+            }
+            if sqlite3_column_int(statement, 2) == 1 {
+                expandedArchivedProjectIDs.insert(id)
+            }
+        }
+        return SidebarProjectStateSnapshot(
+            expandedProjectIDs: expandedProjectIDs,
+            expandedArchivedProjectIDs: expandedArchivedProjectIDs
+        )
+    }
+
+    func loadSidebarProjectState(projectID: UUID) throws -> SidebarProjectStateRow? {
+        let statement = try prepare(
+            "SELECT is_expanded, is_archive_expanded FROM sidebar_project_state WHERE project_id = ?"
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(projectID.uuidString, at: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return SidebarProjectStateRow(
+            isExpanded: sqlite3_column_int(statement, 0) == 1,
+            isArchiveExpanded: sqlite3_column_int(statement, 1) == 1
+        )
+    }
+
     func loadProjects() throws -> [Project] {
         let statement = try prepare(
-            "SELECT id, display_name, root_directory, created_at, last_opened_at FROM projects ORDER BY created_at, display_name"
+            """
+            SELECT
+                id,
+                display_name,
+                root_directory,
+                created_at,
+                last_opened_at,
+                is_pinned,
+                sort_order
+            FROM projects
+            ORDER BY is_pinned DESC, sort_order, created_at, display_name
+            """
         )
         defer { sqlite3_finalize(statement) }
         var projects: [Project] = []
@@ -1115,7 +1334,9 @@ private extension SQLiteYAAWStore {
                     displayName: text(at: 1, in: statement),
                     rootDirectory: URL(fileURLWithPath: text(at: 2, in: statement), isDirectory: true),
                     createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
-                    lastOpenedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+                    lastOpenedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                    isPinned: sqlite3_column_int(statement, 5) == 1,
+                    sortOrder: Int(sqlite3_column_int(statement, 6))
                 )
             )
         }
@@ -1135,7 +1356,8 @@ private extension SQLiteYAAWStore {
                 is_archived,
                 agent_cli,
                 session_identity,
-                canonical_session_name
+                canonical_session_name,
+                is_pinned
             FROM threads
             ORDER BY created_at, display_name
             """
@@ -1159,7 +1381,8 @@ private extension SQLiteYAAWStore {
                     canonicalSessionName: optionalText(at: 9, in: statement),
                     createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
                     lastOpenedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
-                    isArchived: sqlite3_column_int(statement, 6) == 1
+                    isArchived: sqlite3_column_int(statement, 6) == 1,
+                    isPinned: sqlite3_column_int(statement, 10) == 1
                 )
             )
         }

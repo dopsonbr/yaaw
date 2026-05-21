@@ -146,9 +146,14 @@ Recommended tests:
 | Test | Required behavior |
 | --- | --- |
 | Project creation | A selected directory becomes a named project in the sidebar. |
+| Project sidebar nesting | Project rows expand and collapse to show active and archived thread history. |
+| Project row thread creation | A project-row new-thread action creates the thread under that project. |
+| Project pin and reorder | Pinned projects sort first, and manual project reorder persists. |
 | Codex thread creation | A new Codex thread appears under the selected project and gets an agent CLI session terminal. |
 | Claude thread creation | A new Claude thread appears under the selected project and gets an agent CLI session terminal. |
 | CLI choice prompt | Creating a thread asks which available CLI family to invoke. |
+| Optional thread naming | Creating a thread accepts an optional user-entered name and falls back to CLI-derived naming when blank. |
+| Thread pinning | Pinned threads sort above unpinned project threads and persist after relaunch. |
 | Thread naming | The visible thread name matches the bound CLI session name, title, or id. |
 | Thread resume | Closing and reopening a thread resumes the stored CLI session identity. |
 | Thread switching | Switching threads changes the active agent CLI session terminal and right-panel context. |
@@ -158,6 +163,7 @@ Recommended tests:
 | Bottom terminal | `Cmd+J` expands and collapses the selected-thread bottom terminal. |
 | File search | Hidden files are visible and fuzzy search returns expected matches. |
 | nvim open | Opening a file launches `nvim` in the right panel. |
+| External open | The selected project and file external-open actions use detected destinations and configured defaults without depending on real installed editors. |
 | Git open | Git mode launches `lazygit` or falls back to `git diff`. |
 | Persistence | Project/thread/agent CLI session/layout metadata survive app relaunch. |
 
@@ -189,6 +195,7 @@ Good unit test targets:
 - Ignore-rule evaluation.
 - Path normalization.
 - YAML settings parsing and validation.
+- YAML settings raw text load/save behavior, including malformed-save no-overwrite behavior.
 - SQLite migration behavior against a real temporary database.
 - Public project/thread storage APIs.
 - Agent CLI session metadata persistence.
@@ -251,8 +258,9 @@ Artifacts MUST NOT include sensitive terminal output unless explicitly enabled f
 - The app has an E2E harness that can launch the native macOS app.
 - The E2E harness can interact with the app through clicks, typing, and keyboard shortcuts.
 - The E2E harness can capture screenshots.
+- The E2E harness covers opening the settings editor, editing YAML, saving, and returning to the workspace.
 - The suite includes one full no-mock user journey test.
-- The suite includes focused E2E tests for project/thread creation, agent CLI selection, session naming, session resume, panel behavior, file search, `nvim`, `lazygit`, shortcuts, and persistence.
+- The suite includes focused E2E tests for project/thread creation, agent CLI selection, session naming, session resume, panel behavior, file search, `nvim`, external-open settings/actions, `lazygit`, shortcuts, and persistence.
 - Persistence tests verify agent kind and CLI session identity survive relaunch.
 - Tests verify visible inputs and outputs instead of private implementation details.
 - Unit tests are limited to high-value public behavior or deterministic input/output logic.

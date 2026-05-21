@@ -39,6 +39,7 @@ Requirements use:
 - SQLite writes MUST be transactional for project, thread, agent CLI session, archive, index, and layout updates.
 - The app MUST NOT write metadata into user project directories for the first version.
 - The app MUST NOT modify repository files unless the user does so through a terminal tool such as `nvim`, shell commands, or `lazygit`.
+- External-open detection and launch actions MUST NOT write app metadata into user project directories.
 - File indexing MUST be read-only.
 - YAML settings writes SHOULD be atomic.
 
@@ -55,7 +56,7 @@ Requirements use:
 
 - The app SHOULD support macOS keyboard navigation for primary workflows.
 - The app SHOULD expose meaningful accessibility labels for sidebar items, right-panel mode controls, resize handles, and terminal regions.
-- The app SHOULD preserve sufficient contrast using the Dracula palette.
+- The app SHOULD preserve sufficient contrast using the selected built-in palette.
 - The app SHOULD support system text scaling where practical without breaking the panel layout.
 
 ## Usability
@@ -80,7 +81,7 @@ Requirements use:
 ## Maintainability
 
 - The implementation MUST keep app state, terminal management, file indexing, and UI layout concerns separated.
-- Theme colors SHOULD be centralized as Dracula tokens.
+- Theme colors SHOULD be centralized as shared theme tokens.
 - SQLite schema changes SHOULD be versioned through migrations.
 - YAML settings parsing SHOULD tolerate unknown or malformed values safely.
 - Agent CLI terminal integrations SHOULD share common lifecycle management where possible.

@@ -2,6 +2,8 @@ import XCTest
 import SQLite3
 @testable import YAAWKit
 
+private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 final class PersistenceTests: XCTestCase {
     func testSQLiteMigrationInitializesCurrentSchema() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
@@ -627,6 +629,102 @@ final class PersistenceTests: XCTestCase {
         XCTAssertFalse(reloaded.isGlobalTerminalExpanded)
     }
 
+    func testSQLitePersistsPinsProjectOrderAndSidebarExpansion() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: path)
+        let firstProjectID = UUID()
+        let secondProjectID = UUID()
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
+
+        store.save(
+            YAAWSnapshot(
+                projects: [
+                    Project(id: firstProjectID, displayName: "First", rootDirectory: root, isPinned: false, sortOrder: 0),
+                    Project(id: secondProjectID, displayName: "Second", rootDirectory: root, isPinned: true, sortOrder: 0)
+                ],
+                threads: [
+                    AgentThread(id: firstThreadID, displayName: "First", projectID: firstProjectID, workingDirectory: root),
+                    AgentThread(
+                        id: secondThreadID,
+                        displayName: "Second",
+                        projectID: secondProjectID,
+                        workingDirectory: root,
+                        isPinned: true
+                    )
+                ],
+                selectedProjectID: secondProjectID,
+                selectedThreadID: secondThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false,
+                expandedProjectIDs: [secondProjectID],
+                expandedArchivedProjectIDs: [secondProjectID]
+            )
+        )
+
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
+
+        XCTAssertEqual(reloaded.projects.map(\.id), [secondProjectID, firstProjectID])
+        XCTAssertEqual(reloaded.projects.map(\.isPinned), [true, false])
+        XCTAssertEqual(reloaded.projects.map(\.sortOrder), [0, 0])
+        XCTAssertEqual(reloaded.threads.first { $0.id == secondThreadID }?.isPinned, true)
+        XCTAssertEqual(reloaded.expandedProjectIDs, [secondProjectID])
+        XCTAssertEqual(reloaded.expandedArchivedProjectIDs, [secondProjectID])
+    }
+
+    func testSQLiteMigrationAddsPinnedOrderAndSidebarStateToVersionTenDatabase() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let projectID = UUID()
+        let threadID = UUID()
+        try withSQLiteDatabase(path: path) { database in
+            try executeSQL(
+                """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    root_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL
+                );
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    working_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL,
+                    is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1)),
+                    agent_cli TEXT NOT NULL CHECK (agent_cli IN ('codex', 'claude', 'opencode', 'copilot')),
+                    session_identity TEXT,
+                    canonical_session_name TEXT
+                );
+                CREATE TABLE app_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                INSERT INTO projects (id, display_name, root_directory, created_at, last_opened_at)
+                VALUES ('\(projectID.uuidString)', 'Project', '/tmp', 0, 0);
+                INSERT INTO threads (
+                    id, display_name, project_id, working_directory, created_at, last_opened_at,
+                    is_archived, agent_cli, session_identity, canonical_session_name
+                )
+                VALUES ('\(threadID.uuidString)', 'Thread', '\(projectID.uuidString)', '/tmp', 0, 0, 0, 'codex', NULL, NULL);
+                INSERT INTO app_state (key, value) VALUES ('selected_project_id', '\(projectID.uuidString)');
+                PRAGMA user_version = 10;
+                """,
+                database: database
+            )
+        }
+
+        _ = try SQLiteYAAWStore(databasePath: path)
+
+        XCTAssertTrue(try sqliteTableColumns(path: path, table: "projects").contains("is_pinned"))
+        XCTAssertTrue(try sqliteTableColumns(path: path, table: "projects").contains("sort_order"))
+        XCTAssertTrue(try sqliteTableColumns(path: path, table: "threads").contains("is_pinned"))
+        XCTAssertEqual(try sqliteSidebarProjectExpanded(path: path, projectID: projectID), true)
+    }
+
     func testSQLiteLayoutStateMissingRowsUseDefaults() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         let store = try SQLiteYAAWStore(databasePath: path)
@@ -705,12 +803,116 @@ final class PersistenceTests: XCTestCase {
 
         XCTAssertEqual(seeded.themeName, "dracula")
         XCTAssertEqual(seeded.defaultAgentCLI, .codex)
+        XCTAssertEqual(seeded.fileIconPack, .material)
+        XCTAssertEqual(seeded.fonts.interfaceFamily, "system")
+        XCTAssertEqual(seeded.fonts.interfaceSize, 13)
+        XCTAssertEqual(seeded.fonts.editorFamily, "system-monospace")
+        XCTAssertEqual(seeded.fonts.editorSize, 13)
+        XCTAssertEqual(seeded.fonts.terminalFamily, "")
+        XCTAssertEqual(seeded.fonts.terminalSize, 12)
         XCTAssertTrue(seeded.ignoreRules.contains(".git"))
         XCTAssertTrue(seeded.ignoreRules.contains("node_modules"))
         XCTAssertTrue(seeded.ignoreRules.contains("Music"))
         XCTAssertTrue(template.contains("# YAAW settings."))
         XCTAssertTrue(template.contains("# default: [nvim, vim, vi]"))
+        XCTAssertTrue(template.contains("fileBrowserPack: material-file-icons"))
+        XCTAssertTrue(template.contains("# supported: light-2026, light-modern"))
+        XCTAssertFalse(template.contains("only dracula is implemented"))
+        XCTAssertTrue(template.contains("interfaceFamily: system"))
+        XCTAssertTrue(template.contains("editorFamily: system-monospace"))
+        XCTAssertTrue(template.contains("terminalSize: 12"))
         XCTAssertTrue(template.contains("# not changeable yet: custom palettes are reserved for future expansion."))
+    }
+
+    func testYAMLConfigurationRawTextLoadSeedsDefaultFile() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        let text = try store.loadText()
+
+        XCTAssertTrue(text.contains("# YAAW settings."))
+        XCTAssertTrue(text.contains("default: codex"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path.path))
+    }
+
+    func testYAMLConfigurationValidatesRawText() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        let configuration = try store.validate(
+            text: """
+            version: 1
+            agent:
+              default: claude
+            icons:
+              fileBrowserPack: catppuccin-file-icons
+            fonts:
+              interfaceFamily: Avenir Next
+              interfaceSize: 14.5
+              editorFamily: SF Mono
+              editorSize: 15
+              terminalFamily: JetBrains Mono
+              terminalSize: 16
+            """
+        )
+
+        XCTAssertEqual(configuration.defaultAgentCLI, .claude)
+        XCTAssertEqual(configuration.fileIconPack, .catppuccin)
+        XCTAssertEqual(configuration.fonts.interfaceFamily, "Avenir Next")
+        XCTAssertEqual(configuration.fonts.interfaceSize, 14.5)
+        XCTAssertEqual(configuration.fonts.editorFamily, "SF Mono")
+        XCTAssertEqual(configuration.fonts.editorSize, 15)
+        XCTAssertEqual(configuration.fonts.terminalFamily, "JetBrains Mono")
+        XCTAssertEqual(configuration.fonts.terminalSize, 16)
+    }
+
+    func testYAMLConfigurationAcceptsSupportedTheme() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        let configuration = try store.validate(
+            text: """
+            version: 1
+            theme:
+              active: dark-plus
+            """
+        )
+
+        XCTAssertEqual(configuration.themeName, "dark-plus")
+        XCTAssertEqual(configuration.resolvedTheme.displayName, "Dark+")
+    }
+
+    func testYAMLConfigurationSaveTextPreservesRawFormattingAndComments() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+        let text = """
+        # custom settings comment
+        version: 1
+        agent:
+          default: claude
+        """
+
+        try store.saveText(text)
+
+        XCTAssertEqual(try String(contentsOf: path, encoding: .utf8), text)
+        XCTAssertEqual(store.load().defaultAgentCLI, .claude)
+    }
+
+    func testYAMLConfigurationMalformedSaveTextDoesNotOverwriteExistingFile() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+        let original = """
+        # keep me
+        version: 1
+        agent:
+          default: codex
+        """
+        try store.saveText(original)
+
+        XCTAssertThrowsError(try store.saveText("{ nope"))
+
+        XCTAssertEqual(try String(contentsOf: path, encoding: .utf8), original)
+        XCTAssertEqual(store.load().defaultAgentCLI, .codex)
     }
 
     func testYAMLConfigurationLoadsOverridesAndUnknownKeys() throws {
@@ -724,6 +926,15 @@ final class PersistenceTests: XCTestCase {
               default: claude
             theme:
               active: dracula
+            icons:
+              fileBrowserPack: catppuccin-file-icons
+            fonts:
+              interfaceFamily: Avenir Next
+              interfaceSize: 14
+              editorFamily: SF Mono
+              editorSize: 15
+              terminalFamily: JetBrains Mono
+              terminalSize: 16
             keyboardShortcuts:
               toggleBottomTerminal:
                 key: k
@@ -731,6 +942,9 @@ final class PersistenceTests: XCTestCase {
             tools:
               editors:
                 preferred: [zed, nvim]
+              externalOpen:
+                default: vscode
+                preferred: [webstorm, unsupported, vscode, finder, vscode]
               git:
                 preferred: tig
               diff:
@@ -749,9 +963,18 @@ final class PersistenceTests: XCTestCase {
         let reloaded = store.load()
 
         XCTAssertEqual(reloaded.defaultAgentCLI, .claude)
+        XCTAssertEqual(reloaded.fileIconPack, .catppuccin)
+        XCTAssertEqual(reloaded.fonts.interfaceFamily, "Avenir Next")
+        XCTAssertEqual(reloaded.fonts.interfaceSize, 14)
+        XCTAssertEqual(reloaded.fonts.editorFamily, "SF Mono")
+        XCTAssertEqual(reloaded.fonts.editorSize, 15)
+        XCTAssertEqual(reloaded.fonts.terminalFamily, "JetBrains Mono")
+        XCTAssertEqual(reloaded.fonts.terminalSize, 16)
         XCTAssertEqual(reloaded.shortcut(for: .toggleBottomTerminal).key, "k")
         XCTAssertEqual(reloaded.shortcut(for: .toggleBottomTerminal).modifiers, [.command, .option])
         XCTAssertEqual(reloaded.tools.editors.preferred, ["zed", "nvim"])
+        XCTAssertEqual(reloaded.tools.externalOpen.defaultToolID, .vscode)
+        XCTAssertEqual(reloaded.tools.externalOpen.preferredToolIDs, [.webstorm, .vscode, .finder])
         XCTAssertEqual(reloaded.tools.git.preferred, "tig")
         XCTAssertEqual(reloaded.tools.diff.fallback, ["delta", "--diff"])
         XCTAssertEqual(reloaded.tools.agents.codex, "codex-nightly")
@@ -776,12 +999,90 @@ final class PersistenceTests: XCTestCase {
 
         XCTAssertEqual(reloaded.defaultAgentCLI, .codex)
         XCTAssertEqual(reloaded.tools.editors.preferred, ["nvim", "vim", "vi"])
+        XCTAssertEqual(reloaded.tools.externalOpen.defaultToolID, .zed)
+        XCTAssertEqual(reloaded.tools.externalOpen.preferredToolIDs, ExternalOpenSettings.defaultPreferred)
         XCTAssertTrue(reloaded.ignoreRules.contains(".git"))
         XCTAssertTrue(reloaded.ignoreRules.contains("node_modules"))
         XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
         XCTAssertTrue(reloaded.ignoreRules.contains("Movies"))
         XCTAssertTrue(reloaded.ignoreRules.contains("Pictures"))
         XCTAssertTrue(reloaded.ignoreRules.contains("Photos Library.photoslibrary"))
+    }
+
+    func testYAMLConfigurationClampsFontSizesAndFallbacksBlankFamilies() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(
+            """
+            fonts:
+              interfaceFamily: " "
+              interfaceSize: 2
+              editorFamily: ""
+              editorSize: 40
+              terminalFamily: "  "
+              terminalSize: 999
+            """.utf8
+        ).write(to: path)
+        let store = YAMLConfigurationStore(path: path)
+
+        let reloaded = store.load()
+
+        XCTAssertEqual(reloaded.fonts.interfaceFamily, "system")
+        XCTAssertEqual(reloaded.fonts.interfaceSize, 9)
+        XCTAssertEqual(reloaded.fonts.editorFamily, "system-monospace")
+        XCTAssertEqual(reloaded.fonts.editorSize, 28)
+        XCTAssertEqual(reloaded.fonts.terminalFamily, "")
+        XCTAssertEqual(reloaded.fonts.terminalSize, 32)
+    }
+
+    func testYAMLConfigurationFallsBackForUnknownIconPackAndRecordsDiagnostic() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let recorder = RecordingDiagnosticEventRecorder()
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(
+            """
+            icons:
+              fileBrowserPack: unsupported-icons
+            """.utf8
+        ).write(to: path)
+
+        let reloaded = YAMLConfigurationStore(path: path, diagnosticRecorder: recorder).load()
+
+        XCTAssertEqual(reloaded.fileIconPack, .material)
+        XCTAssertEqual(reloaded.icons.fileBrowserPack, FileIconPack.material.rawValue)
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "Configuration"
+                    && $0.name == "unsupported_icon_pack"
+                    && $0.metadata["requested"] == "unsupported-icons"
+                    && $0.metadata["fallback"] == FileIconPack.material.rawValue
+            }
+        )
+    }
+
+    func testYAMLConfigurationFallsBackForUnknownThemeAndRecordsDiagnostic() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let recorder = RecordingDiagnosticEventRecorder()
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(
+            """
+            theme:
+              active: unknown-theme
+            """.utf8
+        ).write(to: path)
+
+        let reloaded = YAMLConfigurationStore(path: path, diagnosticRecorder: recorder).load()
+
+        XCTAssertEqual(reloaded.themeName, ThemeCatalog.defaultID)
+        XCTAssertEqual(reloaded.resolvedTheme.id, ThemeCatalog.defaultID)
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "Configuration"
+                    && $0.name == "unsupported_theme"
+                    && $0.metadata["requested"] == "unknown-theme"
+                    && $0.metadata["fallback"] == ThemeCatalog.defaultID
+            }
+        )
     }
 
     func testYAMLConfigurationRecoversMalformedFileAndRecordsDiagnostic() throws {
@@ -829,6 +1130,26 @@ private func sqliteUserVersion(path: URL) throws -> Int {
                 columns.insert(String(cString: sqlite3_column_text(statement, 1)))
             }
             return columns
+        }
+    }
+
+    private func sqliteSidebarProjectExpanded(path: URL, projectID: UUID) throws -> Bool? {
+        try withSQLiteDatabase(path: path) { database in
+            var statement: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_prepare_v2(
+                    database,
+                    "SELECT is_expanded FROM sidebar_project_state WHERE project_id = ?",
+                    -1,
+                    &statement,
+                    nil
+                ),
+                SQLITE_OK
+            )
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, projectID.uuidString, -1, sqliteTransient)
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_int(statement, 0) == 1
         }
     }
 

@@ -15,7 +15,7 @@ The first implementation stays small: it gives users a project list, one active 
 - Treat `codex`, `claude`, `opencode`, and `copilot` as supported CLI families.
 - Provide a selected-thread bottom terminal that starts collapsed and can be toggled with `Cmd+J`.
 - Use `libghostty` for embedded terminal rendering and terminal behavior.
-- Use the Dracula theme across every app surface.
+- Use Dracula by default and keep built-in theme switching consistent across every app surface.
 - Show files for the selected project in a collapsible right tool panel.
 - Open selected files in `nvim` inside the right panel, falling back to `vim` and then `vi`.
 - Open `lazygit` in a terminal inside the right panel, falling back to `git diff` when `lazygit` is unavailable.
@@ -27,7 +27,7 @@ The first implementation stays small: it gives users a project list, one active 
 
 ## Visual Theme
 
-The app uses the Dracula theme as the default and initial-only theme. All primary surfaces, including sidebars, terminals, file browser, `nvim` editor panel, `lazygit` panel, modal sheets, dividers, and selection states, should use the Dracula OSS palette.
+The app uses Dracula as the default theme and supports built-in light, dark, and high-contrast themes. All primary surfaces, including sidebars, terminals, file browser, `nvim` editor panel, `lazygit` panel, modal sheets, dividers, and selection states, should use the selected theme palette.
 
 | Role | Color |
 | --- | --- |

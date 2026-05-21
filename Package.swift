@@ -42,6 +42,7 @@ let package = Package(
                 "Core",
                 "Diagnostics",
                 "FileBrowser",
+                "Icons",
                 "Layout",
                 "Persistence",
                 "Projects",

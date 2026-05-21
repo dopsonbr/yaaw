@@ -228,14 +228,56 @@ private final class E2ERunner {
     private func runFocusedBehaviorAssertions() throws -> FocusedBehaviorResult {
         let databasePath = paths.stateDirectory.appendingPathComponent("focused-behavior.sqlite")
         let model = try makeModel(databasePath: databasePath)
+        let settingsText = try String(contentsOf: paths.configPath, encoding: .utf8)
+        try assert(settingsText.contains("externalOpen:"), "settings YAML exposes externalOpen")
+        try assert(settingsText.contains("default: zed"), "settings YAML exposes the default external-open destination")
+        let detectedExternalTools: Set<ExternalOpenToolID> = [.vscode, .finder]
+        try assert(
+            ExternalOpenToolResolver.defaultTool(
+                settings: model.configuration.tools.externalOpen,
+                detectedTools: detectedExternalTools
+            ) == .vscode,
+            "external-open default falls back to first detected preferred destination"
+        )
         try assert(model.selectedProject?.displayName == "E2E Sandbox", "initial launch selected the seeded sandbox project")
         try assert(model.selectedProject?.rootDirectory == paths.workspaceDirectory, "initial launch used an E2E sandbox root")
+        try assert(
+            model.selectedExternalOpenDirectoryTarget == ExternalOpenTarget(url: paths.workspaceDirectory, kind: .directory),
+            "external-open target falls back to selected project when no thread is selected"
+        )
 
         try model.createProject(displayName: "E2E Project", rootDirectory: paths.projectDirectory)
         try assert(model.selectedProject?.rootDirectory == paths.projectDirectory, "project creation selected the fixture project")
+        try assert(
+            model.selectedExternalOpenDirectoryTarget == ExternalOpenTarget(url: paths.projectDirectory, kind: .directory),
+            "external-open target follows the selected project before thread creation"
+        )
+        let e2eProjectID = try unwrap(model.selectedProject?.id, "fixture project id exists")
+        let sandboxProjectID = try unwrap(
+            model.projects.first { $0.displayName == "E2E Sandbox" }?.id,
+            "sandbox project id exists"
+        )
+        let sandboxThreadID = try model.createThread(
+            projectID: sandboxProjectID,
+            agentCLI: .codex,
+            displayName: "  Sandbox Named Thread  "
+        )
+        try assert(model.selectedProjectID == sandboxProjectID, "project-row thread creation selected the target project")
+        try assert(model.selectedThread?.displayName == "Sandbox Named Thread", "project-row thread creation accepted optional name")
+        try assert(model.activeThreads(for: sandboxProjectID).contains { $0.id == sandboxThreadID }, "targeted thread appeared under its project")
+        try assert(model.isProjectExpanded(sandboxProjectID), "targeted project expanded after creating a thread")
+        model.toggleProjectPinned(id: e2eProjectID)
+        try assert(model.projects.first?.id == e2eProjectID, "pinned project sorted first")
+        model.toggleThreadPinned(id: sandboxThreadID)
+        try assert(model.activeThreads(for: sandboxProjectID).first?.id == sandboxThreadID, "pinned thread sorted first")
+        model.selectProject(id: e2eProjectID)
 
         let codexThreadID = try model.createThread(agentCLI: .codex)
         try assert(model.selectedThread?.agentCLI == .codex, "codex choice created a codex-backed thread")
+        try assert(
+            model.selectedExternalOpenDirectoryTarget == ExternalOpenTarget(url: paths.projectDirectory, kind: .directory),
+            "external-open target follows the selected thread working directory"
+        )
         model.recordAgentCLIOutput(
             threadID: codexThreadID,
             output: "YAAW_SESSION_ID=codex-e2e-001\nYAAW_SESSION_NAME=Codex E2E Session\n"
@@ -264,6 +306,11 @@ private final class E2ERunner {
         try assert(model.selectedThread?.displayName == "Copilot E2E Session", "copilot CLI metadata renamed the thread")
 
         model.selectThread(id: codexThreadID)
+        model.reloadConfiguration(YAAWConfiguration(theme: ThemeSettings(active: "light-high-contrast")))
+        try assert(model.configuration.themeName == "light-high-contrast", "settings reload applied selected built-in theme")
+        try assert(model.configuration.resolvedTheme.group == .highContrast, "selected theme resolved to high contrast group")
+        try assert(model.selectedThread?.id == codexThreadID, "theme settings reload preserved selected thread")
+
         model.refreshSelectedFileBrowser()
         try waitUntil("file index contains README.md") {
             model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" }
@@ -280,6 +327,14 @@ private final class E2ERunner {
             "fuzzy search preferred RootView.swift"
         )
         model.openFileInNvim(relativePath: "src/App/RootView.swift")
+        try assert(
+            model.externalOpenFileTarget(relativePath: "src/App/RootView.swift")
+                == ExternalOpenTarget(
+                    url: paths.projectDirectory.appendingPathComponent("src/App/RootView.swift"),
+                    kind: .file
+                ),
+            "external-open file target uses the selected thread working directory"
+        )
         let nvimRequest = try unwrap(
             model.terminalLaunchRequest(for: .nvim(threadID: codexThreadID)),
             "nvim request exists"
@@ -425,6 +480,7 @@ private final class E2ERunner {
                 captureDirectory: paths.captureDirectory
             ),
             fileIndexer: ImmediateFileIndexer(),
+            externalToolResolver: PATHAgentCLIExecutableResolver(fallbackSearchPaths: []),
             configuration: configuration,
             environment: missingToolEnvironment
         )
@@ -433,10 +489,10 @@ private final class E2ERunner {
         model.selectRightPanelMode(.git)
         let request = try unwrap(model.terminalLaunchRequest(for: .lazygit(threadID: threadID)), "missing lazygit request")
         try assert(
-            Array(request.command.suffix(2)) == ["git", "diff"]
-                || Array(request.command.suffix(2)) == [paths.missingToolBinDirectory.appendingPathComponent("git").path, "diff"]
-                || Array(request.command.suffix(2)) == ["/usr/bin/git", "diff"],
-            "missing lazygit fell back to git diff"
+            request.command == ["git", "--no-pager", "diff"]
+                || request.command == [paths.missingToolBinDirectory.appendingPathComponent("git").path, "--no-pager", "diff"]
+                || request.command == ["/usr/bin/git", "--no-pager", "diff"],
+            "missing lazygit fell back to git --no-pager diff"
         )
     }
 
@@ -456,6 +512,7 @@ private final class E2ERunner {
                 captureDirectory: paths.captureDirectory
             ),
             fileIndexer: ImmediateFileIndexer(),
+            externalToolResolver: PATHAgentCLIExecutableResolver(fallbackSearchPaths: []),
             configuration: configuration,
             environment: missingToolEnvironment
         )

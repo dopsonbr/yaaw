@@ -38,6 +38,38 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(command, ["claude", "--resume", "claude-session-123"])
     }
 
+    func testPATHResolverSearchesFallbackDirectoriesAfterProcessPath() throws {
+        let root = try temporaryDirectory()
+        let fallbackBin = root.appendingPathComponent("fallback-bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: fallbackBin, withIntermediateDirectories: true)
+        let lazygit = fallbackBin.appendingPathComponent("lazygit")
+        try writeExecutable(at: lazygit, contents: "#!/bin/sh\n")
+        let resolver = PATHAgentCLIExecutableResolver(fallbackSearchPaths: [fallbackBin.path])
+
+        let resolved = resolver.executablePath(
+            named: "lazygit",
+            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        )
+
+        XCTAssertEqual(resolved, lazygit.path)
+    }
+
+    func testPATHResolverPrefersProcessPathBeforeFallbackDirectories() throws {
+        let root = try temporaryDirectory()
+        let pathBin = root.appendingPathComponent("path-bin", isDirectory: true)
+        let fallbackBin = root.appendingPathComponent("fallback-bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: pathBin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: fallbackBin, withIntermediateDirectories: true)
+        let pathTool = pathBin.appendingPathComponent("lazygit")
+        try writeExecutable(at: pathTool, contents: "#!/bin/sh\n")
+        try writeExecutable(at: fallbackBin.appendingPathComponent("lazygit"), contents: "#!/bin/sh\n")
+        let resolver = PATHAgentCLIExecutableResolver(fallbackSearchPaths: [fallbackBin.path])
+
+        let resolved = resolver.executablePath(named: "lazygit", environment: ["PATH": pathBin.path])
+
+        XCTAssertEqual(resolved, pathTool.path)
+    }
+
     func testClaudeResumeCommandUsesCurrentResumeFlag() {
         let service = AgentCLISessionBindingService(
             resolver: StaticExecutableResolver(paths: ["claude": "/tmp/bin/claude"]),

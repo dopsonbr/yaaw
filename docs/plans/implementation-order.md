@@ -19,6 +19,7 @@ The initial commit established a SwiftPM scaffold with placeholder models for pr
 9. [Right Panel Tool Flows](09-right-panel-tool-flows.md)
 10. [Behavior E2E Suite](10-behavior-e2e-suite.md)
 11. [Polish And Hardening](11-polish-hardening.md)
+12. [Icon System](12-icon-system.md)
 
 ## Sequencing Rule
 

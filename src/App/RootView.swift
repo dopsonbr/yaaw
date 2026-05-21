@@ -4,10 +4,14 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var model: AppModel
+    let externalOpenWorkspace: ExternalOpenWorkspace
     let settingsPath: URL
+    let onLoadSettingsText: () throws -> String
+    let onValidateSettingsText: (String) throws -> YAAWConfiguration
+    let onSaveSettingsText: (String) throws -> YAAWConfiguration
     let onOpenSettingsFile: () -> Void
     let onReloadSettings: () -> Void
-    @State private var isSettingsPresented = false
+    @State private var route: RootRoute = .workspace
 
     var body: some View {
         GeometryReader { geometry in
@@ -21,7 +25,13 @@ struct RootView: View {
                         onToggleRightPanel: model.toggleRightPanelCollapsed,
                         onNavigateBack: model.navigateBack,
                         onNavigateForward: model.navigateForward,
-                        onOpenSettings: { isSettingsPresented = true }
+                        fonts: model.configuration.fonts,
+                        externalOpenTools: availableExternalOpenTools,
+                        defaultExternalOpenTool: defaultExternalOpenTool,
+                        externalOpenIcon: externalOpenWorkspace.icon(for:),
+                        onOpenDefaultExternal: openSelectedDirectoryWithDefaultExternalTool,
+                        onOpenExternalTool: openSelectedDirectoryExternally,
+                        onOpenSettings: { route = .settings }
                     )
                 }
                 .frame(height: 44)
@@ -30,50 +40,30 @@ struct RootView: View {
                 Divider()
                     .overlay(dracula(.currentLine))
 
-                HStack(spacing: 0) {
-                    sidebarRegion
-
-                    Divider()
-                        .overlay(dracula(.currentLine))
-
-                    VStack(spacing: 0) {
-                        HStack(spacing: 0) {
-                            MainWorkspaceView(model: model)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                            Divider()
-                                .overlay(dracula(.currentLine))
-
-                            rightPanelRegion(windowWidth: geometry.size.width)
-                        }
-
-                        BottomTerminalBar(
-                            isExpanded: model.isBottomTerminalExpanded,
-                            height: model.layoutState.globalTerminalHeight,
-                            request: selectedBottomTerminalRequest,
-                            onToggle: model.toggleBottomTerminal,
-                            onResize: { delta in
-                                model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
-                            },
-                            onAppearExpanded: {
-                                model.activateSelectedBottomTerminal()
-                            }
-                        )
-                    }
+                switch route {
+                case .workspace:
+                    workspaceContent(windowWidth: geometry.size.width)
+                case .settings:
+                    SettingsEditorView(
+                        configuration: model.configuration,
+                        fonts: model.configuration.fonts,
+                        settingsPath: settingsPath,
+                        onLoadText: onLoadSettingsText,
+                        onValidateText: onValidateSettingsText,
+                        onSaveText: onSaveSettingsText,
+                        onOpenExternal: onOpenSettingsFile,
+                        onReloadConfiguration: onReloadSettings,
+                        onBack: { route = .workspace }
+                    )
                 }
             }
         }
         .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
+        .font(model.configuration.fonts.interfaceFont())
+        .environment(\.fontSettings, model.configuration.fonts)
+        .environment(\.appTheme, model.configuration.resolvedTheme)
         .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
-        .sheet(isPresented: $isSettingsPresented) {
-            SettingsSheet(
-                configuration: model.configuration,
-                settingsPath: settingsPath,
-                onOpenSettingsFile: onOpenSettingsFile,
-                onReloadSettings: onReloadSettings
-            )
-        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             GhosttyTerminalRuntime.closeAll()
         }
@@ -84,11 +74,69 @@ struct RootView: View {
         return model.terminalLaunchRequest(for: .bottom(threadID: selectedThreadID))
     }
 
+    private var availableExternalOpenTools: [ExternalOpenToolID] {
+        externalOpenWorkspace.availableTools(settings: model.configuration.tools.externalOpen)
+    }
+
+    private var defaultExternalOpenTool: ExternalOpenToolID? {
+        externalOpenWorkspace.defaultTool(settings: model.configuration.tools.externalOpen)
+    }
+
+    private func openSelectedDirectoryWithDefaultExternalTool() {
+        guard let tool = defaultExternalOpenTool else { return }
+        openSelectedDirectoryExternally(tool)
+    }
+
+    private func openSelectedDirectoryExternally(_ tool: ExternalOpenToolID) {
+        guard let target = model.selectedExternalOpenDirectoryTarget else { return }
+        externalOpenWorkspace.open(target: target, with: tool)
+    }
+
+    private func openFileExternally(_ entry: FileBrowserEntry, tool: ExternalOpenToolID) {
+        guard let target = model.externalOpenFileTarget(relativePath: entry.relativePath) else { return }
+        externalOpenWorkspace.open(target: target, with: tool)
+    }
+
+    private func workspaceContent(windowWidth: Double) -> some View {
+        HStack(spacing: 0) {
+            sidebarRegion
+
+            Divider()
+                .overlay(dracula(.currentLine))
+
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    MainWorkspaceView(model: model)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    Divider()
+                        .overlay(dracula(.currentLine))
+
+                    rightPanelRegion(windowWidth: windowWidth)
+                }
+
+                BottomTerminalBar(
+                    isExpanded: model.isBottomTerminalExpanded,
+                    height: model.layoutState.globalTerminalHeight,
+                    request: selectedBottomTerminalRequest,
+                    fonts: model.configuration.fonts,
+                    onToggle: model.toggleBottomTerminal,
+                    onResize: { delta in
+                        model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
+                    },
+                    onAppearExpanded: {
+                        model.activateSelectedBottomTerminal()
+                    }
+                )
+            }
+        }
+    }
+
     @ViewBuilder
     private var sidebarRegion: some View {
         if model.layoutState.isSidebarCollapsed {
             CollapsedPanelRail(
-                systemImage: "sidebar.left",
+                systemImage: IconRole.sidebar.icon.systemSymbolName,
                 accessibilityLabel: "Expand sidebar",
                 action: model.toggleSidebarCollapsed
             )
@@ -110,7 +158,7 @@ struct RootView: View {
     private func rightPanelRegion(windowWidth: Double) -> some View {
         if !model.layoutState.isRightPanelCollapsed && windowWidth < rightPanelAdaptiveMinimumWidth {
             CollapsedPanelRail(
-                systemImage: "sidebar.right",
+                systemImage: IconRole.rightSidebar.icon.systemSymbolName,
                 accessibilityLabel: "Right panel hidden until the window is wider",
                 action: {}
             )
@@ -119,7 +167,7 @@ struct RootView: View {
             .opacity(0.65)
         } else if model.layoutState.isRightPanelCollapsed {
             CollapsedPanelRail(
-                systemImage: "sidebar.right",
+                systemImage: IconRole.rightSidebar.icon.systemSymbolName,
                 accessibilityLabel: "Expand right panel",
                 action: model.toggleRightPanelCollapsed
             )
@@ -132,10 +180,19 @@ struct RootView: View {
                 }
             )
 
-            RightPanelView(model: model)
+            RightPanelView(
+                model: model,
+                externalOpenTools: availableExternalOpenTools,
+                onOpenFileExternally: openFileExternally
+            )
                 .frame(width: model.layoutState.rightPanelWidth)
         }
     }
+}
+
+private enum RootRoute {
+    case workspace
+    case settings
 }
 
 private let rightPanelAdaptiveMinimumWidth = 1_680.0
@@ -148,12 +205,18 @@ private struct AppChromeHeader: View {
     let onToggleRightPanel: () -> Void
     let onNavigateBack: () -> Void
     let onNavigateForward: () -> Void
+    let fonts: FontSettings
+    let externalOpenTools: [ExternalOpenToolID]
+    let defaultExternalOpenTool: ExternalOpenToolID?
+    let externalOpenIcon: (ExternalOpenToolID) -> NSImage?
+    let onOpenDefaultExternal: () -> Void
+    let onOpenExternalTool: (ExternalOpenToolID) -> Void
     let onOpenSettings: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onToggleSidebar) {
-                Image(systemName: "sidebar.left")
+                Image(systemName: IconRole.sidebar.icon.systemSymbolName)
                     .frame(width: 26, height: 26)
             }
             .buttonStyle(.plain)
@@ -162,7 +225,7 @@ private struct AppChromeHeader: View {
             .accessibilityLabel(isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
 
             Button(action: onNavigateBack) {
-                Image(systemName: "chevron.left")
+                Image(systemName: IconRole.navigateBack.icon.systemSymbolName)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
@@ -171,7 +234,7 @@ private struct AppChromeHeader: View {
             .accessibilityLabel("Back")
 
             Button(action: onNavigateForward) {
-                Image(systemName: "chevron.right")
+                Image(systemName: IconRole.navigateForward.icon.systemSymbolName)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
@@ -184,24 +247,33 @@ private struct AppChromeHeader: View {
                 .frame(height: 28)
 
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(fonts.interfaceFont(sizeOffset: 2, weight: .semibold))
                 .foregroundStyle(dracula(.foreground))
                 .lineLimit(1)
                 .truncationMode(.middle)
 
             Spacer()
 
+            ExternalOpenSplitButton(
+                tools: externalOpenTools,
+                defaultTool: defaultExternalOpenTool,
+                icon: externalOpenIcon,
+                onOpenDefault: onOpenDefaultExternal,
+                onOpenTool: onOpenExternalTool
+            )
+
             Button(action: onOpenSettings) {
-                Image(systemName: "gearshape")
+                Image(systemName: IconRole.settings.icon.systemSymbolName)
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .foregroundStyle(dracula(.foreground))
             .help("Settings")
             .accessibilityLabel("Open settings")
+            .accessibilityIdentifier("open-settings-button")
 
             Button(action: onToggleRightPanel) {
-                Image(systemName: "sidebar.right")
+                Image(systemName: IconRole.rightSidebar.icon.systemSymbolName)
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
@@ -214,92 +286,409 @@ private struct AppChromeHeader: View {
     }
 }
 
-private struct SettingsSheet: View {
-    let configuration: YAAWConfiguration
-    let settingsPath: URL
-    let onOpenSettingsFile: () -> Void
-    let onReloadSettings: () -> Void
-    @Environment(\.dismiss) private var dismiss
+private struct ExternalOpenSplitButton: View {
+    let tools: [ExternalOpenToolID]
+    let defaultTool: ExternalOpenToolID?
+    let icon: (ExternalOpenToolID) -> NSImage?
+    let onOpenDefault: () -> Void
+    let onOpenTool: (ExternalOpenToolID) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        HStack(spacing: 0) {
+            Button(action: onOpenDefault) {
+                ExternalOpenToolIcon(tool: defaultTool, icon: defaultTool.flatMap(icon))
+                    .frame(width: 30, height: 28)
+            }
+            .buttonStyle(.plain)
+            .disabled(defaultTool == nil)
+            .help(defaultTool.map { "Open in \($0.displayName)" } ?? "No external open destination available")
+            .accessibilityLabel(defaultTool.map { "Open in \($0.displayName)" } ?? "No external open destination available")
+            .accessibilityIdentifier("external-open-default-button")
+
+            Menu {
+                ForEach(tools) { tool in
+                    Button {
+                        onOpenTool(tool)
+                    } label: {
+                        Label {
+                            Text(tool.displayName)
+                        } icon: {
+                            ExternalOpenToolIcon(tool: tool, icon: icon(tool))
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .disabled(tools.isEmpty)
+            .help("Choose external open destination")
+            .accessibilityLabel("Choose external open destination")
+            .accessibilityIdentifier("external-open-menu-button")
+        }
+        .background(dracula(.currentLine).opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(dracula(.comment).opacity(0.45), lineWidth: 1)
+        )
+    }
+}
+
+private struct ExternalOpenToolIcon: View {
+    let tool: ExternalOpenToolID?
+    let icon: NSImage?
+
+    var body: some View {
+        if let icon {
+            Image(nsImage: icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 16, height: 16)
+        } else if let tool {
+            Image(systemName: tool.systemSymbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(dracula(.cyan))
+        } else {
+            Image(systemName: IconRole.openDocument.icon.systemSymbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(dracula(.comment))
+        }
+    }
+}
+
+private struct SettingsEditorView: View {
+    let configuration: YAAWConfiguration
+    let fonts: FontSettings
+    let settingsPath: URL
+    let onLoadText: () throws -> String
+    let onValidateText: (String) throws -> YAAWConfiguration
+    let onSaveText: (String) throws -> YAAWConfiguration
+    let onOpenExternal: () -> Void
+    let onReloadConfiguration: () -> Void
+    let onBack: () -> Void
+
+    @State private var editorText = ""
+    @State private var lastSavedText = ""
+    @State private var statusMessage = "Loading settings..."
+    @State private var validationError: String?
+    @State private var hasLoaded = false
+    @State private var pendingDiscardAction: SettingsDiscardAction?
+    @State private var isShowingDiscardConfirmation = false
+    @State private var selectedThemeID = ThemeCatalog.defaultID
+
+    private var hasUnsavedChanges: Bool {
+        editorText != lastSavedText
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Settings")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(dracula(.purple))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Settings")
+                        .font(fonts.interfaceFont(sizeOffset: 8, weight: .semibold))
+                        .foregroundStyle(dracula(.purple))
+
+                    Text(settingsPath.path)
+                        .font(fonts.editorFont(sizeOffset: -1))
+                        .textSelection(.enabled)
+                        .foregroundStyle(dracula(.cyan))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
 
                 Spacer()
 
                 Button {
-                    dismiss()
+                    requestBack()
                 } label: {
-                    Image(systemName: "xmark")
+                    Label("Back", systemImage: IconRole.navigateBack.icon.systemSymbolName)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(dracula(.comment))
-                .help("Close")
-                .accessibilityLabel("Close settings")
+                .help("Back to workspace")
+                .accessibilityLabel("Back to workspace")
+                .accessibilityIdentifier("settings-back-button")
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("YAML File")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(dracula(.comment))
-
-                Text(settingsPath.path)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .foregroundStyle(dracula(.cyan))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Divider().overlay(dracula(.currentLine))
+            appearanceSection
 
             VStack(alignment: .leading, spacing: 10) {
-                SettingsSummaryRow(label: "Theme", value: "\(configuration.themeName) (only Dracula is active now)")
+                SettingsSummaryRow(label: "Theme", value: configuration.resolvedTheme.displayName)
                 SettingsSummaryRow(label: "Default agent", value: configuration.defaultAgentCLI.displayName)
                 SettingsSummaryRow(label: "Editors", value: configuration.tools.editors.preferred.joined(separator: ", "))
+                SettingsSummaryRow(label: "External open", value: configuration.tools.externalOpen.default)
                 SettingsSummaryRow(label: "Git", value: configuration.tools.git.preferred)
                 SettingsSummaryRow(label: "Diff fallback", value: configuration.tools.diff.fallback.joined(separator: " "))
+                SettingsSummaryRow(label: "File icons", value: configuration.fileIconPack.rawValue)
+                SettingsSummaryRow(label: "Interface font", value: "\(configuration.fonts.interfaceFamily), \(configuration.fonts.interfaceSize.formattedFontSize) pt")
+                SettingsSummaryRow(label: "Editor font", value: "\(configuration.fonts.editorFamily), \(configuration.fonts.editorSize.formattedFontSize) pt")
+                SettingsSummaryRow(label: "Terminal font", value: terminalFontSummary)
                 SettingsSummaryRow(label: "Ignore rules", value: "\(configuration.ignoreRules.count) rules")
+            }
+
+            editorHeader
+
+            TextEditor(text: $editorText)
+                .font(fonts.editorFont())
+                .foregroundStyle(dracula(.foreground))
+                .scrollContentBackground(.hidden)
+                .background(dracula(.currentLine).opacity(0.45))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(validationError == nil ? dracula(.currentLine) : dracula(.red), lineWidth: 1)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel("Settings YAML editor")
+                .accessibilityIdentifier("settings-yaml-editor")
+
+            if let validationError {
+                Label(validationError, systemImage: IconRole.warning.icon.systemSymbolName)
+                    .font(fonts.interfaceFont(sizeOffset: -1))
+                    .foregroundStyle(dracula(.red))
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            } else {
+                Text(statusMessage)
+                    .font(fonts.interfaceFont(sizeOffset: -1))
+                    .foregroundStyle(dracula(.comment))
             }
 
             HStack {
                 Button {
-                    onOpenSettingsFile()
+                    save()
                 } label: {
-                    Label("Open YAML", systemImage: "doc.text")
+                    Label("Save", systemImage: "square.and.arrow.down")
                 }
+                .disabled(!hasUnsavedChanges)
+                .accessibilityIdentifier("settings-save-button")
 
                 Button {
-                    onReloadSettings()
+                    requestReload()
                 } label: {
-                    Label("Reload", systemImage: "arrow.clockwise")
+                    Label("Reload", systemImage: IconRole.reload.icon.systemSymbolName)
+                }
+                .accessibilityIdentifier("settings-reload-button")
+
+                Button {
+                    revert()
+                } label: {
+                    Label("Revert", systemImage: "arrow.uturn.backward")
+                }
+                .disabled(!hasUnsavedChanges)
+                .accessibilityIdentifier("settings-revert-button")
+
+                Button {
+                    onOpenExternal()
+                } label: {
+                    Label("Open External", systemImage: IconRole.openDocument.icon.systemSymbolName)
                 }
 
                 Spacer()
             }
         }
         .padding(24)
-        .frame(width: 560)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
+        .onAppear(perform: loadIfNeeded)
+        .onChange(of: configuration.themeName) { _, newThemeID in
+            selectedThemeID = ThemeCatalog.theme(id: newThemeID)?.id ?? ThemeCatalog.defaultID
+        }
+        .confirmationDialog(
+            "Discard unsaved settings changes?",
+            isPresented: $isShowingDiscardConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Discard Changes", role: .destructive) {
+                performPendingDiscardAction()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDiscardAction = nil
+            }
+        } message: {
+            Text("Unsaved YAML edits will be lost.")
+        }
     }
+
+    private var editorHeader: some View {
+        HStack {
+            Text("YAML")
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+                .foregroundStyle(dracula(.comment))
+
+            if hasUnsavedChanges {
+                Text("Unsaved")
+                    .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+                    .foregroundStyle(dracula(.orange))
+            }
+
+            Spacer()
+        }
+    }
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Appearance")
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+                .foregroundStyle(dracula(.comment))
+
+            Picker("Theme", selection: themeSelection) {
+                ForEach(ThemeGroup.allCases) { group in
+                    Section(group.displayName) {
+                        ForEach(ThemeCatalog.themes(in: group)) { theme in
+                            Text(theme.displayName).tag(theme.id)
+                        }
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: 360, alignment: .leading)
+            .accessibilityLabel("Theme")
+            .accessibilityIdentifier("settings-theme-picker")
+        }
+    }
+
+    private var themeSelection: Binding<String> {
+        Binding(
+            get: { selectedThemeID },
+            set: { newValue in
+                guard selectedThemeID != newValue else { return }
+                selectedThemeID = newValue
+                saveThemeSelection(newValue)
+            }
+        )
+    }
+
+    private var terminalFontSummary: String {
+        let family = configuration.fonts.terminalFamily.isEmpty ? "Ghostty default" : configuration.fonts.terminalFamily
+        return "\(family), \(configuration.fonts.terminalSize.formattedFontSize) pt"
+    }
+
+    private func loadIfNeeded() {
+        guard !hasLoaded else { return }
+        hasLoaded = true
+        reloadFromDisk()
+    }
+
+    private func requestBack() {
+        guard hasUnsavedChanges else {
+            onBack()
+            return
+        }
+        pendingDiscardAction = .back
+        isShowingDiscardConfirmation = true
+    }
+
+    private func requestReload() {
+        guard hasUnsavedChanges else {
+            reloadFromDisk()
+            return
+        }
+        pendingDiscardAction = .reload
+        isShowingDiscardConfirmation = true
+    }
+
+    private func performPendingDiscardAction() {
+        switch pendingDiscardAction {
+        case .back:
+            pendingDiscardAction = nil
+            onBack()
+        case .reload:
+            pendingDiscardAction = nil
+            reloadFromDisk()
+        case .none:
+            break
+        }
+    }
+
+    private func reloadFromDisk() {
+        do {
+            let text = try onLoadText()
+            editorText = text
+            lastSavedText = text
+            do {
+                let configuration = try onValidateText(text)
+                selectedThemeID = configuration.resolvedTheme.id
+                validationError = nil
+                onReloadConfiguration()
+                statusMessage = "Settings reloaded from disk."
+            } catch {
+                validationError = "YAML validation failed: \(error)"
+                statusMessage = "Settings file loaded with validation errors."
+            }
+        } catch {
+            validationError = "Could not load settings: \(error)"
+            statusMessage = "Settings file could not be loaded."
+        }
+    }
+
+    private func save() {
+        do {
+            _ = try onSaveText(editorText)
+            let configuration = try onValidateText(editorText)
+            selectedThemeID = configuration.resolvedTheme.id
+            lastSavedText = editorText
+            validationError = nil
+            statusMessage = "Settings saved and applied."
+        } catch {
+            validationError = "YAML validation failed: \(error)"
+            statusMessage = "Settings were not saved."
+        }
+    }
+
+    private func revert() {
+        editorText = lastSavedText
+        do {
+            let configuration = try onValidateText(editorText)
+            selectedThemeID = configuration.resolvedTheme.id
+            validationError = nil
+            statusMessage = "Unsaved edits reverted."
+        } catch {
+            validationError = "YAML validation failed: \(error)"
+            statusMessage = "Reverted to the last loaded file contents."
+        }
+    }
+
+    private func saveThemeSelection(_ themeID: String) {
+        do {
+            var nextConfiguration = try onValidateText(editorText)
+            nextConfiguration.theme.active = themeID
+            let renderedText = YAMLConfigurationStore.render(nextConfiguration)
+            _ = try onSaveText(renderedText)
+            editorText = renderedText
+            lastSavedText = renderedText
+            selectedThemeID = themeID
+            validationError = nil
+            statusMessage = "Theme saved and applied."
+        } catch {
+            selectedThemeID = configuration.resolvedTheme.id
+            validationError = "YAML validation failed: \(error)"
+            statusMessage = "Theme was not changed."
+        }
+    }
+}
+
+private enum SettingsDiscardAction {
+    case back
+    case reload
 }
 
 private struct SettingsSummaryRow: View {
     let label: String
     let value: String
+    @Environment(\.fontSettings) private var fonts
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label)
-                .font(.caption.weight(.semibold))
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
                 .foregroundStyle(dracula(.comment))
                 .frame(width: 110, alignment: .leading)
 
             Text(value)
-                .font(.system(.body, design: .monospaced))
+                .font(fonts.editorFont())
                 .foregroundStyle(dracula(.foreground))
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -310,116 +699,48 @@ private struct SettingsSummaryRow: View {
 private struct SidebarView: View {
     @ObservedObject var model: AppModel
     @State private var isProjectSheetPresented = false
-    @State private var isThreadSheetPresented = false
+    @State private var threadSheetProject: Project?
+    @Environment(\.fontSettings) private var fonts
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("YAAW")
-                .font(.title2.weight(.semibold))
+                .font(fonts.interfaceFont(sizeOffset: 8, weight: .semibold))
                 .foregroundStyle(dracula(.purple))
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 SectionHeader(
                     title: "Projects",
                     actionTitle: "New",
-                    systemImage: "folder.badge.plus"
+                    systemImage: IconRole.newProject.icon.systemSymbolName
                 ) {
                     isProjectSheetPresented = true
                 }
 
-                ForEach(model.projects) { project in
-                    Button {
-                        model.selectProject(id: project.id)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(project.displayName)
-                                .lineLimit(1)
-
-                            Text(project.rootDirectory.path)
-                                .font(.caption)
-                                .foregroundStyle(dracula(.comment))
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.plain)
-                    .background(model.selectedProjectID == project.id ? dracula(.currentLine) : dracula(.background))
-                    .accessibilityLabel("Project \(project.displayName)")
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(
-                    title: "Threads",
-                    actionTitle: "New",
-                    systemImage: "plus.message"
-                ) {
-                    isThreadSheetPresented = true
-                }
-
-                ForEach(model.activeThreadsForSelectedProject) { thread in
-                    Button {
-                        model.selectThread(id: thread.id)
-                    } label: {
-                        HStack {
-                            Text(thread.displayName)
-                                .lineLimit(1)
-
-                            Spacer()
-
-                            Text(thread.agentCLI.displayName)
-                                .font(.caption)
-                                .foregroundStyle(dracula(.cyan))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.plain)
-                    .background(model.selectedThreadID == thread.id ? dracula(.currentLine) : dracula(.background))
-                    .accessibilityLabel("Thread \(thread.displayName), \(thread.agentCLI.displayName)")
-                }
-
-                if let selectedThreadID = model.selectedThreadID {
-                    Button("Archive Selected Thread") {
-                        model.archiveThread(id: selectedThreadID)
-                    }
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    .foregroundStyle(dracula(.orange))
-                    .padding(.top, 4)
-                    .accessibilityLabel("Archive selected thread")
-                }
-            }
-
-            DisclosureGroup {
-                if model.archivedThreadsForSelectedProject.isEmpty {
-                    Text("No archived threads")
-                        .font(.caption)
-                        .foregroundStyle(dracula(.comment))
-                        .padding(.vertical, 4)
-                } else {
-                    ForEach(model.archivedThreadsForSelectedProject) { thread in
-                        ArchivedThreadRow(thread: thread) {
-                            model.selectThread(id: thread.id)
-                        } onUnarchive: {
-                            model.unarchiveThread(id: thread.id)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(model.projects) { project in
+                            ProjectSidebarSection(
+                                model: model,
+                                project: project,
+                                onNewThread: {
+                                    threadSheetProject = project
+                                }
+                            )
                         }
                     }
                 }
-            } label: {
-                Label("Archived", systemImage: "archivebox")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(dracula(.orange))
+                .scrollIndicators(.hidden)
+                .frame(maxHeight: .infinity)
             }
 
-            Spacer()
+            Spacer(minLength: 0)
 
             Button {
                 model.toggleSidebarCollapsed()
             } label: {
-                Label("Collapse Sidebar", systemImage: "sidebar.left")
-                    .font(.caption.weight(.semibold))
+                Label("Collapse Sidebar", systemImage: IconRole.sidebar.icon.systemSymbolName)
+                    .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
             }
             .buttonStyle(.plain)
             .foregroundStyle(dracula(.comment))
@@ -429,8 +750,192 @@ private struct SidebarView: View {
         .sheet(isPresented: $isProjectSheetPresented) {
             ProjectCreationSheet(model: model)
         }
-        .sheet(isPresented: $isThreadSheetPresented) {
-            ThreadChoiceSheet(model: model)
+        .sheet(item: $threadSheetProject) { project in
+            ThreadChoiceSheet(model: model, project: project)
+        }
+    }
+}
+
+private struct ProjectSidebarSection: View {
+    @ObservedObject var model: AppModel
+    let project: Project
+    let onNewThread: () -> Void
+    @Environment(\.fontSettings) private var fonts
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                SidebarIconButton(
+                    systemImage: (
+                        model.isProjectExpanded(project.id) ? IconRole.disclosureExpanded : IconRole.disclosureCollapsed
+                    ).icon.systemSymbolName,
+                    help: model.isProjectExpanded(project.id) ? "Collapse project" : "Expand project"
+                ) {
+                    model.setProjectExpanded(project.id, isExpanded: !model.isProjectExpanded(project.id))
+                }
+
+                Button {
+                    model.selectProject(id: project.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 5) {
+                            if project.isPinned {
+                                Image(systemName: IconRole.pinned.icon.systemSymbolName)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(dracula(.pink))
+                            }
+
+                            Text(project.displayName)
+                                .font(fonts.interfaceFont(sizeOffset: 1, weight: .semibold))
+                                .lineLimit(1)
+                        }
+
+                        Text(project.rootDirectory.path)
+                            .font(fonts.interfaceFont(sizeOffset: -1))
+                            .foregroundStyle(dracula(.comment))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Project \(project.displayName)")
+
+                SidebarIconButton(
+                    systemImage: (project.isPinned ? IconRole.unpin : IconRole.pin).icon.systemSymbolName,
+                    help: project.isPinned ? "Unpin project" : "Pin project"
+                ) {
+                    model.toggleProjectPinned(id: project.id)
+                }
+
+                SidebarIconButton(systemImage: IconRole.moveUp.icon.systemSymbolName, help: "Move project up") {
+                    model.moveProject(id: project.id, direction: .up)
+                }
+
+                SidebarIconButton(systemImage: IconRole.moveDown.icon.systemSymbolName, help: "Move project down") {
+                    model.moveProject(id: project.id, direction: .down)
+                }
+
+                SidebarIconButton(systemImage: IconRole.newThread.icon.systemSymbolName, help: "New thread") {
+                    onNewThread()
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 4)
+            .background(model.selectedProjectID == project.id ? dracula(.currentLine) : dracula(.background))
+
+            if model.isProjectExpanded(project.id) {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(model.activeThreads(for: project.id)) { thread in
+                        ActiveThreadRow(model: model, thread: thread)
+                    }
+
+                    ArchivedThreadDisclosure(model: model, project: project)
+                }
+                .padding(.leading, 20)
+            }
+        }
+    }
+}
+
+private struct ActiveThreadRow: View {
+    @ObservedObject var model: AppModel
+    let thread: AgentThread
+    @Environment(\.fontSettings) private var fonts
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                model.selectThread(id: thread.id)
+            } label: {
+                HStack(spacing: 6) {
+                    if thread.isPinned {
+                        Image(systemName: IconRole.pinned.icon.systemSymbolName)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(dracula(.pink))
+                    }
+
+                    Text(thread.displayName)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text(thread.agentCLI.displayName)
+                        .font(fonts.interfaceFont(sizeOffset: -1))
+                        .foregroundStyle(dracula(.cyan))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Thread \(thread.displayName), \(thread.agentCLI.displayName)")
+
+            SidebarIconButton(
+                systemImage: (thread.isPinned ? IconRole.unpin : IconRole.pin).icon.systemSymbolName,
+                help: thread.isPinned ? "Unpin thread" : "Pin thread"
+            ) {
+                model.toggleThreadPinned(id: thread.id)
+            }
+
+            SidebarIconButton(systemImage: IconRole.archive.icon.systemSymbolName, help: "Archive thread") {
+                model.archiveThread(id: thread.id)
+            }
+        }
+        .font(fonts.interfaceFont())
+        .padding(.vertical, 5)
+        .padding(.horizontal, 4)
+        .background(model.selectedThreadID == thread.id ? dracula(.currentLine) : dracula(.background))
+    }
+}
+
+private struct ArchivedThreadDisclosure: View {
+    @ObservedObject var model: AppModel
+    let project: Project
+    @Environment(\.fontSettings) private var fonts
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Button {
+                model.setProjectArchiveExpanded(
+                    project.id,
+                    isExpanded: !model.isProjectArchiveExpanded(project.id)
+                )
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: (
+                        model.isProjectArchiveExpanded(project.id) ? IconRole.disclosureExpanded : IconRole.disclosureCollapsed
+                    ).icon.systemSymbolName)
+                        .frame(width: 12)
+
+                    Label("Archived", systemImage: IconRole.archive.icon.systemSymbolName)
+                        .labelStyle(.titleAndIcon)
+
+                    Spacer()
+
+                    Text("\(model.archivedThreads(for: project.id).count)")
+                        .font(fonts.interfaceFont(sizeOffset: -2))
+                        .foregroundStyle(dracula(.comment))
+                }
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+                .foregroundStyle(dracula(.orange))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Archived threads for \(project.displayName)")
+
+            if model.isProjectArchiveExpanded(project.id) {
+                if model.archivedThreads(for: project.id).isEmpty {
+                    Text("No archived threads")
+                        .font(fonts.interfaceFont(sizeOffset: -1))
+                        .foregroundStyle(dracula(.comment))
+                        .padding(.vertical, 4)
+                } else {
+                    ForEach(model.archivedThreads(for: project.id)) { thread in
+                        ArchivedThreadRow(model: model, thread: thread)
+                    }
+                }
+            }
         }
     }
 }
@@ -440,11 +945,12 @@ private struct SectionHeader: View {
     let actionTitle: String
     let systemImage: String
     let action: () -> Void
+    @Environment(\.fontSettings) private var fonts
 
     var body: some View {
         HStack {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
                 .foregroundStyle(dracula(.comment))
 
             Spacer()
@@ -454,7 +960,7 @@ private struct SectionHeader: View {
                     .labelStyle(.iconOnly)
             }
                 .buttonStyle(.plain)
-                .font(.caption.weight(.semibold))
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
                 .foregroundStyle(dracula(.cyan))
                 .help(actionTitle)
                 .accessibilityLabel("\(actionTitle) \(title)")
@@ -462,28 +968,58 @@ private struct SectionHeader: View {
     }
 }
 
+private struct SidebarIconButton: View {
+    let systemImage: String
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .frame(width: 18, height: 18)
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(dracula(.cyan))
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 private struct ArchivedThreadRow: View {
+    @ObservedObject var model: AppModel
     let thread: AgentThread
-    let onSelect: () -> Void
-    let onUnarchive: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Button(action: onSelect) {
-                Text(thread.displayName)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                model.selectThread(id: thread.id)
+            } label: {
+                HStack(spacing: 6) {
+                    if thread.isPinned {
+                        Image(systemName: IconRole.pinned.icon.systemSymbolName)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(dracula(.pink))
+                    }
+
+                    Text(thread.displayName)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Archived thread \(thread.displayName)")
 
-            Button(action: onUnarchive) {
-                Image(systemName: "arrow.uturn.backward")
+            SidebarIconButton(
+                systemImage: (thread.isPinned ? IconRole.unpin : IconRole.pin).icon.systemSymbolName,
+                help: thread.isPinned ? "Unpin thread" : "Pin thread"
+            ) {
+                model.toggleThreadPinned(id: thread.id)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(dracula(.cyan))
-            .help("Unarchive")
-            .accessibilityLabel("Unarchive \(thread.displayName)")
+
+            SidebarIconButton(systemImage: IconRole.unarchive.icon.systemSymbolName, help: "Unarchive \(thread.displayName)") {
+                model.unarchiveThread(id: thread.id)
+            }
         }
         .padding(.vertical, 6)
     }
@@ -603,7 +1139,9 @@ private struct ProjectCreationSheet: View {
 
 private struct ThreadChoiceSheet: View {
     @ObservedObject var model: AppModel
+    let project: Project
     @Environment(\.dismiss) private var dismiss
+    @State private var displayName = ""
     @State private var errorMessage: String?
 
     var body: some View {
@@ -612,8 +1150,13 @@ private struct ThreadChoiceSheet: View {
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(dracula(.purple))
 
-            Text(model.selectedProject?.displayName ?? "No project selected")
+            Text(project.displayName)
                 .foregroundStyle(dracula(.comment))
+
+            TextField("Optional thread name", text: $displayName)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 15))
+                .accessibilityLabel("Optional thread name")
 
             HStack(spacing: 12) {
                 ForEach(AgentCLIKind.allCases) { agentCLI in
@@ -632,13 +1175,17 @@ private struct ThreadChoiceSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 360)
+        .frame(width: 420)
         .background(dracula(.background))
     }
 
     private func createThread(agentCLI: AgentCLIKind) {
         do {
-            try model.createThread(agentCLI: agentCLI)
+            try model.createThread(
+                projectID: project.id,
+                agentCLI: agentCLI,
+                displayName: displayName
+            )
             dismiss()
         } catch {
             errorMessage = "Thread could not be created."
@@ -669,6 +1216,7 @@ private struct MainWorkspaceView: View {
             TerminalPlaceholderView(
                 request: selectedProjectTerminalRequest,
                 unavailableMessage: selectedProjectTerminalUnavailableMessage,
+                fonts: model.configuration.fonts,
                 onTitleChange: { role, title in
                     if case .project(let threadID) = role {
                         model.recordAgentCLITerminalTitle(threadID: threadID, title: title)
@@ -702,6 +1250,9 @@ private struct MainWorkspaceView: View {
 
 private struct RightPanelView: View {
     @ObservedObject var model: AppModel
+    let externalOpenTools: [ExternalOpenToolID]
+    let onOpenFileExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
+    @Environment(\.fontSettings) private var fonts
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -711,9 +1262,9 @@ private struct RightPanelView: View {
                         Button {
                             model.selectRightPanelTab(id: tab.id)
                         } label: {
-                            Label(tab.title, systemImage: iconName(for: tab))
+                            Label(tab.title, systemImage: IconRole.rightPanelMode(mode(for: tab.kind)).icon.systemSymbolName)
                                 .labelStyle(.titleAndIcon)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(fonts.interfaceFont(weight: .semibold))
                                 .lineLimit(1)
                         }
                         .buttonStyle(.plain)
@@ -727,7 +1278,7 @@ private struct RightPanelView: View {
                     Button {
                         chooseNvimFile()
                     } label: {
-                        Image(systemName: "plus")
+                        Image(systemName: IconRole.add.icon.systemSymbolName)
                             .font(.system(size: 13, weight: .bold))
                             .frame(width: 24, height: 24)
                     }
@@ -748,10 +1299,13 @@ private struct RightPanelView: View {
                         get: { model.fileBrowserState.searchQuery },
                         set: { model.updateFileSearchQuery($0) }
                     ),
+                    fileIconPack: model.configuration.fileIconPack,
                     onRefresh: model.refreshSelectedFileBrowser,
                     onOpenFile: { entry in
                         model.openFileInNvim(relativePath: entry.relativePath)
-                    }
+                    },
+                    externalOpenTools: externalOpenTools,
+                    onOpenExternally: onOpenFileExternally
                 )
                 .onAppear {
                     model.refreshSelectedFileBrowser()
@@ -763,7 +1317,8 @@ private struct RightPanelView: View {
             case .nvim:
                 TerminalPlaceholderView(
                     request: selectedRightPanelRequest,
-                    unavailableMessage: selectedRightPanelUnavailableMessage(tool: "nvim")
+                    unavailableMessage: selectedRightPanelUnavailableMessage(tool: "nvim"),
+                    fonts: model.configuration.fonts
                 )
                     .id("\(model.selectedThreadID?.uuidString ?? "none")-\(model.selectedRightPanelTab.id)")
                     .onAppear {
@@ -773,7 +1328,8 @@ private struct RightPanelView: View {
             case .git:
                 TerminalPlaceholderView(
                     request: selectedRightPanelRequest,
-                    unavailableMessage: selectedRightPanelUnavailableMessage(tool: "lazygit")
+                    unavailableMessage: selectedRightPanelUnavailableMessage(tool: "lazygit"),
+                    fonts: model.configuration.fonts
                 )
                     .id(model.selectedThreadID)
                     .onAppear {
@@ -805,14 +1361,14 @@ private struct RightPanelView: View {
         return "Terminal unavailable for \(tool)"
     }
 
-    private func iconName(for tab: RightPanelTab) -> String {
-        switch tab.kind {
+    private func mode(for kind: RightPanelTabKind) -> RightPanelMode {
+        switch kind {
         case .files:
-            return "doc.on.doc"
+            .files
         case .git:
-            return "arrow.triangle.branch"
+            .git
         case .nvim:
-            return "terminal"
+            .nvim
         }
     }
 
@@ -839,7 +1395,7 @@ private struct MissingDirectoryBanner: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: "exclamationmark.triangle")
+            Label(title, systemImage: IconRole.warning.icon.systemSymbolName)
                 .font(.headline)
                 .foregroundStyle(dracula(.orange))
 
@@ -865,8 +1421,11 @@ private struct MissingDirectoryBanner: View {
 private struct FileBrowserPanel: View {
     let state: FileBrowserState
     @Binding var searchQuery: String
+    let fileIconPack: FileIconPack
     let onRefresh: () -> Void
     let onOpenFile: (FileBrowserEntry) -> Void
+    let externalOpenTools: [ExternalOpenToolID]
+    let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
     @State private var expandedFolders: Set<String> = []
     @State private var typedQuery: String = ""
     @State private var debounceTask: Task<Void, Never>?
@@ -899,7 +1458,7 @@ private struct FileBrowserPanel: View {
                     }
 
                 Button(action: onRefresh) {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: IconRole.reload.icon.systemSymbolName)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(dracula(.cyan))
@@ -936,12 +1495,21 @@ private struct FileBrowserPanel: View {
                                 node: node,
                                 depth: 0,
                                 expandedFolders: $expandedFolders,
-                                onOpenFile: onOpenFile
+                                fileIconPack: fileIconPack,
+                                onOpenFile: onOpenFile,
+                                externalOpenTools: externalOpenTools,
+                                onOpenExternally: onOpenExternally
                             )
                         }
                     } else {
                         ForEach(state.visibleEntries) { entry in
-                            FileBrowserSearchRow(entry: entry, onOpenFile: onOpenFile)
+                            FileBrowserSearchRow(
+                                entry: entry,
+                                fileIconPack: fileIconPack,
+                                onOpenFile: onOpenFile,
+                                externalOpenTools: externalOpenTools,
+                                onOpenExternally: onOpenExternally
+                            )
                         }
                     }
                 }
@@ -976,7 +1544,10 @@ private struct FileBrowserTreeRow: View {
     let node: FileBrowserTreeNode
     let depth: Int
     @Binding var expandedFolders: Set<String>
+    let fileIconPack: FileIconPack
     let onOpenFile: (FileBrowserEntry) -> Void
+    let externalOpenTools: [ExternalOpenToolID]
+    let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -991,11 +1562,15 @@ private struct FileBrowserTreeRow: View {
                     entry: node.entry,
                     displayName: node.displayName,
                     depth: depth,
+                    fileIconPack: fileIconPack,
                     isExpanded: isExpanded
                 )
             }
             .buttonStyle(.plain)
             .help(node.entry.isDirectory ? node.entry.relativePath : "Open in nvim")
+            .contextMenu {
+                externalOpenMenuItems(for: node.entry)
+            }
 
             if node.entry.isDirectory && isExpanded {
                 ForEach(node.children) { child in
@@ -1003,7 +1578,10 @@ private struct FileBrowserTreeRow: View {
                         node: child,
                         depth: depth + 1,
                         expandedFolders: $expandedFolders,
-                        onOpenFile: onOpenFile
+                        fileIconPack: fileIconPack,
+                        onOpenFile: onOpenFile,
+                        externalOpenTools: externalOpenTools,
+                        onOpenExternally: onOpenExternally
                     )
                 }
             }
@@ -1021,11 +1599,25 @@ private struct FileBrowserTreeRow: View {
             expandedFolders.insert(node.entry.relativePath)
         }
     }
+
+    @ViewBuilder
+    private func externalOpenMenuItems(for entry: FileBrowserEntry) -> some View {
+        if !entry.isDirectory {
+            ForEach(externalOpenTools) { tool in
+                Button("Open in \(tool.displayName)") {
+                    onOpenExternally(entry, tool)
+                }
+            }
+        }
+    }
 }
 
 private struct FileBrowserSearchRow: View {
     let entry: FileBrowserEntry
+    let fileIconPack: FileIconPack
     let onOpenFile: (FileBrowserEntry) -> Void
+    let externalOpenTools: [ExternalOpenToolID]
+    let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
 
     var body: some View {
         if entry.isDirectory {
@@ -1033,6 +1625,7 @@ private struct FileBrowserSearchRow: View {
                 entry: entry,
                 displayName: entry.relativePath,
                 depth: 0,
+                fileIconPack: fileIconPack,
                 isExpanded: false
             )
         } else {
@@ -1043,11 +1636,19 @@ private struct FileBrowserSearchRow: View {
                     entry: entry,
                     displayName: entry.relativePath,
                     depth: 0,
+                    fileIconPack: fileIconPack,
                     isExpanded: false
                 )
             }
             .buttonStyle(.plain)
             .help("Open in nvim")
+            .contextMenu {
+                ForEach(externalOpenTools) { tool in
+                    Button("Open in \(tool.displayName)") {
+                        onOpenExternally(entry, tool)
+                    }
+                }
+            }
         }
     }
 }
@@ -1056,23 +1657,30 @@ private struct FileBrowserRowContent: View {
     let entry: FileBrowserEntry
     let displayName: String
     let depth: Int
+    let fileIconPack: FileIconPack
     var isExpanded = false
+    @State private var isHovered = false
+    @Environment(\.fontSettings) private var fonts
 
     var body: some View {
+        let fileIcon = FileIconResolver(pack: fileIconPack).icon(for: entry, isExpanded: isExpanded)
+
         HStack(spacing: 6) {
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+            Image(systemName: (
+                isExpanded ? IconRole.disclosureExpanded : IconRole.disclosureCollapsed
+            ).icon.systemSymbolName)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(dracula(.comment))
                 .frame(width: 12)
                 .opacity(entry.isDirectory ? 1 : 0)
 
-            Image(systemName: entry.isDirectory ? "folder" : "doc.text")
+            Image(systemName: fileIcon.systemSymbolName)
                 .font(.system(size: 13))
-                .foregroundStyle(dracula(entry.isDirectory ? .cyan : .purple))
+                .foregroundStyle(dracula(fileIcon.draculaRole ?? (entry.isDirectory ? .cyan : .purple)))
                 .frame(width: 15)
 
             Text(displayName)
-                .font(.system(.caption, design: .default).weight(entry.isDirectory ? .semibold : .regular))
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: entry.isDirectory ? .semibold : .regular))
                 .foregroundStyle(dracula(.foreground))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -1080,7 +1688,9 @@ private struct FileBrowserRowContent: View {
         .padding(.leading, CGFloat(depth) * 14)
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isHovered ? AnyShapeStyle(dracula(.currentLine).opacity(0.45)) : AnyShapeStyle(Color.clear))
         .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
         .accessibilityLabel("\(entry.isDirectory ? "Folder" : "File") \(entry.relativePath)")
     }
 }
@@ -1088,16 +1698,23 @@ private struct FileBrowserRowContent: View {
 private struct TerminalPlaceholderView: View {
     let request: TerminalLaunchRequest?
     let unavailableMessage: String
+    let fonts: FontSettings
     var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
+    @Environment(\.appTheme) private var appTheme
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let request {
-                GhosttyTerminalSurfaceView(request: request, onTitleChange: onTitleChange)
+                GhosttyTerminalSurfaceView(
+                    request: request,
+                    theme: appTheme,
+                    fonts: fonts,
+                    onTitleChange: onTitleChange
+                )
                     .accessibilityLabel("\(request.title) terminal")
             } else {
                 Text(unavailableMessage)
-                    .font(.system(.body, design: .monospaced))
+                    .font(fonts.editorFont())
                     .foregroundStyle(dracula(.foreground))
             }
         }
@@ -1110,6 +1727,7 @@ private struct BottomTerminalBar: View {
     let isExpanded: Bool
     let height: Double
     let request: TerminalLaunchRequest?
+    let fonts: FontSettings
     let onToggle: () -> Void
     let onResize: (Double) -> Void
     let onAppearExpanded: () -> Void
@@ -1142,7 +1760,8 @@ private struct BottomTerminalBar: View {
             if isExpanded {
                 TerminalPlaceholderView(
                     request: request,
-                    unavailableMessage: "Terminal unavailable for the selected thread"
+                    unavailableMessage: "Terminal unavailable for the selected thread",
+                    fonts: fonts
                 )
                     .frame(height: height)
                     .onAppear(perform: onAppearExpanded)
@@ -1251,8 +1870,69 @@ private struct WindowTitleUpdater: NSViewRepresentable {
     }
 }
 
-func dracula(_ role: DraculaRole) -> Color {
-    Color(hex: DraculaTheme.hex(for: role))
+func dracula(_ role: ThemeRole) -> AppThemeColor {
+    AppThemeColor(role: role)
+}
+
+struct AppThemeColor: ShapeStyle {
+    let role: ThemeRole
+
+    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        Color(hex: environment.appTheme.hex(for: role)).resolve(in: environment)
+    }
+}
+
+private struct AppThemeEnvironmentKey: EnvironmentKey {
+    static let defaultValue = ThemeCatalog.defaultTheme
+}
+
+private struct FontSettingsEnvironmentKey: EnvironmentKey {
+    static let defaultValue = FontSettings()
+}
+
+private extension EnvironmentValues {
+    var appTheme: ThemeDefinition {
+        get { self[AppThemeEnvironmentKey.self] }
+        set { self[AppThemeEnvironmentKey.self] = newValue }
+    }
+
+    var fontSettings: FontSettings {
+        get { self[FontSettingsEnvironmentKey.self] }
+        set { self[FontSettingsEnvironmentKey.self] = newValue }
+    }
+}
+
+private extension FontSettings {
+    func interfaceFont(sizeOffset: Double = 0, weight: Font.Weight = .regular) -> Font {
+        swiftUIFont(family: interfaceFamily, size: interfaceSize + sizeOffset, weight: weight, design: .default)
+    }
+
+    func editorFont(sizeOffset: Double = 0, weight: Font.Weight = .regular) -> Font {
+        swiftUIFont(family: editorFamily, size: editorSize + sizeOffset, weight: weight, design: .monospaced)
+    }
+
+    private func swiftUIFont(
+        family: String,
+        size: Double,
+        weight: Font.Weight,
+        design: Font.Design
+    ) -> Font {
+        let pointSize = CGFloat(max(6, size))
+        switch family.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "", "system":
+            return .system(size: pointSize, weight: weight, design: .default)
+        case "system-monospace", "monospace":
+            return .system(size: pointSize, weight: weight, design: .monospaced)
+        default:
+            return .custom(family, size: pointSize).weight(weight)
+        }
+    }
+}
+
+private extension Double {
+    var formattedFontSize: String {
+        formatted(.number.precision(.fractionLength(0 ... 2)))
+    }
 }
 
 private extension Color {

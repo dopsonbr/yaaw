@@ -11,6 +11,8 @@ public struct YAAWSnapshot: Equatable, Sendable {
     public var bottomTerminalExpandedThreadIDs: Set<UUID>
     public var layoutState: LayoutState
     public var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
+    public var expandedProjectIDs: Set<UUID>
+    public var expandedArchivedProjectIDs: Set<UUID>
 
     public var isGlobalTerminalExpanded: Bool {
         get { selectedThreadID.map { bottomTerminalExpandedThreadIDs.contains($0) } ?? false }
@@ -35,7 +37,9 @@ public struct YAAWSnapshot: Equatable, Sendable {
         bottomTerminalExpandedThreadIDs: Set<UUID> = [],
         isGlobalTerminalExpanded: Bool,
         layoutState: LayoutState? = nil,
-        fileIndexMetadataByThreadID: [UUID: FileIndexMetadata] = [:]
+        fileIndexMetadataByThreadID: [UUID: FileIndexMetadata] = [:],
+        expandedProjectIDs: Set<UUID> = [],
+        expandedArchivedProjectIDs: Set<UUID> = []
     ) {
         self.projects = projects
         self.threads = threads
@@ -58,6 +62,8 @@ public struct YAAWSnapshot: Equatable, Sendable {
         }
         self.layoutState.isGlobalTerminalExpanded = false
         self.fileIndexMetadataByThreadID = fileIndexMetadataByThreadID
+        self.expandedProjectIDs = expandedProjectIDs
+        self.expandedArchivedProjectIDs = expandedArchivedProjectIDs
     }
 }
 
@@ -74,6 +80,8 @@ public protocol YAAWStore: AnyObject {
     func setSelectedProject(_ projectID: UUID)
     func setSelectedThread(_ threadID: UUID?)
     func setLayoutState(_ state: LayoutState)
+    func setProjectExpanded(_ projectID: UUID, isExpanded: Bool)
+    func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool)
     func upsertFileIndexMetadata(_ metadata: FileIndexMetadata)
     func cachedFileIndex(cacheKey: String) -> CachedFileIndex?
     func upsertCachedFileIndex(_ index: CachedFileIndex)
@@ -150,6 +158,22 @@ public final class InMemoryYAAWStore: YAAWStore {
         snapshot.layoutState = state
     }
 
+    public func setProjectExpanded(_ projectID: UUID, isExpanded: Bool) {
+        if isExpanded {
+            snapshot.expandedProjectIDs.insert(projectID)
+        } else {
+            snapshot.expandedProjectIDs.remove(projectID)
+        }
+    }
+
+    public func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool) {
+        if isExpanded {
+            snapshot.expandedArchivedProjectIDs.insert(projectID)
+        } else {
+            snapshot.expandedArchivedProjectIDs.remove(projectID)
+        }
+    }
+
     public func upsertFileIndexMetadata(_ metadata: FileIndexMetadata) {
         snapshot.fileIndexMetadataByThreadID[metadata.threadID] = metadata
     }
@@ -195,7 +219,8 @@ public final class InMemoryYAAWStore: YAAWStore {
                 selectedThreadID: threadID,
                 rightPanelModesByThreadID: [threadID: .files],
                 selectedRightPanelMode: .files,
-                isGlobalTerminalExpanded: false
+                isGlobalTerminalExpanded: false,
+                expandedProjectIDs: [projectID]
             )
         )
     }

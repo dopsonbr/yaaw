@@ -9,6 +9,7 @@ struct YAAWApp: App {
     private let databasePath: URL
     private let configurationPath: URL
     private let configurationStore: YAMLConfigurationStore
+    @MainActor private let externalOpenWorkspace = ExternalOpenWorkspace()
 
     init() {
         var environment = ProcessInfo.processInfo.environment
@@ -77,7 +78,11 @@ struct YAAWApp: App {
                 } else {
                     RootView(
                         model: model,
+                        externalOpenWorkspace: externalOpenWorkspace,
                         settingsPath: configurationPath,
+                        onLoadSettingsText: loadSettingsText,
+                        onValidateSettingsText: validateSettingsText,
+                        onSaveSettingsText: saveSettingsText,
                         onOpenSettingsFile: openSettingsFile,
                         onReloadSettings: reloadSettings
                     )
@@ -166,10 +171,24 @@ struct YAAWApp: App {
     }
 
     private func openSettingsFile() {
-        if !FileManager.default.fileExists(atPath: configurationPath.path) {
-            try? configurationStore.save(model.configuration)
-        }
+        try? configurationStore.ensureFileExists()
         NSWorkspace.shared.open(configurationPath)
+    }
+
+    private func loadSettingsText() throws -> String {
+        try configurationStore.loadText()
+    }
+
+    private func validateSettingsText(_ text: String) throws -> YAAWConfiguration {
+        try configurationStore.validate(text: text)
+    }
+
+    @discardableResult
+    private func saveSettingsText(_ text: String) throws -> YAAWConfiguration {
+        try configurationStore.saveText(text)
+        let configuration = try configurationStore.validate(text: text)
+        model.reloadConfiguration(configuration)
+        return configuration
     }
 
     private func reloadSettings() {

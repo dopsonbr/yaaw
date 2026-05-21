@@ -7,7 +7,7 @@ The design favors a small, terminal-first desktop wrapper over a full IDE or age
 ## Product Principles
 
 - Native macOS shell.
-- Dracula theme everywhere.
+- Dracula by default, with built-in theme switching.
 - Terminal-first workflow.
 - One agent CLI session terminal per thread.
 - Full-power local CLI agents, starting with `codex` and `claude` and expanding to `copilot` and `opencode`.
@@ -20,7 +20,7 @@ The design favors a small, terminal-first desktop wrapper over a full IDE or age
 
 ## Theme
 
-Use the Dracula OSS palette as the app's visual contract.
+Use shared theme roles as the app's visual contract. Dracula is the default palette, and built-in light, dark, and high-contrast themes map to the same roles so all app and terminal surfaces change together.
 
 | Token | Hex | Use |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ Use the Dracula OSS palette as the app's visual contract.
 | `red` | `#ff5555` | Error states. |
 | `yellow` | `#f1fa8c` | Attention state. |
 
-Reference: [dracula/dracula-theme](https://github.com/dracula/dracula-theme).
+Reference for the default palette: [dracula/dracula-theme](https://github.com/dracula/dracula-theme).
 
 ## App Shell
 
@@ -64,7 +64,7 @@ The shell has four resizeable regions:
 
 Each region should use native split-view handles. Collapsed regions become narrow icon rails instead of disappearing from the user's mental model.
 
-The title bar includes a settings gear. The gear opens a lightweight settings sheet that shows the app-owned YAML settings path, current effective defaults, and actions to open or reload the file.
+The title bar includes a settings gear. The gear navigates to a full content-route settings view with the app-owned YAML settings path, current effective defaults, an embedded YAML editor, Save/Reload/Revert actions, optional external opening, and a top-right Back button.
 
 ## Navigation Model
 
@@ -79,6 +79,8 @@ Project metadata should include:
 - Root directory.
 - Created timestamp.
 - Last opened timestamp.
+- Pin state.
+- Manual sort order.
 - Archived flag, if project archiving is later added.
 
 ### Thread
@@ -97,10 +99,11 @@ Thread metadata should include:
 - Created timestamp.
 - Last opened timestamp.
 - Archived flag.
+- Pin state.
 
 The thread display name should mirror the bound CLI session's reported name, title, or id. Closing and reopening a thread should resume the same stored CLI session identity.
 
-The left sidebar is the only required thread switcher for the MVP.
+The left sidebar is the only required thread switcher for the MVP. It should use nested project rows: each project can expand to show active threads and an archived-thread disclosure, and each project row owns the new-thread action for that project. Pinned projects sort above unpinned projects, manual project reorder is scoped within pinned/unpinned groups, and pinned threads sort above recently opened unpinned threads.
 
 ## Terminal Design
 
@@ -198,8 +201,9 @@ User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml
 The YAML file is the source of truth for:
 
 - Keyboard shortcuts.
-- Dracula theme selection.
+- Built-in theme selection.
 - Default agent CLI.
+- Interface, editor, and embedded terminal font families and sizes.
 - Editor fallback order.
 - Git and diff tool commands.
 - Agent executable command names.
@@ -245,5 +249,5 @@ Add more shortcuts only after the interaction model stabilizes.
 - Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
 - Opening Git mode launches `lazygit` or `git diff` inside the right panel.
 - Users can switch the right panel between file tree, `nvim`, and `lazygit` by cycling tabs or clicking icons.
-- The full app uses the Dracula theme.
+- The full app uses the selected built-in theme, defaulting to Dracula.
 - A user can archive inactive threads.

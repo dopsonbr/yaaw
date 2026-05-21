@@ -8,7 +8,12 @@ APP_NAME="YAAW-E2E"
 
 cd "$ROOT_DIR"
 
-APP_BUNDLE="$(./script/build_and_run.sh --build-only --variant=e2e | tail -1)"
+./script/build_and_run.sh --build-only --variant=e2e >/dev/null
+APP_BUNDLE="$ROOT_DIR/dist/$APP_NAME.app"
+if [[ ! -d "$APP_BUNDLE" ]]; then
+  echo "expected E2E app bundle was not created: $APP_BUNDLE" >&2
+  exit 1
+fi
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 SCREENSHOT_DIR="$ARTIFACT_DIR/screenshots"
@@ -270,6 +275,122 @@ APPLESCRIPT
   return 1
 }
 
+run_settings_editor_probe() {
+  local database_path="$ARTIFACT_DIR/states/settings-editor.sqlite"
+  local screenshot_path="$SCREENSHOT_DIR/settings-editor.png"
+
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  set_launch_environment "$database_path"
+  /usr/bin/open -n "$APP_BUNDLE"
+  wait_for_window
+  assert_no_privacy_prompts "settings editor"
+
+  if ! osascript <<APPLESCRIPT >/dev/null
+on findByIdentifier(rootElement, targetIdentifier)
+  tell application "System Events"
+    try
+      if (value of attribute "AXIdentifier" of rootElement as text) is targetIdentifier then return rootElement
+    end try
+    try
+      set childElements to UI elements of rootElement
+    on error
+      return missing value
+    end try
+    repeat with childElement in childElements
+      try
+        set foundElement to my findByIdentifier(childElement, targetIdentifier)
+        if foundElement is not missing value then return foundElement
+      end try
+    end repeat
+  end tell
+  return missing value
+end findByIdentifier
+
+on findTextArea(rootElement)
+  tell application "System Events"
+    try
+      if (value of attribute "AXRole" of rootElement as text) is "AXTextArea" then return rootElement
+    end try
+    try
+      set childElements to UI elements of rootElement
+    on error
+      return missing value
+    end try
+    repeat with childElement in childElements
+      try
+        set foundElement to my findTextArea(childElement)
+        if foundElement is not missing value then return foundElement
+      end try
+    end repeat
+  end tell
+  return missing value
+end findTextArea
+
+tell application "System Events"
+  set frontmost of process "$APP_NAME" to true
+  tell process "$APP_NAME"
+    perform action "AXRaise" of window 1
+    set openButton to my findByIdentifier(window 1, "open-settings-button")
+    if openButton is missing value then error "settings button not found"
+    click openButton
+
+    set editorContainer to missing value
+    repeat 80 times
+      set editorContainer to my findByIdentifier(window 1, "settings-yaml-editor")
+      if editorContainer is not missing value then exit repeat
+      delay 0.1
+    end repeat
+    if editorContainer is missing value then error "settings YAML editor not found"
+
+    set editorArea to my findTextArea(editorContainer)
+    if editorArea is missing value then set editorArea to my findTextArea(window 1)
+    if editorArea is missing value then error "settings text area not found"
+    set existingText to value of editorArea as text
+    if existingText does not contain "# YAAW settings." then error "settings YAML text did not load"
+
+    set replacementText to "version: 1" & linefeed & "agent:" & linefeed & "  default: claude" & linefeed
+    click editorArea
+    set value of editorArea to replacementText
+    delay 0.4
+    set updatedText to value of editorArea as text
+    if updatedText does not contain "default: claude" then error "settings YAML editor did not accept edited text"
+
+    set saveButton to my findByIdentifier(window 1, "settings-save-button")
+    if saveButton is missing value then error "settings save button not found"
+    click saveButton
+    delay 0.5
+
+    set backButton to my findByIdentifier(window 1, "settings-back-button")
+    if backButton is missing value then error "settings back button not found"
+    click backButton
+
+    repeat 50 times
+      set returnedButton to my findByIdentifier(window 1, "open-settings-button")
+      if returnedButton is not missing value then return
+      delay 0.1
+    end repeat
+    error "settings back button did not return to workspace"
+  end tell
+end tell
+APPLESCRIPT
+  then
+    echo "$APP_NAME settings editor probe failed" >&2
+    capture_window "$screenshot_path" || true
+    pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  if ! grep -A2 "^agent:" "$ARTIFACT_DIR/config/settings.yaml" | grep "default: claude" >/dev/null; then
+    echo "$APP_NAME settings editor save did not update the YAML file" >&2
+    sed -n '1,80p' "$ARTIFACT_DIR/config/settings.yaml" >&2 || true
+    capture_window "$screenshot_path" || true
+    pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+}
+
 if [[ "$RUNNER_STATUS" -ne 0 ]]; then
   launch_state "launch" || true
   exit "$RUNNER_STATUS"
@@ -279,6 +400,7 @@ fi
 # verifies durable state transitions directly, while the launched app states
 # below verify real rendering and terminal behavior through screenshots.
 run_keyboard_input_probe
+run_settings_editor_probe
 
 for state in launch project-creation files nvim git missing-directory bottom-terminal panel-collapse; do
   launch_state "$state"

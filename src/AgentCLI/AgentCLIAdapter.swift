@@ -141,13 +141,32 @@ public protocol AgentCLIExecutableResolving: Sendable {
 }
 
 public struct PATHAgentCLIExecutableResolver: AgentCLIExecutableResolving {
-    public init() {}
+    public static let defaultFallbackSearchPaths = [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin"
+    ]
+
+    private let fallbackSearchPaths: [String]
+
+    public init(fallbackSearchPaths: [String] = Self.defaultFallbackSearchPaths) {
+        self.fallbackSearchPaths = fallbackSearchPaths
+    }
 
     public func executablePath(named executableName: String, environment: [String: String]) -> String? {
-        let pathValue = environment["PATH"] ?? "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        for directory in pathValue.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(directory), isDirectory: true)
-                .appendingPathComponent(executableName)
+        if executableName.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: executableName) {
+            return executableName
+        }
+
+        let pathValue = environment["PATH"] ?? ""
+        var searchedDirectories = Set<String>()
+        let searchPaths = pathValue.split(separator: ":").map(String.init) + fallbackSearchPaths
+        for directory in searchPaths where searchedDirectories.insert(directory).inserted {
+            let candidate = URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent(executableName)
             if FileManager.default.isExecutableFile(atPath: candidate.path) {
                 return candidate.path
             }

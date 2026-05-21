@@ -21,6 +21,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var layoutState: LayoutState
     @Published public private(set) var fileBrowserState: FileBrowserState
     @Published public private(set) var configuration: YAAWConfiguration
+    @Published public private(set) var expandedProjectIDs: Set<UUID>
+    @Published public private(set) var expandedArchivedProjectIDs: Set<UUID>
 
     public let projectTerminal: TerminalSurfaceDescriptor
     public private(set) var navigationHistory: NavigationHistory
@@ -64,12 +66,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.fileIndexCacheCoordinator = FileIndexCacheCoordinator(store: store, fileIndexer: fileIndexer)
         self.fileIndexDirectoryWatcher = FileIndexDirectoryWatcher()
         self.externalToolResolver = externalToolResolver
-        self.configuration = configuration.validated()
         self.diagnosticRecorder = diagnosticRecorder
+        self.configuration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
         self.environment = environment
         self.homeDirectory = homeDirectory
         let snapshot = store.load()
-        self.projects = snapshot.projects
+        self.projects = Self.sortedProjects(snapshot.projects)
         self.threads = snapshot.threads
         self.fileIndexMetadataByThreadID = snapshot.fileIndexMetadataByThreadID
         for (index, thread) in snapshot.threads.enumerated() {
@@ -80,6 +82,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 cachedActiveThreadsByProject[thread.projectID, default: []].append(thread)
             }
         }
+        for projectID in cachedActiveThreadsByProject.keys {
+            cachedActiveThreadsByProject[projectID]?.sort(by: Self.threadPrecedes)
+        }
+        for projectID in cachedArchivedThreadsByProject.keys {
+            cachedArchivedThreadsByProject[projectID]?.sort(by: Self.threadPrecedes)
+        }
         let selectedProjectID = snapshot.projects.contains { $0.id == snapshot.selectedProjectID }
             ? snapshot.selectedProjectID
             : snapshot.projects[0].id
@@ -88,6 +96,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             : snapshot.threads.first { $0.projectID == selectedProjectID && !$0.isArchived }?.id
         self.selectedProjectID = selectedProjectID
         self.selectedThreadID = selectedThreadID
+        var expandedProjectIDs = snapshot.expandedProjectIDs
+        expandedProjectIDs.insert(selectedProjectID)
+        self.expandedProjectIDs = expandedProjectIDs
+        self.expandedArchivedProjectIDs = snapshot.expandedArchivedProjectIDs
         self.bottomTerminalExpandedThreadIDs = snapshot.bottomTerminalExpandedThreadIDs
         var rightPanelModesByThreadID = snapshot.rightPanelModesByThreadID
         if let selectedThreadID, rightPanelModesByThreadID[selectedThreadID] == nil {
@@ -146,6 +158,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 cachedActiveThreadsByProject[thread.projectID, default: []].append(thread)
             }
         }
+        for projectID in cachedActiveThreadsByProject.keys {
+            cachedActiveThreadsByProject[projectID]?.sort(by: Self.threadPrecedes)
+        }
+        for projectID in cachedArchivedThreadsByProject.keys {
+            cachedArchivedThreadsByProject[projectID]?.sort(by: Self.threadPrecedes)
+        }
     }
 
     private func mutateThreads(_ block: (inout [AgentThread]) -> Void) {
@@ -159,6 +177,34 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func firstActiveThreadID(forProject projectID: UUID) -> UUID? {
         cachedActiveThreadsByProject[projectID]?.first?.id
+    }
+
+    private static func sortedProjects(_ projects: [Project]) -> [Project] {
+        projects.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned && !rhs.isPinned
+            }
+            if lhs.sortOrder != rhs.sortOrder {
+                return lhs.sortOrder < rhs.sortOrder
+            }
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+        }
+    }
+
+    private static func threadPrecedes(_ lhs: AgentThread, _ rhs: AgentThread) -> Bool {
+        if lhs.isPinned != rhs.isPinned {
+            return lhs.isPinned && !rhs.isPinned
+        }
+        if lhs.lastOpenedAt != rhs.lastOpenedAt {
+            return lhs.lastOpenedAt > rhs.lastOpenedAt
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt > rhs.createdAt
+        }
+        return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
     }
 
     public var windowTitle: String {
@@ -176,14 +222,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func reloadConfiguration(_ configuration: YAAWConfiguration) {
-        self.configuration = configuration.validated()
+        self.configuration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
         activeProjectLaunchCommandsByThreadID.removeAll()
         recordDiagnostic(
             category: "Configuration",
             name: "settings_yaml_reloaded",
             metadata: [
                 "theme": self.configuration.themeName,
-                "default_agent": self.configuration.defaultAgentCLI.rawValue
+                "default_agent": self.configuration.defaultAgentCLI.rawValue,
+                "file_icon_pack": self.configuration.fileIconPack.rawValue,
+                "interface_font_size": "\(self.configuration.fonts.interfaceSize)",
+                "editor_font_size": "\(self.configuration.fonts.editorSize)",
+                "terminal_font_size": "\(self.configuration.fonts.terminalSize)"
             ]
         )
         refreshSelectedFileBrowser()
@@ -195,6 +245,31 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public var selectedThreadWorkingDirectoryState: ProjectDirectoryState? {
         selectedThread.map { directoryState(for: $0.workingDirectory) }
+    }
+
+    public var selectedExternalOpenDirectoryTarget: ExternalOpenTarget? {
+        if let thread = selectedThread {
+            guard isExistingDirectory(thread.workingDirectory) else { return nil }
+            return ExternalOpenTarget(url: thread.workingDirectory, kind: .directory)
+        }
+        guard let project = selectedProject,
+              isExistingDirectory(project.rootDirectory) else {
+            return nil
+        }
+        return ExternalOpenTarget(url: project.rootDirectory, kind: .directory)
+    }
+
+    public func externalOpenFileTarget(relativePath: String) -> ExternalOpenTarget? {
+        guard let thread = selectedThread,
+              isExistingDirectory(thread.workingDirectory) else {
+            return nil
+        }
+        let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
+        guard !normalizedPath.isEmpty else { return nil }
+        return ExternalOpenTarget(
+            url: thread.workingDirectory.appendingPathComponent(normalizedPath),
+            kind: .file
+        )
     }
 
     public var selectedRightPanelMode: RightPanelMode {
@@ -231,8 +306,24 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         cachedArchivedThreadsByProject[selectedProjectID] ?? []
     }
 
+    public func activeThreads(for projectID: UUID) -> [AgentThread] {
+        cachedActiveThreadsByProject[projectID] ?? []
+    }
+
+    public func archivedThreads(for projectID: UUID) -> [AgentThread] {
+        cachedArchivedThreadsByProject[projectID] ?? []
+    }
+
     public var hasArchivedThreadsForSelectedProject: Bool {
         !archivedThreadsForSelectedProject.isEmpty
+    }
+
+    public func isProjectExpanded(_ projectID: UUID) -> Bool {
+        expandedProjectIDs.contains(projectID)
+    }
+
+    public func isProjectArchiveExpanded(_ projectID: UUID) -> Bool {
+        expandedArchivedProjectIDs.contains(projectID)
     }
 
     public var terminalLifecycleEvents: [TerminalLifecycleEvent] {
@@ -602,11 +693,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             displayName: resolvedName,
             rootDirectory: rootDirectory,
             createdAt: now,
-            lastOpenedAt: now
+            lastOpenedAt: now,
+            sortOrder: nextProjectSortOrder(isPinned: false)
         )
         projects.append(project)
+        projects = Self.sortedProjects(projects)
         selectedProjectID = project.id
         selectedThreadID = nil
+        expandedProjectIDs.insert(project.id)
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         recordDiagnostic(
@@ -615,19 +709,22 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             metadata: ["project_id": project.id.uuidString]
         )
         persistProject(project)
+        persistProjectExpanded(projectID: project.id)
         persistSelection()
         return project.id
     }
 
     @discardableResult
     public func createThread(
+        projectID: UUID? = nil,
         agentCLI: AgentCLIKind?,
         displayName: String? = nil,
         workingDirectory: URL? = nil,
         now: Date = Date()
     ) throws -> UUID {
         let agentCLI = agentCLI ?? configuration.defaultAgentCLI
-        guard let project = selectedProject else {
+        let resolvedProjectID = projectID ?? selectedProjectID
+        guard let project = projects.first(where: { $0.id == resolvedProjectID }) else {
             throw AppModelError.selectedProjectMissing
         }
         let resolvedWorkingDirectory = workingDirectory ?? project.rootDirectory
@@ -648,7 +745,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             lastOpenedAt: now
         )
         mutateThreads { $0.append(thread) }
+        markProjectOpened(project.id, now: now)
         selectedThreadID = thread.id
+        selectedProjectID = project.id
+        expandedProjectIDs.insert(project.id)
         rightPanelModesByThreadID[thread.id] = .files
         rightPanelStatesByThreadID[thread.id] = RightPanelState.defaultState()
         resetFileBrowserForSelectedThread()
@@ -662,6 +762,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             ]
         )
         persistThread(thread)
+        persistProject(projects.first { $0.id == project.id } ?? project)
+        persistProjectExpanded(projectID: project.id)
         persistRightPanelMode(threadID: thread.id)
         persistRightPanelState(threadID: thread.id)
         persistSelection()
@@ -676,11 +778,65 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         throw AppModelError.agentCLIChangeNotAllowed
     }
 
+    public func toggleProjectPinned(id projectID: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        projects[index].isPinned.toggle()
+        projects[index].sortOrder = nextProjectSortOrder(isPinned: projects[index].isPinned)
+        normalizeProjectSortOrders()
+        persistProject(projects.first { $0.id == projectID }!)
+    }
+
+    public func toggleThreadPinned(id threadID: UUID) {
+        guard let index = threadIndexByID[threadID] else { return }
+        mutateThreads { $0[index].isPinned.toggle() }
+        persistThread(threads[index])
+    }
+
+    public func moveProject(id projectID: UUID, direction: ProjectMoveDirection) {
+        projects = Self.sortedProjects(projects)
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        let candidateIndex: Int
+        switch direction {
+        case .up:
+            candidateIndex = index - 1
+        case .down:
+            candidateIndex = index + 1
+        }
+        guard projects.indices.contains(candidateIndex),
+              projects[index].isPinned == projects[candidateIndex].isPinned else {
+            return
+        }
+        projects.swapAt(index, candidateIndex)
+        normalizeProjectSortOrders(preservingCurrentOrder: true)
+    }
+
+    public func setProjectExpanded(_ projectID: UUID, isExpanded: Bool) {
+        guard projects.contains(where: { $0.id == projectID }) else { return }
+        if isExpanded {
+            expandedProjectIDs.insert(projectID)
+        } else {
+            expandedProjectIDs.remove(projectID)
+        }
+        persistProjectExpanded(projectID: projectID)
+    }
+
+    public func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool) {
+        guard projects.contains(where: { $0.id == projectID }) else { return }
+        if isExpanded {
+            expandedArchivedProjectIDs.insert(projectID)
+        } else {
+            expandedArchivedProjectIDs.remove(projectID)
+        }
+        persistProjectArchiveExpanded(projectID: projectID)
+    }
+
     public func selectProject(id projectID: UUID) {
         guard projects.contains(where: { $0.id == projectID }) else { return }
         guard selectedProjectID != projectID else { return }
+        markProjectOpened(projectID)
         selectedProjectID = projectID
         selectedThreadID = firstActiveThreadID(forProject: projectID)
+        expandedProjectIDs.insert(projectID)
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         recordDiagnostic(
@@ -688,13 +844,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "project_selected",
             metadata: ["project_id": projectID.uuidString]
         )
+        persistProject(projects.first { $0.id == projectID }!)
+        persistProjectExpanded(projectID: projectID)
         persistSelection()
     }
 
     public func selectThread(id threadID: UUID) {
         guard let thread = thread(withID: threadID) else { return }
+        markProjectOpened(thread.projectID)
+        markThreadOpened(threadID)
         selectedProjectID = thread.projectID
         selectedThreadID = thread.id
+        expandedProjectIDs.insert(thread.projectID)
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         recordDiagnostic(
@@ -705,6 +866,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "agent_cli": thread.agentCLI.rawValue
             ]
         )
+        persistProject(projects.first { $0.id == thread.projectID }!)
+        persistThread(threads[threadIndexByID[threadID]!])
+        persistProjectExpanded(projectID: thread.projectID)
         persistSelection()
     }
 
@@ -723,7 +887,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func unarchiveThread(id threadID: UUID) {
         guard let index = threadIndexByID[threadID] else { return }
-        mutateThreads { $0[index].isArchived = false }
+        mutateThreads {
+            $0[index].isArchived = false
+            $0[index].lastOpenedAt = Date()
+        }
         selectThread(id: threadID)
     }
 
@@ -747,6 +914,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard projects.contains(where: { $0.id == selection.projectID }) else { return }
         selectedProjectID = selection.projectID
         selectedThreadID = selection.threadID
+        expandedProjectIDs.insert(selection.projectID)
+        persistProjectExpanded(projectID: selection.projectID)
         resetFileBrowserForSelectedThread()
     }
 
@@ -920,9 +1089,53 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return [resolvedGitTool]
         }
         let fallback = configuration.tools.diff.fallback
-        guard let executable = fallback.first else { return ["git", "diff"] }
+        if isGitDiffFallback(fallback) {
+            let gitExecutable = fallback.first ?? "git"
+            let resolvedGit = externalToolResolver.executablePath(named: gitExecutable, environment: environment) ?? gitExecutable
+            return [resolvedGit, "--no-pager", "diff"]
+        }
+        guard let executable = fallback.first else { return ["git", "--no-pager", "diff"] }
         let resolvedExecutable = externalToolResolver.executablePath(named: executable, environment: environment) ?? executable
         return [resolvedExecutable] + Array(fallback.dropFirst())
+    }
+
+    private func isGitDiffFallback(_ command: [String]) -> Bool {
+        command.count == 2
+            && URL(fileURLWithPath: command[0]).lastPathComponent == "git"
+            && command[1] == "diff"
+    }
+
+    private func nextProjectSortOrder(isPinned: Bool) -> Int {
+        (projects.filter { $0.isPinned == isPinned }.map(\.sortOrder).max() ?? -1) + 1
+    }
+
+    private func normalizeProjectSortOrders(preservingCurrentOrder: Bool = false) {
+        if !preservingCurrentOrder {
+            projects = Self.sortedProjects(projects)
+        }
+        var pinnedOrder = 0
+        var unpinnedOrder = 0
+        for index in projects.indices {
+            if projects[index].isPinned {
+                projects[index].sortOrder = pinnedOrder
+                pinnedOrder += 1
+            } else {
+                projects[index].sortOrder = unpinnedOrder
+                unpinnedOrder += 1
+            }
+            persistProject(projects[index])
+        }
+        projects = Self.sortedProjects(projects)
+    }
+
+    private func markProjectOpened(_ projectID: UUID, now: Date = Date()) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        projects[index].lastOpenedAt = now
+    }
+
+    private func markThreadOpened(_ threadID: UUID, now: Date = Date()) {
+        guard let index = threadIndexByID[threadID] else { return }
+        mutateThreads { $0[index].lastOpenedAt = now }
     }
 
     private func persistSelection() {
@@ -959,6 +1172,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func persistProject(_ project: Project) {
         store.upsertProject(project)
+    }
+
+    private func persistProjectExpanded(projectID: UUID) {
+        store.setProjectExpanded(projectID, isExpanded: expandedProjectIDs.contains(projectID))
+    }
+
+    private func persistProjectArchiveExpanded(projectID: UUID) {
+        store.setProjectArchiveExpanded(
+            projectID,
+            isExpanded: expandedArchivedProjectIDs.contains(projectID)
+        )
     }
 
     private func persistFileIndexMetadata(_ metadata: FileIndexMetadata) {

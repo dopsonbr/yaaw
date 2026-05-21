@@ -35,7 +35,10 @@ Requirements use:
 The SQLite database MUST store:
 
 - Projects.
+- Project pin state.
+- Project manual sort order.
 - Threads.
+- Thread pin state.
 - Thread-to-project relationships.
 - Thread working directories.
 - Thread agent CLI selection.
@@ -47,6 +50,8 @@ The SQLite database MUST store:
 - Right-panel mode per thread.
 - Panel collapsed states.
 - Panel sizes.
+- Sidebar project expansion state.
+- Sidebar per-project archived-thread expansion state.
 - File index metadata.
 - Durable file index cache entries when caching is enabled.
 
@@ -62,22 +67,28 @@ YAML configuration MUST include comments that show defaults and identify setting
 
 YAML configuration SHOULD include:
 
-- Theme selection, initially fixed to Dracula.
+- Theme selection, defaulting to Dracula with built-in light, dark, and high-contrast options.
 - File indexing ignore rules.
 - Keyboard shortcuts.
 - Default agent CLI.
+- Interface, editor, and embedded terminal font families and sizes.
 - Editor, Git, diff, and agent command overrides.
 - User-level app preferences.
 
-The app MUST expose a settings action in the window title bar that opens the YAML settings file and reloads settings after manual edits.
+The app MUST expose a settings action in the window title bar that navigates to an in-app YAML editor for the app-owned settings file.
+
+The settings editor MUST validate YAML before saving and MUST NOT overwrite the last saved settings file when validation fails.
 
 ## Projects
 
 - A project MUST represent a named local directory.
 - The built-in `global` project MUST be scoped to the user's home directory.
 - Each project MUST have a stable id, display name, root directory, created timestamp, and last opened timestamp.
+- Each project MUST have durable pin state and manual sort order.
 - A project MAY have multiple threads.
 - A project MAY have threads that point at different worktrees.
+- Pinned projects MUST sort before unpinned projects.
+- Users MUST be able to manually reorder projects within pinned and unpinned groups.
 
 ## Threads
 
@@ -88,17 +99,21 @@ The app MUST expose a settings action in the window title bar that opens the YAM
 - The currently implemented adapter set MAY be smaller than the full product direction while adapters are added incrementally.
 - A thread MUST store the CLI session identity needed to resume the exact bound agent CLI session.
 - A thread MUST have a stable id, display name, project id, working directory, `agent_cli`, CLI session identity, created timestamp, last opened timestamp, and archive state.
+- A thread MUST have durable pin state.
 - A thread display name MUST be derived from the bound CLI session's reported name, title, or id.
 - A thread working directory MAY be the project root or a separate worktree directory.
 - A thread MUST NOT switch from one CLI family to another after it is created.
 - New thread creation MUST ask the user which available CLI family to start.
+- New thread creation MUST let the user optionally name the thread before launch.
 - New thread creation MUST launch the selected agent CLI in the thread working directory.
+- Creating a thread from a project row MUST create the thread under that project, even when another project was previously selected.
 - Reopening a thread MUST invoke the matching CLI resume behavior for the stored session identity.
 - Each thread MUST own one agent CLI session terminal while the app is running.
 - Live thread terminal sessions MUST NOT be required to persist after app restart.
 - Thread terminal/session state MUST be preserved while the app process is running.
 - Archived threads MUST move out of the primary active thread list.
 - Archived threads MUST retain the agent CLI selection and CLI session identity required for later resume.
+- Thread lists MUST sort pinned threads before unpinned threads, then sort by most recently opened.
 
 ## Terminal Requirements
 
@@ -124,6 +139,9 @@ The app MUST expose a settings action in the window title bar that opens the YAM
 - The app MUST have a right tool panel.
 - The app MUST have a selected-thread bottom terminal.
 - The left sidebar MUST be collapsible.
+- The left sidebar MUST show project rows with nested active and archived thread history.
+- Each project row MUST expose a new-thread action that targets that project.
+- Project and archived-thread disclosure state SHOULD persist across app restarts.
 - The right tool panel MUST be collapsible.
 - The bottom terminal MUST be collapsed by default per thread.
 - The bottom terminal MUST toggle with `Cmd+J`.
@@ -170,8 +188,10 @@ If two threads happen to share the same panel state because they point at the sa
 - File index caches MUST remain read-only with respect to user project directories and MUST NOT write app metadata into repositories.
 - If a Git branch or detached `HEAD` identity changes for a working directory, Files mode MUST use a different cache key to avoid showing stale branch-specific results as current.
 - File search SHOULD prefer exact filename matches, then prefix matches, then fuzzy path matches.
-- Opening a file MUST switch the right panel to `nvim` mode.
-- Opening a file MUST launch `nvim <relative-file-path>` in the right-panel terminal.
+- Opening a file through the default row action MUST switch the right panel to `nvim` mode.
+- Opening a file through the default row action MUST launch `nvim <relative-file-path>` in the right-panel terminal.
+- Files mode MUST also offer an external-open action for files without replacing the default `nvim` behavior.
+- External file-open actions MUST use the selected thread's working directory for relative file targets.
 
 ## nvim Mode
 
@@ -204,9 +224,9 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 
 ## Theme
 
-- The app MUST use the Dracula theme across all app surfaces.
-- The first version MUST NOT require theme switching.
-- Terminals, sidebar, right panel, modal sheets, split-view handles, icons, file tree, `nvim`, and `lazygit` surfaces MUST use the Dracula visual system.
+- The app MUST default to the Dracula theme across all app surfaces.
+- The app MUST support built-in theme switching from Settings.
+- Terminals, sidebar, right panel, modal sheets, split-view handles, icons, file tree, `nvim`, and `lazygit` surfaces MUST use the selected built-in visual system.
 - The implementation SHOULD use shared theme tokens rather than hardcoding colors throughout the app.
 
 ## Agent CLI Scope
@@ -225,6 +245,10 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - `nvim` SHOULD be detected from the user's `PATH`.
 - `codex`, `claude`, `copilot`, and `opencode` SHOULD be detected from the user's `PATH` when their corresponding adapter is available.
 - `lazygit` MUST be detected from the user's `PATH`.
+- External project/file open destinations SHOULD include VS Code, VS Code Insiders, Sublime Text, Zed, Finder, Terminal, Ghostty, Xcode, and WebStorm when installed.
+- The default external-open destination MUST be configurable in app-owned YAML settings.
+- The title bar MUST provide an external-open control for the selected thread working directory, falling back to the selected project root when no thread is selected.
+- External file-open actions MUST reveal files in Finder, open containing directories in Terminal/Ghostty, and open files directly in editor apps.
 - External tool failures MUST be visible in the embedded terminal surface.
 - Agent CLI launch or resume failures MUST be visible in the thread's agent CLI session terminal.
 - The first version SHOULD avoid bundling external CLI tools unless packaging later requires it.
@@ -247,6 +271,7 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - `Cmd+[` and `Cmd+]` perform global back/forward navigation.
 - Hidden files appear in the file browser by default.
 - Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
+- A user can open the selected project or selected file in an installed external editor, Finder, or terminal destination.
 - Opening Git mode launches `lazygit` or `git diff` inside the right panel.
 - `lazygit` is resolved from `PATH`, with `git diff` fallback when unavailable.
 - Project, thread, agent CLI session, index, archive, and layout metadata are stored in SQLite.

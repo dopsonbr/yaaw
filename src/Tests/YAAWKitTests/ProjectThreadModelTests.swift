@@ -14,7 +14,9 @@ final class ProjectThreadModelTests: XCTestCase {
             displayName: "Sample",
             rootDirectory: rootDirectory,
             createdAt: createdAt,
-            lastOpenedAt: lastOpenedAt
+            lastOpenedAt: lastOpenedAt,
+            isPinned: true,
+            sortOrder: 7
         )
 
         XCTAssertEqual(project.id, id)
@@ -22,6 +24,8 @@ final class ProjectThreadModelTests: XCTestCase {
         XCTAssertEqual(project.rootDirectory, rootDirectory)
         XCTAssertEqual(project.createdAt, createdAt)
         XCTAssertEqual(project.lastOpenedAt, lastOpenedAt)
+        XCTAssertTrue(project.isPinned)
+        XCTAssertEqual(project.sortOrder, 7)
     }
 
     func testAgentThreadPreservesPublicMetadataAndArchiveState() {
@@ -38,7 +42,8 @@ final class ProjectThreadModelTests: XCTestCase {
             workingDirectory: workingDirectory,
             createdAt: createdAt,
             lastOpenedAt: lastOpenedAt,
-            isArchived: true
+            isArchived: true,
+            isPinned: true
         )
 
         XCTAssertEqual(thread.id, id)
@@ -48,5 +53,6 @@ final class ProjectThreadModelTests: XCTestCase {
         XCTAssertEqual(thread.createdAt, createdAt)
         XCTAssertEqual(thread.lastOpenedAt, lastOpenedAt)
         XCTAssertTrue(thread.isArchived)
+        XCTAssertTrue(thread.isPinned)
     }
 }

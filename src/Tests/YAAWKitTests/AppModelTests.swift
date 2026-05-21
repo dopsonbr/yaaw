@@ -274,6 +274,126 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.selectedRightPanelMode, .files)
     }
 
+    func testCreateThreadCanTargetNonSelectedProjectAndUseOptionalName() throws {
+        let firstProjectID = UUID()
+        let secondProjectID = UUID()
+        let firstRoot = try temporaryDirectory()
+        let secondRoot = try temporaryDirectory()
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [
+                        Project(id: firstProjectID, displayName: "First", rootDirectory: firstRoot, sortOrder: 0),
+                        Project(id: secondProjectID, displayName: "Second", rootDirectory: secondRoot, sortOrder: 1)
+                    ],
+                    threads: [],
+                    selectedProjectID: firstProjectID,
+                    selectedThreadID: nil,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            )
+        )
+
+        let threadID = try model.createThread(
+            projectID: secondProjectID,
+            agentCLI: .codex,
+            displayName: "  Investigate Checkout  "
+        )
+        let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
+
+        XCTAssertEqual(model.selectedProjectID, secondProjectID)
+        XCTAssertEqual(model.selectedThreadID, threadID)
+        XCTAssertEqual(thread.projectID, secondProjectID)
+        XCTAssertEqual(thread.workingDirectory, secondRoot)
+        XCTAssertEqual(thread.displayName, "Investigate Checkout")
+        XCTAssertTrue(model.isProjectExpanded(secondProjectID))
+    }
+
+    func testCreateThreadBlankOptionalNameKeepsCLIPlaceholder() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        let threadID = try model.createThread(agentCLI: .opencode, displayName: "   ")
+        let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
+
+        XCTAssertEqual(thread.displayName, "Starting OpenCode...")
+    }
+
+    func testThreadHistorySortsPinnedThenRecentlyOpened() {
+        let projectID = UUID()
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let root = FileManager.default.temporaryDirectory
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                    threads: [
+                        AgentThread(
+                            id: firstThreadID,
+                            displayName: "Older",
+                            projectID: projectID,
+                            workingDirectory: root,
+                            lastOpenedAt: Date(timeIntervalSince1970: 10)
+                        ),
+                        AgentThread(
+                            id: secondThreadID,
+                            displayName: "Newer",
+                            projectID: projectID,
+                            workingDirectory: root,
+                            lastOpenedAt: Date(timeIntervalSince1970: 20)
+                        )
+                    ],
+                    selectedProjectID: projectID,
+                    selectedThreadID: secondThreadID,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            )
+        )
+
+        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+
+        model.selectThread(id: firstThreadID)
+        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
+
+        model.toggleThreadPinned(id: secondThreadID)
+        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+    }
+
+    func testProjectPinningAndManualReorderUsePinnedFirstGroups() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let thirdID = UUID()
+        let root = FileManager.default.temporaryDirectory
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [
+                        Project(id: firstID, displayName: "First", rootDirectory: root, sortOrder: 0),
+                        Project(id: secondID, displayName: "Second", rootDirectory: root, sortOrder: 1),
+                        Project(id: thirdID, displayName: "Third", rootDirectory: root, sortOrder: 2)
+                    ],
+                    threads: [],
+                    selectedProjectID: firstID,
+                    selectedThreadID: nil,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            )
+        )
+
+        model.toggleProjectPinned(id: thirdID)
+        XCTAssertEqual(model.projects.map(\.id), [thirdID, firstID, secondID])
+
+        model.moveProject(id: secondID, direction: .up)
+        XCTAssertEqual(model.projects.map(\.id), [thirdID, secondID, firstID])
+
+        model.moveProject(id: firstID, direction: .up)
+        XCTAssertEqual(model.projects.map(\.id), [thirdID, firstID, secondID])
+    }
+
     func testAgentCLIChoiceCannotChangeAfterCreate() throws {
         let fixture = AppModelFixture()
         let model = AppModel(store: fixture.store)
@@ -342,6 +462,24 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(request.command, ["/tools/codex-nightly"])
     }
 
+    func testReloadConfigurationAppliesThemeAndRecordsDiagnostic() throws {
+        let fixture = AppModelFixture()
+        let recorder = RecordingDiagnosticEventRecorder()
+        let model = AppModel(store: fixture.store, diagnosticRecorder: recorder)
+
+        model.reloadConfiguration(YAAWConfiguration(theme: ThemeSettings(active: "solarized-light")))
+
+        XCTAssertEqual(model.configuration.themeName, "solarized-light")
+        XCTAssertEqual(model.configuration.resolvedTheme.displayName, "Solarized Light")
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "Configuration"
+                    && $0.name == "settings_yaml_reloaded"
+                    && $0.metadata["theme"] == "solarized-light"
+            }
+        )
+    }
+
     func testConfiguredEditorAndGitToolsAreUsedForRightPanelTerminals() throws {
         let fixture = AppModelFixture()
         let resolver = StaticAppModelExecutableResolver(
@@ -386,6 +524,25 @@ final class AppModelTests: XCTestCase {
         let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(gitRequest.command, ["/tools/delta", "--diff"])
+    }
+
+    func testGitModeResolvesLazygitFromFallbackSearchPathWhenGUIPathOmitsHomebrew() throws {
+        let fixture = AppModelFixture()
+        let root = try temporaryDirectory()
+        let homebrewBin = root.appendingPathComponent("homebrew-bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: homebrewBin, withIntermediateDirectories: true)
+        let lazygit = homebrewBin.appendingPathComponent("lazygit")
+        try writeExecutable(at: lazygit, contents: "#!/bin/sh\n")
+        let model = AppModel(
+            store: fixture.store,
+            externalToolResolver: PATHAgentCLIExecutableResolver(fallbackSearchPaths: [homebrewBin.path]),
+            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        )
+
+        model.selectRightPanelMode(.git)
+        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+
+        XCTAssertEqual(request.command, [lazygit.path])
     }
 
     func testAgentCLIMetadataDoesNotRebuildActiveProjectTerminalCommand() throws {
@@ -575,7 +732,7 @@ final class AppModelTests: XCTestCase {
         let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(nvimRequest.command, ["nvim", "README.md"])
-        XCTAssertEqual(gitRequest.command, ["git", "diff"])
+        XCTAssertEqual(gitRequest.command, ["git", "--no-pager", "diff"])
     }
 
     func testEditorFallbackUsesVimThenViWhenNvimMissing() throws {
@@ -610,7 +767,7 @@ final class AppModelTests: XCTestCase {
         model.selectRightPanelMode(.git)
         let request = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
-        XCTAssertEqual(request.command, ["/usr/bin/git", "diff"])
+        XCTAssertEqual(request.command, ["/usr/bin/git", "--no-pager", "diff"])
     }
 
     func testOpeningDifferentFilesReplacesNvimTerminalSessionRequest() throws {
@@ -692,11 +849,83 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(reloadedModel.terminalLifecycleEvents.isEmpty)
     }
 
+    func testSelectedExternalOpenDirectoryUsesSelectedThreadWorkingDirectory() throws {
+        let root = try temporaryDirectory()
+        let worktree = try temporaryDirectory()
+        let projectID = UUID()
+        let threadID = UUID()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(
+                        id: threadID,
+                        displayName: "Thread",
+                        projectID: projectID,
+                        workingDirectory: worktree,
+                        agentCLI: .codex
+                    )
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(store: store)
+
+        XCTAssertEqual(
+            model.selectedExternalOpenDirectoryTarget,
+            ExternalOpenTarget(url: worktree, kind: .directory)
+        )
+    }
+
+    func testSelectedExternalOpenDirectoryFallsBackToProjectWhenNoThreadIsSelected() throws {
+        let root = try temporaryDirectory()
+        let projectID = UUID()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [],
+                selectedProjectID: projectID,
+                selectedThreadID: nil,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(store: store)
+
+        XCTAssertEqual(
+            model.selectedExternalOpenDirectoryTarget,
+            ExternalOpenTarget(url: root, kind: .directory)
+        )
+    }
+
+    func testExternalOpenFileTargetUsesSelectedThreadWorkingDirectory() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        let target = model.externalOpenFileTarget(relativePath: "src/App/RootView.swift")
+
+        XCTAssertEqual(
+            target,
+            ExternalOpenTarget(
+                url: fixture.root.appendingPathComponent("src/App/RootView.swift"),
+                kind: .file
+            )
+        )
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("YAAWKitTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func writeExecutable(at path: URL, contents: String) throws {
+        try contents.write(to: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
     }
 }
 
