@@ -21,14 +21,32 @@ public final class LoggerDiagnosticEventRecorder: DiagnosticEventRecording, @unc
     public static let shared = LoggerDiagnosticEventRecorder()
 
     private let subsystem: String
+    private let queue = DispatchQueue(label: "dev.dopsonbr.YAAW.diagnostics", qos: .utility)
+    private let cacheLock = NSLock()
+    private var loggersByCategory: [String: Logger] = [:]
 
     public init(subsystem: String = "dev.dopsonbr.YAAW") {
         self.subsystem = subsystem
     }
 
     public func record(_ event: DiagnosticEvent) {
-        let logger = Logger(subsystem: subsystem, category: event.category)
-        logger.info("\(event.name, privacy: .public) \(Self.render(event.metadata), privacy: .public)")
+        let logger = self.logger(forCategory: event.category)
+        let rendered = Self.render(event.metadata)
+        let name = event.name
+        queue.async {
+            logger.info("\(name, privacy: .public) \(rendered, privacy: .public)")
+        }
+    }
+
+    private func logger(forCategory category: String) -> Logger {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cached = loggersByCategory[category] {
+            return cached
+        }
+        let logger = Logger(subsystem: subsystem, category: category)
+        loggersByCategory[category] = logger
+        return logger
     }
 
     private static func render(_ metadata: [String: String]) -> String {

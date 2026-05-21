@@ -84,8 +84,11 @@ public protocol TerminalSessionManaging: AnyObject {
 }
 
 public final class PlaceholderTerminalSessionManager: TerminalSessionManaging {
-    public private(set) var lifecycleEvents: [TerminalLifecycleEvent] = []
+    public static let lifecycleEventLimit = 500
+    private var ringEvents: [TerminalLifecycleEvent] = []
     private var sessionsByRole: [TerminalRole: TerminalSessionRecord] = [:]
+
+    public var lifecycleEvents: [TerminalLifecycleEvent] { ringEvents }
 
     public init() {}
 
@@ -93,19 +96,19 @@ public final class PlaceholderTerminalSessionManager: TerminalSessionManaging {
     public func activate(_ request: TerminalLaunchRequest) -> TerminalSessionRecord {
         if let existing = sessionsByRole[request.role], existing.state == .active {
             if existing.request == request {
-                lifecycleEvents.append(.activated(existing))
+                appendEvent(.activated(existing))
                 return existing
             }
             var terminatedSession = existing
             terminatedSession.state = .terminated
             sessionsByRole[request.role] = terminatedSession
-            lifecycleEvents.append(.terminated(terminatedSession))
+            appendEvent(.terminated(terminatedSession))
         }
 
         let session = TerminalSessionRecord(request: request)
         sessionsByRole[request.role] = session
-        lifecycleEvents.append(.created(session))
-        lifecycleEvents.append(.activated(session))
+        appendEvent(.created(session))
+        appendEvent(.activated(session))
         return session
     }
 
@@ -113,7 +116,7 @@ public final class PlaceholderTerminalSessionManager: TerminalSessionManaging {
         guard var session = sessionsByRole[role] else { return }
         session.state = .terminated
         sessionsByRole[role] = session
-        lifecycleEvents.append(.terminated(session))
+        appendEvent(.terminated(session))
     }
 
     public func session(for role: TerminalRole) -> TerminalSessionRecord? {
@@ -123,6 +126,13 @@ public final class PlaceholderTerminalSessionManager: TerminalSessionManaging {
     public func recordLaunchFailure(_ request: TerminalLaunchRequest, message: String) {
         let session = TerminalSessionRecord(request: request, state: .launchFailed(message))
         sessionsByRole[request.role] = session
-        lifecycleEvents.append(.surfaceLaunchFailed(request, message))
+        appendEvent(.surfaceLaunchFailed(request, message))
+    }
+
+    private func appendEvent(_ event: TerminalLifecycleEvent) {
+        ringEvents.append(event)
+        if ringEvents.count > Self.lifecycleEventLimit {
+            ringEvents.removeFirst(ringEvents.count - Self.lifecycleEventLimit)
+        }
     }
 }
