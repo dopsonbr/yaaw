@@ -26,7 +26,7 @@ final class SQLitePersistenceBenchmarks: BenchmarkCase {
         var snapshot = store.load()
         measure {
             snapshot.threads[0].displayName = "edited-\(UUID().uuidString.prefix(6))"
-            store.save(snapshot)
+            store.upsertThread(snapshot.threads[0])
         }
     }
 

@@ -157,7 +157,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public func selectRightPanelMode(_ mode: RightPanelMode) {
         guard let selectedThreadID else { return }
         rightPanelModesByThreadID[selectedThreadID] = mode
-        persist()
+        persistRightPanelMode(threadID: selectedThreadID)
     }
 
     public func cycleRightPanelModeForward() {
@@ -183,7 +183,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "expanded": "\(bottomTerminalExpandedThreadIDs.contains(selectedThreadID))"
             ]
         )
-        persist()
+        persistBottomTerminalExpanded(threadID: selectedThreadID)
     }
 
     public func toggleGlobalTerminal() {
@@ -192,12 +192,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func toggleSidebarCollapsed() {
         layoutState.isSidebarCollapsed.toggle()
-        persist()
+        persistLayout()
     }
 
     public func toggleRightPanelCollapsed() {
         layoutState.isRightPanelCollapsed.toggle()
-        persist()
+        persistLayout()
     }
 
     public func setSidebarWidth(_ width: Double) {
@@ -206,7 +206,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             minimum: LayoutState.minimumSidebarWidth,
             maximum: LayoutState.maximumSidebarWidth
         )
-        persist()
+        persistLayout()
     }
 
     public func setRightPanelWidth(_ width: Double) {
@@ -215,7 +215,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             minimum: LayoutState.minimumRightPanelWidth,
             maximum: LayoutState.maximumRightPanelWidth
         )
-        persist()
+        persistLayout()
     }
 
     public func setGlobalTerminalHeight(_ height: Double) {
@@ -224,7 +224,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             minimum: LayoutState.minimumGlobalTerminalHeight,
             maximum: LayoutState.maximumGlobalTerminalHeight
         )
-        persist()
+        persistLayout()
     }
 
     public func terminalLaunchRequest(for role: TerminalRole) -> TerminalLaunchRequest? {
@@ -469,7 +469,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "project_created",
             metadata: ["project_id": project.id.uuidString]
         )
-        persist()
+        persistProject(project)
+        persistSelection()
         return project.id
     }
 
@@ -516,7 +517,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "agent_cli": thread.agentCLI.rawValue
             ]
         )
-        persist()
+        persistThread(thread)
+        persistRightPanelMode(threadID: thread.id)
+        persistSelection()
         return thread.id
     }
 
@@ -539,7 +542,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "project_selected",
             metadata: ["project_id": projectID.uuidString]
         )
-        persist()
+        persistSelection()
     }
 
     public func selectThread(id threadID: UUID) {
@@ -556,7 +559,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "agent_cli": thread.agentCLI.rawValue
             ]
         )
-        persist()
+        persistSelection()
     }
 
     public func archiveThread(id threadID: UUID) {
@@ -567,7 +570,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             resetFileBrowserForSelectedThread()
         }
         pushCurrentSelection()
-        persist()
+        persistThread(threads[index])
+        persistSelection()
     }
 
     public func unarchiveThread(id threadID: UUID) {
@@ -579,13 +583,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public func navigateBack() {
         guard let selection = navigationHistory.goBack() else { return }
         apply(selection)
-        persist()
+        persistSelection()
     }
 
     public func navigateForward() {
         guard let selection = navigationHistory.goForward() else { return }
         apply(selection)
-        persist()
+        persistSelection()
     }
 
     private func pushCurrentSelection() {
@@ -608,7 +612,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         threads[index].canonicalSessionName = metadata.canonicalName
         threads[index].displayName = metadata.canonicalName
         pendingTerminalTitlesByThreadID.removeValue(forKey: threads[index].id)
-        persist()
+        persistThread(threads[index])
     }
 
     private func refreshFileBrowser(for thread: AgentThread) {
@@ -673,7 +677,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                     errorMessage: nil
                 )
             }
-            persist()
+            persistFileIndexMetadata(result.metadata)
         case .failure(let error):
             if selectedThreadID == threadID {
                 fileBrowserState.isIndexing = false
@@ -740,21 +744,39 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         return [git, "diff"]
     }
 
-    private func persist() {
-        store.save(
-            YAAWSnapshot(
-                projects: projects,
-                threads: threads,
-                selectedProjectID: selectedProjectID,
-                selectedThreadID: selectedThreadID,
-                rightPanelModesByThreadID: rightPanelModesByThreadID,
-                selectedRightPanelMode: selectedRightPanelMode,
-                bottomTerminalExpandedThreadIDs: bottomTerminalExpandedThreadIDs,
-                isGlobalTerminalExpanded: isBottomTerminalExpanded,
-                layoutState: layoutState,
-                fileIndexMetadataByThreadID: fileIndexMetadataByThreadID
-            )
+    private func persistSelection() {
+        store.setSelectedProject(selectedProjectID)
+        store.setSelectedThread(selectedThreadID)
+    }
+
+    private func persistLayout() {
+        store.setLayoutState(layoutState)
+    }
+
+    private func persistRightPanelMode(threadID: UUID) {
+        store.setRightPanelMode(
+            threadID: threadID,
+            mode: rightPanelModesByThreadID[threadID] ?? .files
         )
+    }
+
+    private func persistBottomTerminalExpanded(threadID: UUID) {
+        store.setBottomTerminalExpanded(
+            threadID: threadID,
+            isExpanded: bottomTerminalExpandedThreadIDs.contains(threadID)
+        )
+    }
+
+    private func persistThread(_ thread: AgentThread) {
+        store.upsertThread(thread)
+    }
+
+    private func persistProject(_ project: Project) {
+        store.upsertProject(project)
+    }
+
+    private func persistFileIndexMetadata(_ metadata: FileIndexMetadata) {
+        store.upsertFileIndexMetadata(metadata)
     }
 
     private func recordTerminalLaunchFailure(role: TerminalRole, path: String, reason: String) {
