@@ -14,6 +14,15 @@ This file tracks review findings that are real but intentionally belong to a lat
 
 ## Open Items
 
+## Rejected Review Findings
+
+### R-001: Legacy AgentIDE Application Support Migration
+
+- Source: Multi-CLI/image-paste Codex review on 2026-05-20.
+- Finding: Reviewer requested a one-time migration from `~/Library/Application Support/AgentIDE/AgentIDE.sqlite` into `~/Library/Application Support/YAAW/YAAW.sqlite`.
+- Decision: Rejected for this change because product direction explicitly does not preserve compatibility with the old `AgentIDE` prefix. YAAW uses app-owned `YAAW` paths and `YAAW_*` environment variables only.
+- Reconsideration gate: Reopen only if product requirements explicitly ask for legacy AgentIDE data migration.
+
 ## Resolved Items
 
 ### D-002: Replace Interim libghostty Swift Package If Upstream Publishes A Stable Full-Surface Package
@@ -21,7 +30,7 @@ This file tracks review findings that are real but intentionally belong to a lat
 - Source: Plan 06 upstream research on 2026-05-20.
 - Finding: Official Ghostty sources expose the full macOS embedding API in `include/ghostty.h`, but current official public docs still emphasize `libghostty-vt` as the available split and do not publish a stable official full-surface SwiftUI/AppKit package.
 - Resolution: Plan 11 keeps `Lakr233/libghostty-spm` 1.1.4 behind the narrow `src/App/GhosttyTerminalSurfaceView.swift` bridge, documents the current distribution path in `docs/standards/dependency/libghostty.md`, and hardens `script/build_and_run.sh --verify` to ad-hoc sign and verify the staged `.app`.
-- Closure test: `./script/build_and_run.sh --verify` verifies the app bundle signature and rejects `/Applications/Ghostty.app` binary links; `otool -L dist/AgentIDE.app/Contents/MacOS/AgentIDE` showed no dependency on `/Applications/Ghostty.app`.
+- Closure test: `./script/build_and_run.sh --verify` verifies the app bundle signature and rejects `/Applications/Ghostty.app` binary links; `otool -L dist/YAAW.app/Contents/MacOS/YAAW` showed no dependency on `/Applications/Ghostty.app`.
 
 ### D-001: Persist Non-Default Thread CLI Metadata
 

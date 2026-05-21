@@ -1,6 +1,10 @@
+import Foundation
+
 public enum AgentCLIKind: String, CaseIterable, Identifiable, Equatable, Sendable, Codable {
     case codex
     case claude
+    case opencode
+    case copilot
 
     public var id: String {
         rawValue
@@ -12,6 +16,14 @@ public enum AgentCLIKind: String, CaseIterable, Identifiable, Equatable, Sendabl
             "Codex"
         case .claude:
             "Claude"
+        case .opencode:
+            "OpenCode"
+        case .copilot:
+            "Copilot"
         }
+    }
+
+    public func imagePasteText(for imageURL: URL) -> String {
+        "Attached image: \(imageURL.path)"
     }
 }

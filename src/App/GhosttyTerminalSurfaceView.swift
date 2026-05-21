@@ -1,4 +1,4 @@
-import AgentIDEKit
+import YAAWKit
 import AppKit
 import GhosttyTerminal
 import SwiftUI
@@ -48,9 +48,14 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
         terminal.frame = container.bounds
         if let terminalContainer = container as? TerminalContainerView {
             terminalContainer.terminalView = terminal
+            terminalContainer.request = request
+            terminalContainer.registerTerminalForPaste()
         }
         terminal.fitToSize()
         terminal.setSurfaceVisible(true)
+        if let terminalContainer = container as? TerminalContainerView {
+            terminalContainer.focusTerminalIfPossible()
+        }
         GhosttyTerminalStateRegistry.shared.configure(
             entry,
             for: request,
@@ -62,12 +67,124 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
 @available(macOS 14.0, *)
 private final class TerminalContainerView: NSView {
     weak var terminalView: TerminalView?
+    var request: TerminalLaunchRequest?
 
     override func layout() {
         super.layout()
         guard let terminalView else { return }
         terminalView.frame = bounds
         terminalView.fitToSize()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            TerminalImagePasteBridge.shared.unregister(container: self)
+        } else {
+            registerTerminalForPaste()
+        }
+    }
+
+    func registerTerminalForPaste() {
+        guard let terminalView, let request else { return }
+        TerminalImagePasteBridge.shared.register(
+            container: self,
+            terminalView: terminalView,
+            request: request
+        )
+    }
+
+    func focusTerminalIfPossible() {
+        guard let terminalView else { return }
+        DispatchQueue.main.async { [weak terminalView] in
+            guard let terminalView,
+                  terminalView.window?.isKeyWindow == true
+            else {
+                return
+            }
+            terminalView.window?.makeFirstResponder(terminalView)
+        }
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class TerminalImagePasteBridge {
+    static let shared = TerminalImagePasteBridge()
+
+    private let imageStore = YAAWPastedImageStore()
+    private let pasteFormatter = TerminalPasteTextFormatter()
+    private var keyMonitor: Any?
+    private var registrations: [ObjectIdentifier: Registration] = [:]
+
+    private init() {}
+
+    func register(
+        container: TerminalContainerView,
+        terminalView: TerminalView,
+        request: TerminalLaunchRequest
+    ) {
+        registrations[ObjectIdentifier(container)] = Registration(
+            container: container,
+            terminalView: terminalView,
+            request: request
+        )
+        installKeyMonitorIfNeeded()
+    }
+
+    func unregister(container: TerminalContainerView) {
+        registrations.removeValue(forKey: ObjectIdentifier(container))
+        if registrations.isEmpty {
+            removeKeyMonitor()
+        }
+    }
+
+    private func removeKeyMonitor() {
+        guard let keyMonitor else { return }
+        NSEvent.removeMonitor(keyMonitor)
+        self.keyMonitor = nil
+    }
+
+    private func installKeyMonitorIfNeeded() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handlePasteShortcut(event) ?? event
+        }
+    }
+
+    private func handlePasteShortcut(_ event: NSEvent) -> NSEvent? {
+        guard TerminalPasteShortcut.matches(event),
+              let registration = focusedRegistration(in: event.window),
+              let terminalView = registration.terminalView,
+              let pngData = PasteboardImageExtractor.pngData(from: .general),
+              let imageURL = try? imageStore.savePNGData(pngData, role: registration.request.role)
+        else {
+            return event
+        }
+
+        let agentCLI = registration.request.agentCLI ?? .codex
+        let text = pasteFormatter.text(for: .image(imageURL), agentCLI: agentCLI)
+        terminalView.sendText(text)
+        return nil
+    }
+
+    private func focusedRegistration(in eventWindow: NSWindow?) -> Registration? {
+        registrations.values.first { registration in
+            guard let container = registration.container,
+                  let terminalView = registration.terminalView,
+                  terminalView.window === eventWindow,
+                  container.window === eventWindow
+            else {
+                return false
+            }
+            return eventWindow?.firstResponder === terminalView
+        }
+    }
+
+    private struct Registration {
+        weak var container: TerminalContainerView?
+        weak var terminalView: TerminalView?
+        var request: TerminalLaunchRequest
     }
 }
 
@@ -154,20 +271,20 @@ private final class GhosttyTerminalStateRegistry {
         let request: TerminalLaunchRequest
         let state: TerminalViewState
         let view: TerminalView
-        let delegate: AgentIDETerminalDelegate
+        let delegate: YAAWTerminalDelegate
 
         init(request: TerminalLaunchRequest, state: TerminalViewState, view: TerminalView) {
             self.request = request
             self.state = state
             self.view = view
-            self.delegate = AgentIDETerminalDelegate(state: state)
+            self.delegate = YAAWTerminalDelegate(state: state)
         }
     }
 }
 
 @available(macOS 14.0, *)
 @MainActor
-private final class AgentIDETerminalDelegate:
+private final class YAAWTerminalDelegate:
     TerminalSurfaceTitleDelegate,
     TerminalSurfaceGridResizeDelegate,
     TerminalSurfaceFocusDelegate,

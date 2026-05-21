@@ -1,19 +1,19 @@
 import XCTest
-@testable import AgentIDEKit
+@testable import YAAWKit
 
 final class AppModelTests: XCTestCase {
-    func testGlobalTerminalStartsCollapsed() {
+    func testBottomTerminalStartsCollapsed() {
         let model = AppModel()
 
-        XCTAssertFalse(model.isGlobalTerminalExpanded)
+        XCTAssertFalse(model.isBottomTerminalExpanded)
     }
 
-    func testToggleGlobalTerminalChangesVisibleState() {
+    func testToggleBottomTerminalChangesSelectedThreadVisibleState() {
         let model = AppModel()
 
-        model.toggleGlobalTerminal()
+        model.toggleBottomTerminal()
 
-        XCTAssertTrue(model.isGlobalTerminalExpanded)
+        XCTAssertTrue(model.isBottomTerminalExpanded)
     }
 
     func testPanelCollapseActionsUpdateLayoutState() {
@@ -91,8 +91,8 @@ final class AppModelTests: XCTestCase {
     func testSnapshotSelectedModeSeedsSelectedThreadMode() {
         let fixture = AppModelFixture()
         let model = AppModel(
-            store: InMemoryAgentIDEStore(
-                snapshot: AgentIDESnapshot(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
                     projects: [Project(id: fixture.projectID, displayName: "Project", rootDirectory: fixture.root)],
                     threads: [
                         AgentThread(
@@ -121,10 +121,10 @@ final class AppModelTests: XCTestCase {
         let firstThreadID = UUID()
         let secondThreadID = UUID()
         let archivedThreadID = UUID()
-        let root = URL(fileURLWithPath: "/tmp/agent-ide", isDirectory: true)
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
         let model = AppModel(
-            store: InMemoryAgentIDEStore(
-                snapshot: AgentIDESnapshot(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
                     projects: [
                         Project(id: firstProjectID, displayName: "First", rootDirectory: root),
                         Project(id: secondProjectID, displayName: "Second", rootDirectory: root)
@@ -177,7 +177,7 @@ final class AppModelTests: XCTestCase {
 
     func testCreateProjectRejectsMissingDirectory() {
         let model = AppModel()
-        let missing = URL(fileURLWithPath: "/tmp/agent-ide-missing-\(UUID().uuidString)", isDirectory: true)
+        let missing = URL(fileURLWithPath: "/tmp/yaaw-missing-\(UUID().uuidString)", isDirectory: true)
 
         XCTAssertThrowsError(try model.createProject(displayName: "Missing", rootDirectory: missing)) { error in
             XCTAssertEqual(error as? AppModelError, .missingProjectDirectory(missing.path))
@@ -191,8 +191,8 @@ final class AppModelTests: XCTestCase {
         let projectID = UUID()
         let threadID = UUID()
         let model = AppModel(
-            store: InMemoryAgentIDEStore(
-                snapshot: AgentIDESnapshot(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
                     projects: [Project(id: projectID, displayName: "Missing", rootDirectory: root)],
                     threads: [
                         AgentThread(
@@ -392,18 +392,35 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(renderedDiagnostics.contains(secretOutput))
     }
 
-    func testGlobalTerminalSessionIsSharedAppWide() throws {
+    func testBottomTerminalSessionIsScopedToSelectedThread() throws {
         let fixture = AppModelFixture()
-        let homeDirectory = URL(fileURLWithPath: "/tmp/agent-ide-home", isDirectory: true)
-        let model = AppModel(store: fixture.store, homeDirectory: homeDirectory)
+        let model = AppModel(store: fixture.store)
 
-        let firstActivation = try XCTUnwrap(model.activateGlobalTerminal())
+        let firstActivation = try XCTUnwrap(model.activateSelectedBottomTerminal())
         model.selectThread(id: fixture.secondThreadID)
-        let secondActivation = try XCTUnwrap(model.activateGlobalTerminal())
+        let secondActivation = try XCTUnwrap(model.activateSelectedBottomTerminal())
 
-        XCTAssertEqual(firstActivation.id, secondActivation.id)
-        XCTAssertEqual(firstActivation.request.role, .global)
-        XCTAssertEqual(firstActivation.request.workingDirectory, homeDirectory)
+        XCTAssertNotEqual(firstActivation.id, secondActivation.id)
+        XCTAssertEqual(firstActivation.request.role, .bottom(threadID: fixture.firstThreadID))
+        XCTAssertEqual(secondActivation.request.role, .bottom(threadID: fixture.secondThreadID))
+        XCTAssertEqual(firstActivation.request.workingDirectory, fixture.root)
+        XCTAssertEqual(secondActivation.request.workingDirectory, fixture.root)
+    }
+
+    func testBottomTerminalToggleDoesNotMutateSidebarOrSelection() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+        let sidebarWidth = model.layoutState.sidebarWidth
+        let projectID = model.selectedProjectID
+        let threadID = model.selectedThreadID
+
+        model.toggleBottomTerminal()
+
+        XCTAssertEqual(model.layoutState.sidebarWidth, sidebarWidth)
+        XCTAssertFalse(model.layoutState.isSidebarCollapsed)
+        XCTAssertEqual(model.selectedProjectID, projectID)
+        XCTAssertEqual(model.selectedThreadID, threadID)
+        XCTAssertTrue(model.isBottomTerminalExpanded)
     }
 
     func testRightPanelTerminalRequestsUseSelectedThreadWorkingDirectory() throws {
@@ -456,7 +473,42 @@ final class AppModelTests: XCTestCase {
         let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(nvimRequest.command, ["nvim", "README.md"])
-        XCTAssertEqual(gitRequest.command, ["lazygit"])
+        XCTAssertEqual(gitRequest.command, ["git", "diff"])
+    }
+
+    func testEditorFallbackUsesVimThenViWhenNvimMissing() throws {
+        let fixture = AppModelFixture()
+        let vimModel = AppModel(
+            store: fixture.store,
+            externalToolResolver: StaticAppModelExecutableResolver(paths: ["vim": "/usr/bin/vim"]),
+            environment: [:]
+        )
+        vimModel.openFileInNvim(relativePath: "README.md")
+        let vimRequest = try XCTUnwrap(vimModel.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        XCTAssertEqual(vimRequest.command, ["/usr/bin/vim", "README.md"])
+
+        let viModel = AppModel(
+            store: fixture.store,
+            externalToolResolver: StaticAppModelExecutableResolver(paths: ["vi": "/usr/bin/vi"]),
+            environment: [:]
+        )
+        viModel.openFileInNvim(relativePath: "README.md")
+        let viRequest = try XCTUnwrap(viModel.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        XCTAssertEqual(viRequest.command, ["/usr/bin/vi", "README.md"])
+    }
+
+    func testGitFallbackUsesGitDiffWhenLazygitMissing() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(
+            store: fixture.store,
+            externalToolResolver: StaticAppModelExecutableResolver(paths: ["git": "/usr/bin/git"]),
+            environment: [:]
+        )
+
+        model.selectRightPanelMode(.git)
+        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+
+        XCTAssertEqual(request.command, ["/usr/bin/git", "diff"])
     }
 
     func testOpeningDifferentFilesReplacesNvimTerminalSessionRequest() throws {
@@ -540,7 +592,7 @@ final class AppModelTests: XCTestCase {
 
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AgentIDEKitTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("YAAWKitTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -568,9 +620,9 @@ private struct AppModelFixture {
     let secondThreadID = UUID()
     let root = FileManager.default.temporaryDirectory
 
-    var store: InMemoryAgentIDEStore {
-        InMemoryAgentIDEStore(
-            snapshot: AgentIDESnapshot(
+    var store: InMemoryYAAWStore {
+        InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
                 threads: [
                     AgentThread(

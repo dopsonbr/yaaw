@@ -1,15 +1,15 @@
 import XCTest
 import SQLite3
-@testable import AgentIDEKit
+@testable import YAAWKit
 
 final class PersistenceTests: XCTestCase {
     func testSQLiteMigrationInitializesCurrentSchema() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
-        _ = try SQLiteAgentIDEStore(databasePath: path)
+        _ = try SQLiteYAAWStore(databasePath: path)
 
         let version = try sqliteUserVersion(path: path)
 
-        XCTAssertEqual(version, SQLiteAgentIDEStore.schemaVersion)
+        XCTAssertEqual(version, SQLiteYAAWStore.schemaVersion)
     }
 
     func testSQLiteMigrationRecoversPartialVersionZeroSchema() throws {
@@ -29,10 +29,10 @@ final class PersistenceTests: XCTestCase {
             )
         }
 
-        let store = try SQLiteAgentIDEStore(databasePath: path)
+        let store = try SQLiteYAAWStore(databasePath: path)
         let loaded = store.load()
 
-        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteAgentIDEStore.schemaVersion)
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
         XCTAssertFalse(loaded.projects.isEmpty)
         XCTAssertFalse(loaded.threads.isEmpty)
     }
@@ -72,9 +72,9 @@ final class PersistenceTests: XCTestCase {
             )
         }
 
-        _ = try SQLiteAgentIDEStore(databasePath: path)
+        _ = try SQLiteYAAWStore(databasePath: path)
 
-        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteAgentIDEStore.schemaVersion)
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
         XCTAssertTrue(try sqliteTableColumns(path: path, table: "threads").contains("agent_cli"))
     }
 
@@ -119,7 +119,7 @@ final class PersistenceTests: XCTestCase {
             )
         }
 
-        XCTAssertThrowsError(try SQLiteAgentIDEStore(databasePath: path)) { error in
+        XCTAssertThrowsError(try SQLiteYAAWStore(databasePath: path)) { error in
             XCTAssertEqual(
                 error as? SQLiteStoreError,
                 .executionFailed("Cannot migrate existing threads without explicit agent_cli choices")
@@ -169,7 +169,7 @@ final class PersistenceTests: XCTestCase {
             )
         }
 
-        XCTAssertThrowsError(try SQLiteAgentIDEStore(databasePath: path, diagnosticRecorder: recorder))
+        XCTAssertThrowsError(try SQLiteYAAWStore(databasePath: path, diagnosticRecorder: recorder))
 
         XCTAssertTrue(
             recorder.events.contains {
@@ -183,13 +183,13 @@ final class PersistenceTests: XCTestCase {
 
     func testSQLiteStorePersistsPlanOneSnapshot() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
-        let store = try SQLiteAgentIDEStore(databasePath: path)
+        let store = try SQLiteYAAWStore(databasePath: path)
         let projectID = UUID()
         let firstThreadID = UUID()
         let secondThreadID = UUID()
-        let root = URL(fileURLWithPath: "/tmp/agent-ide", isDirectory: true)
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
         let createdAt = Date(timeIntervalSince1970: 42)
-        let snapshot = AgentIDESnapshot(
+        let snapshot = YAAWSnapshot(
             projects: [
                 Project(
                     id: projectID,
@@ -227,7 +227,7 @@ final class PersistenceTests: XCTestCase {
         )
 
         store.save(snapshot)
-        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
 
         XCTAssertEqual(reloaded.projects, snapshot.projects)
         XCTAssertEqual(reloaded.threads.map(\.id), snapshot.threads.map(\.id))
@@ -243,7 +243,7 @@ final class PersistenceTests: XCTestCase {
 
     func testSQLiteLayoutStatePersistsThroughReload() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
-        let store = try SQLiteAgentIDEStore(databasePath: path)
+        let store = try SQLiteYAAWStore(databasePath: path)
         var snapshot = store.load()
         let layoutState = LayoutState(
             sidebarWidth: 312,
@@ -256,9 +256,14 @@ final class PersistenceTests: XCTestCase {
         snapshot.layoutState = layoutState
 
         store.save(snapshot)
-        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
 
-        XCTAssertEqual(reloaded.layoutState, layoutState)
+        XCTAssertEqual(reloaded.layoutState.sidebarWidth, layoutState.sidebarWidth)
+        XCTAssertEqual(reloaded.layoutState.rightPanelWidth, layoutState.rightPanelWidth)
+        XCTAssertEqual(reloaded.layoutState.globalTerminalHeight, layoutState.globalTerminalHeight)
+        XCTAssertEqual(reloaded.layoutState.isSidebarCollapsed, layoutState.isSidebarCollapsed)
+        XCTAssertEqual(reloaded.layoutState.isRightPanelCollapsed, layoutState.isRightPanelCollapsed)
+        XCTAssertFalse(reloaded.layoutState.isGlobalTerminalExpanded)
     }
 
     func testSQLiteMigrationAddsAgentCLISessionColumnsToVersionThreeThreads() throws {
@@ -301,10 +306,10 @@ final class PersistenceTests: XCTestCase {
             )
         }
 
-        _ = try SQLiteAgentIDEStore(databasePath: path)
+        _ = try SQLiteYAAWStore(databasePath: path)
         let columns = try sqliteTableColumns(path: path, table: "threads")
 
-        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteAgentIDEStore.schemaVersion)
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
         XCTAssertTrue(columns.contains("session_identity"))
         XCTAssertTrue(columns.contains("canonical_session_name"))
     }
@@ -351,10 +356,10 @@ final class PersistenceTests: XCTestCase {
             )
         }
 
-        _ = try SQLiteAgentIDEStore(databasePath: path)
+        _ = try SQLiteYAAWStore(databasePath: path)
         let columns = try sqliteTableColumns(path: path, table: "file_index_metadata")
 
-        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteAgentIDEStore.schemaVersion)
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
         XCTAssertTrue(columns.contains("thread_id"))
         XCTAssertTrue(columns.contains("root_path"))
         XCTAssertTrue(columns.contains("indexed_at"))
@@ -364,10 +369,10 @@ final class PersistenceTests: XCTestCase {
 
     func testSQLiteFileIndexMetadataPersistsThroughReload() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
-        let store = try SQLiteAgentIDEStore(databasePath: path)
+        let store = try SQLiteYAAWStore(databasePath: path)
         let projectID = UUID()
         let threadID = UUID()
-        let root = URL(fileURLWithPath: "/tmp/agent-ide", isDirectory: true)
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
         let metadata = FileIndexMetadata(
             threadID: threadID,
             rootPath: root.path,
@@ -375,7 +380,7 @@ final class PersistenceTests: XCTestCase {
             fileCount: 12,
             ignoredDirectoryCount: 3
         )
-        let snapshot = AgentIDESnapshot(
+        let snapshot = YAAWSnapshot(
             projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
             threads: [
                 AgentThread(
@@ -394,14 +399,73 @@ final class PersistenceTests: XCTestCase {
         )
 
         store.save(snapshot)
-        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
 
         XCTAssertEqual(reloaded.fileIndexMetadataByThreadID[threadID], metadata)
     }
 
+    func testSQLiteAcceptsAllSupportedAgentCLIKinds() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: path)
+        let projectID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
+        let threads = AgentCLIKind.allCases.map { kind in
+            AgentThread(
+                displayName: kind.displayName,
+                projectID: projectID,
+                workingDirectory: root,
+                agentCLI: kind
+            )
+        }
+
+        store.save(
+            YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: threads,
+                selectedProjectID: projectID,
+                selectedThreadID: threads.first?.id,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
+
+        XCTAssertEqual(Set(reloaded.threads.map(\.agentCLI)), Set(AgentCLIKind.allCases))
+    }
+
+    func testSQLitePersistsBottomTerminalExpandedThreads() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: path)
+        let projectID = UUID()
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
+
+        store.save(
+            YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(id: firstThreadID, displayName: "First", projectID: projectID, workingDirectory: root),
+                    AgentThread(id: secondThreadID, displayName: "Second", projectID: projectID, workingDirectory: root)
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: firstThreadID,
+                selectedRightPanelMode: .files,
+                bottomTerminalExpandedThreadIDs: [secondThreadID],
+                isGlobalTerminalExpanded: false
+            )
+        )
+
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
+
+        XCTAssertEqual(reloaded.bottomTerminalExpandedThreadIDs, [secondThreadID])
+        XCTAssertFalse(reloaded.isGlobalTerminalExpanded)
+    }
+
     func testSQLiteLayoutStateMissingRowsUseDefaults() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
-        let store = try SQLiteAgentIDEStore(databasePath: path)
+        let store = try SQLiteYAAWStore(databasePath: path)
         _ = store.load()
         try withSQLiteDatabase(path: path) { database in
             try executeSQL(
@@ -413,7 +477,7 @@ final class PersistenceTests: XCTestCase {
             )
         }
 
-        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
 
         XCTAssertEqual(reloaded.layoutState.sidebarWidth, 333)
         XCTAssertEqual(reloaded.layoutState.rightPanelWidth, LayoutState.defaultRightPanelWidth)
@@ -425,14 +489,14 @@ final class PersistenceTests: XCTestCase {
 
     func testSQLiteTransactionRejectsPartialInvalidThreadWrite() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
-        let store = try SQLiteAgentIDEStore(databasePath: path)
+        let store = try SQLiteYAAWStore(databasePath: path)
         let projectID = UUID()
         let invalidThread = AgentThread(
             displayName: "Invalid",
             projectID: UUID(),
-            workingDirectory: URL(fileURLWithPath: "/tmp/agent-ide", isDirectory: true)
+            workingDirectory: URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
         )
-        let snapshot = AgentIDESnapshot(
+        let snapshot = YAAWSnapshot(
             projects: [Project(id: projectID, displayName: "Project", rootDirectory: invalidThread.workingDirectory)],
             threads: [invalidThread],
             selectedProjectID: projectID,
@@ -442,7 +506,7 @@ final class PersistenceTests: XCTestCase {
         )
 
         store.save(snapshot)
-        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
 
         XCTAssertNotEqual(reloaded.projects.map(\.id), [projectID])
         XCTAssertFalse(reloaded.threads.contains { $0.id == invalidThread.id })
@@ -450,7 +514,7 @@ final class PersistenceTests: XCTestCase {
 
     func testSQLiteLoadFallsBackWhenPersistedUUIDIsInvalid() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
-        _ = try SQLiteAgentIDEStore(databasePath: path)
+        _ = try SQLiteYAAWStore(databasePath: path)
         try withSQLiteDatabase(path: path) { database in
             try executeSQL(
                 """
@@ -462,7 +526,7 @@ final class PersistenceTests: XCTestCase {
             )
         }
 
-        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
 
         XCTAssertEqual(reloaded.projects.first?.displayName, "Global")
         XCTAssertEqual(reloaded.threads.first?.displayName, "Hello World")
@@ -473,7 +537,7 @@ final class PersistenceTests: XCTestCase {
         let store = JSONConfigurationStore(path: path)
 
         let seeded = store.load()
-        try store.save(AgentIDEConfiguration(ignoreRules: seeded.ignoreRules + ["vendor"]))
+        try store.save(YAAWConfiguration(ignoreRules: seeded.ignoreRules + ["vendor"]))
         let reloaded = store.load()
 
         XCTAssertEqual(seeded.theme, "Dracula")
@@ -489,12 +553,12 @@ final class PersistenceTests: XCTestCase {
 
         let recovered = JSONConfigurationStore(path: path).load()
 
-        XCTAssertEqual(recovered, AgentIDEConfiguration())
+        XCTAssertEqual(recovered, YAAWConfiguration())
     }
 
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AgentIDEKitTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("YAAWKitTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

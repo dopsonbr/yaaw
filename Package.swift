@@ -3,29 +3,29 @@
 import PackageDescription
 
 let package = Package(
-    name: "AgentIDE",
+    name: "YAAW",
     platforms: [
         .macOS(.v26)
     ],
     products: [
-        .executable(name: "AgentIDE", targets: ["AgentIDE"]),
-        .executable(name: "AgentIDEE2E", targets: ["AgentIDEE2E"]),
-        .library(name: "AgentIDEKit", targets: ["AgentIDEKit"])
+        .executable(name: "YAAW", targets: ["YAAW"]),
+        .executable(name: "YAAWE2E", targets: ["YAAWE2E"]),
+        .library(name: "YAAWKit", targets: ["YAAWKit"])
     ],
     dependencies: [
         .package(url: "https://github.com/Lakr233/libghostty-spm.git", from: "1.1.4")
     ],
     targets: [
         .executableTarget(
-            name: "AgentIDE",
+            name: "YAAW",
             dependencies: [
-                "AgentIDEKit",
+                "YAAWKit",
                 .product(name: "GhosttyTerminal", package: "libghostty-spm")
             ],
             path: "src/App"
         ),
         .target(
-            name: "AgentIDEKit",
+            name: "YAAWKit",
             path: "src",
             exclude: [
                 "AGENTS.md",
@@ -51,13 +51,13 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "AgentIDEKitTests",
-            dependencies: ["AgentIDEKit"],
-            path: "src/Tests/AgentIDEKitTests"
+            name: "YAAWKitTests",
+            dependencies: ["YAAWKit"],
+            path: "src/Tests/YAAWKitTests"
         ),
         .executableTarget(
-            name: "AgentIDEE2E",
-            dependencies: ["AgentIDEKit"],
+            name: "YAAWE2E",
+            dependencies: ["YAAWKit"],
             path: "src/E2E"
         )
     ]

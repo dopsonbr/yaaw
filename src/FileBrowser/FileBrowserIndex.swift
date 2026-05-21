@@ -28,7 +28,7 @@ public final class BackgroundFileIndexer: FileIndexing {
 
     public init(
         queue: DispatchQueue = DispatchQueue(
-            label: "dev.dopsonbr.AgentIDE.file-index",
+            label: "dev.dopsonbr.YAAW.file-index",
             qos: .userInitiated,
             attributes: .concurrent
         )

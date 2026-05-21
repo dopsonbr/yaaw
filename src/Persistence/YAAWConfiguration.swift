@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-public struct AgentIDEConfiguration: Codable, Equatable, Sendable {
+public struct YAAWConfiguration: Codable, Equatable, Sendable {
     public var version: Int
     public var theme: String
     public var ignoreRules: [String]
@@ -27,7 +27,7 @@ public struct AgentIDEConfiguration: Codable, Equatable, Sendable {
 
 public final class JSONConfigurationStore {
     private let path: URL
-    private let logger = Logger(subsystem: "dev.dopsonbr.AgentIDE", category: "Configuration")
+    private let logger = Logger(subsystem: "dev.dopsonbr.YAAW", category: "Configuration")
 
     public init(path: URL) {
         self.path = path
@@ -35,19 +35,19 @@ public final class JSONConfigurationStore {
 
     public static func defaultPath() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("AgentIDE", isDirectory: true)
+        return base.appendingPathComponent("YAAW", isDirectory: true)
             .appendingPathComponent("config.json")
     }
 
-    public func load() -> AgentIDEConfiguration {
+    public func load() -> YAAWConfiguration {
         do {
             guard FileManager.default.fileExists(atPath: path.path) else {
-                let configuration = AgentIDEConfiguration()
+                let configuration = YAAWConfiguration()
                 try save(configuration)
                 return configuration
             }
             let data = try Data(contentsOf: path)
-            let configuration = try JSONDecoder().decode(AgentIDEConfiguration.self, from: data)
+            let configuration = try JSONDecoder().decode(YAAWConfiguration.self, from: data)
             guard configuration.theme == "Dracula", !configuration.ignoreRules.isEmpty else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(codingPath: [], debugDescription: "Invalid configuration values")
@@ -56,13 +56,13 @@ public final class JSONConfigurationStore {
             return configuration
         } catch {
             logger.error("Recovering malformed configuration: \(String(describing: error), privacy: .public)")
-            let configuration = AgentIDEConfiguration()
+            let configuration = YAAWConfiguration()
             try? save(configuration)
             return configuration
         }
     }
 
-    public func save(_ configuration: AgentIDEConfiguration) throws {
+    public func save(_ configuration: YAAWConfiguration) throws {
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(),
             withIntermediateDirectories: true

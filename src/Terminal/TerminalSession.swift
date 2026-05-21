@@ -2,7 +2,7 @@ import Foundation
 
 public enum TerminalRole: Hashable, Sendable {
     case project(threadID: UUID)
-    case global
+    case bottom(threadID: UUID)
     case nvim(threadID: UUID)
     case lazygit(threadID: UUID)
 
@@ -10,8 +10,8 @@ public enum TerminalRole: Hashable, Sendable {
         switch self {
         case .project:
             return .project
-        case .global:
-            return .global
+        case .bottom:
+            return .bottom
         case .nvim:
             return .nvim
         case .lazygit:
@@ -26,19 +26,22 @@ public struct TerminalLaunchRequest: Equatable, Sendable {
     public var workingDirectory: URL
     public var command: [String]
     public var relaunchToken: UUID?
+    public var agentCLI: AgentCLIKind?
 
     public init(
         role: TerminalRole,
         title: String,
         workingDirectory: URL,
         command: [String],
-        relaunchToken: UUID? = nil
+        relaunchToken: UUID? = nil,
+        agentCLI: AgentCLIKind? = nil
     ) {
         self.role = role
         self.title = title
         self.workingDirectory = workingDirectory
         self.command = command
         self.relaunchToken = relaunchToken
+        self.agentCLI = agentCLI
     }
 }
 

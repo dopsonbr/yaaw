@@ -1,6 +1,6 @@
 # Technical Requirements
 
-This document defines implementation requirements for the first version of the native macOS Agent IDE.
+This document defines implementation requirements for the first version of YAAW - Yet Another Agent Wrapper.
 
 Requirements use:
 
@@ -25,7 +25,8 @@ Requirements use:
 - The app MUST use JSON files for user-editable or portable configuration.
 - The app MUST keep project metadata in app-owned storage rather than writing metadata into project directories.
 - The app MUST keep live terminal process state in memory while running and MUST NOT require restoring live PTY processes after restart.
-- The app MUST persist the agent CLI session metadata needed to resume each thread's bound `codex` or `claude` session after the app or thread is reopened.
+- The app MUST persist the agent CLI session metadata needed to resume each thread's bound CLI agent session after the app or thread is reopened.
+- The app MUST remain a desktop wrapper around local CLIs and MUST NOT become an agent harness, prompt orchestrator, or tool-call proxy.
 
 ## Storage
 
@@ -73,13 +74,15 @@ JSON configuration SHOULD include:
 
 - A thread MUST belong to one project.
 - A thread MUST be bound to exactly one managed agent CLI session.
-- A thread MUST store `agent_cli` as either `codex` or `claude`.
+- A thread MUST store `agent_cli` as the selected CLI family.
+- The product direction MUST include `codex`, `claude`, `copilot`, and `opencode` as CLI families.
+- The currently implemented adapter set MAY be smaller than the full product direction while adapters are added incrementally.
 - A thread MUST store the CLI session identity needed to resume the exact bound agent CLI session.
 - A thread MUST have a stable id, display name, project id, working directory, `agent_cli`, CLI session identity, created timestamp, last opened timestamp, and archive state.
 - A thread display name MUST be derived from the bound CLI session's reported name, title, or id.
 - A thread working directory MAY be the project root or a separate worktree directory.
-- A thread MUST NOT switch from `codex` to `claude`, or from `claude` to `codex`, after it is created.
-- New thread creation MUST ask the user whether to start a `codex` or `claude` session.
+- A thread MUST NOT switch from one CLI family to another after it is created.
+- New thread creation MUST ask the user which available CLI family to start.
 - New thread creation MUST launch the selected agent CLI in the thread working directory.
 - Reopening a thread MUST invoke the matching CLI resume behavior for the stored session identity.
 - Each thread MUST own one agent CLI session terminal while the app is running.
@@ -92,13 +95,13 @@ JSON configuration SHOULD include:
 
 - Every embedded terminal surface MUST use `libghostty`.
 - The app MUST provide one agent CLI session terminal per active thread.
-- The app MUST provide one global terminal.
-- The app MUST provide a right-panel terminal for `nvim`.
-- The app MUST provide a right-panel terminal for `lazygit`.
+- The app MUST provide one selected-thread bottom terminal.
+- The app MUST provide a right-panel terminal for `nvim`, falling back to `vim` and then `vi`.
+- The app MUST provide a right-panel terminal for `lazygit`, falling back to `git diff`.
 - Agent CLI session terminals MUST launch in the selected thread's working directory.
-- Agent CLI session terminals MUST invoke either `codex` or `claude` according to the selected thread's stored `agent_cli`.
+- Agent CLI session terminals MUST invoke the selected local CLI according to the selected thread's stored `agent_cli`.
 - Agent CLI session terminals MUST resume the selected thread's stored CLI session identity when reopening an existing thread.
-- The global terminal MUST launch in the user's home directory.
+- The bottom terminal MUST launch in the selected thread's working directory.
 - The `nvim` terminal MUST launch in the selected thread's working directory.
 - The `lazygit` terminal MUST launch in the selected thread's working directory.
 - Terminal sessions MUST preserve runtime state while the app is open.
@@ -110,11 +113,12 @@ JSON configuration SHOULD include:
 - The app MUST have a left project/thread sidebar.
 - The app MUST have a central agent CLI session terminal area.
 - The app MUST have a right tool panel.
-- The app MUST have a bottom global terminal.
+- The app MUST have a selected-thread bottom terminal.
 - The left sidebar MUST be collapsible.
 - The right tool panel MUST be collapsible.
-- The global terminal MUST be collapsed by default.
-- The global terminal MUST toggle with `Cmd+J`.
+- The bottom terminal MUST be collapsed by default per thread.
+- The bottom terminal MUST toggle with `Cmd+J`.
+- Toggling or resizing the bottom terminal MUST NOT mutate sidebar width, sidebar collapse state, project selection, thread selection, or left-panel content.
 - Every major panel MUST be resizeable.
 - Panel size and collapsed state SHOULD persist across app restarts.
 
@@ -167,13 +171,12 @@ If two threads happen to share the same panel state because they point at the sa
 
 ## Git Mode
 
-- Git mode MUST run `lazygit` inside the right panel.
+- Git mode MUST run `lazygit` inside the right panel when it is available.
 - Git mode MUST use the selected thread's working directory.
 - Git mode MUST NOT open a separate terminal window.
 - Git mode MUST use an embedded `libghostty` terminal.
 - `lazygit` MUST be detected from the user's `PATH`.
-- If `lazygit` is not installed or fails to launch, the app MUST show the raw terminal error output.
-- The app MUST NOT refine, rewrite, or replace the `lazygit` error message for the first version.
+- If `lazygit` is not installed, Git mode MUST fall back to `git diff`.
 - The app MUST NOT implement a custom source control UI for the first version.
 
 ## Global Navigation
@@ -196,18 +199,19 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 
 ## Agent CLI Scope
 
-- The first version MUST manage thread sessions through terminal-backed `codex` and `claude` CLI processes.
-- Each thread MUST be tied to exactly one `codex` or `claude` CLI session.
+- The first version MUST manage thread sessions through terminal-backed local CLI agent processes.
+- Each thread MUST be tied to exactly one CLI agent session.
 - The app MUST ask which agent CLI to invoke when starting a new thread.
 - The app MUST use the selected CLI session's reported name, title, or id as the canonical thread display name.
 - Closing and reopening a thread MUST resume the associated agent CLI session.
-- The app MUST NOT require users to manually run `codex`, `claude`, or resume commands for normal thread creation or reopening.
+- The app MUST NOT require users to manually run the selected CLI or resume commands for normal thread creation or reopening.
 - The app MUST NOT orchestrate multiple agent CLI sessions inside one thread for the first version.
+- The app MUST NOT mediate prompts, tool calls, model behavior, or agent decisions beyond launching and resuming the user's selected local CLI.
 
 ## External Tools
 
 - `nvim` SHOULD be detected from the user's `PATH`.
-- `codex` and `claude` MUST be detected from the user's `PATH` when their corresponding thread type is created or resumed.
+- `codex`, `claude`, `copilot`, and `opencode` SHOULD be detected from the user's `PATH` when their corresponding adapter is available.
 - `lazygit` MUST be detected from the user's `PATH`.
 - External tool failures MUST be visible in the embedded terminal surface.
 - Agent CLI launch or resume failures MUST be visible in the thread's agent CLI session terminal.
@@ -217,21 +221,21 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 
 - A user can create a project from a local directory.
 - A user can create multiple threads under a project.
-- Creating a thread asks the user whether to invoke `codex` or `claude`.
-- Each thread is bound to exactly one stored `codex` or `claude` CLI session.
+- Creating a thread asks the user which available CLI family to invoke.
+- Each thread is bound to exactly one stored CLI agent session.
 - A thread's visible name matches the bound CLI session's reported name, title, or id.
 - Closing and reopening a thread resumes the stored CLI session identity.
 - A thread can point at a project root or a separate worktree.
 - Each running thread has one agent CLI session terminal.
-- The global terminal is collapsed by default and toggles with `Cmd+J`.
-- The sidebar, right tool panel, and global terminal are resizeable.
+- The selected-thread bottom terminal is collapsed by default and toggles with `Cmd+J`.
+- The sidebar, right tool panel, and bottom terminal are resizeable.
 - The right tool panel is scoped to the active thread.
 - The right tool panel can switch between Files, `nvim`, and Git.
 - `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes.
 - `Cmd+[` and `Cmd+]` perform global back/forward navigation.
 - Hidden files appear in the file browser by default.
-- Opening a file launches `nvim` inside the right panel.
-- Opening Git mode launches `lazygit` inside the right panel.
-- `lazygit` is resolved from `PATH`, and launch errors are shown as-is.
+- Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
+- Opening Git mode launches `lazygit` or `git diff` inside the right panel.
+- `lazygit` is resolved from `PATH`, with `git diff` fallback when unavailable.
 - Project, thread, agent CLI session, index, archive, and layout metadata are stored in SQLite.
 - User-editable configuration is stored in JSON.

@@ -92,6 +92,50 @@ public struct ClaudeCLIAdapter: AgentCLIAdapter {
     }
 }
 
+public struct OpenCodeCLIAdapter: AgentCLIAdapter {
+    public let kind: AgentCLIKind = .opencode
+    public let executableName = "opencode"
+
+    public init() {}
+
+    public func invocation(
+        sessionIdentity: String?,
+        resolvedExecutablePath: String?
+    ) -> AgentCLIInvocation {
+        AgentCLIInvocation(
+            executableName: executableName,
+            resolvedExecutablePath: resolvedExecutablePath,
+            arguments: sessionIdentity.map { ["--session", $0] } ?? []
+        )
+    }
+
+    public func metadata(from output: String, terminalTitle: String?) -> AgentCLISessionMetadata? {
+        AgentCLIOutputParser.metadata(from: output, terminalTitle: terminalTitle, kind: kind)
+    }
+}
+
+public struct CopilotCLIAdapter: AgentCLIAdapter {
+    public let kind: AgentCLIKind = .copilot
+    public let executableName = "copilot"
+
+    public init() {}
+
+    public func invocation(
+        sessionIdentity: String?,
+        resolvedExecutablePath: String?
+    ) -> AgentCLIInvocation {
+        AgentCLIInvocation(
+            executableName: executableName,
+            resolvedExecutablePath: resolvedExecutablePath,
+            arguments: sessionIdentity.map { ["--resume=\($0)"] } ?? []
+        )
+    }
+
+    public func metadata(from output: String, terminalTitle: String?) -> AgentCLISessionMetadata? {
+        AgentCLIOutputParser.metadata(from: output, terminalTitle: terminalTitle, kind: kind)
+    }
+}
+
 public protocol AgentCLIExecutableResolving: Sendable {
     func executablePath(named executableName: String, environment: [String: String]) -> String?
 }
@@ -136,7 +180,12 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
     private let captureDirectory: URL?
 
     public init(
-        adapters: [any AgentCLIAdapter] = [CodexCLIAdapter(), ClaudeCLIAdapter()],
+        adapters: [any AgentCLIAdapter] = [
+            CodexCLIAdapter(),
+            ClaudeCLIAdapter(),
+            OpenCodeCLIAdapter(),
+            CopilotCLIAdapter()
+        ],
         resolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
         environment: [String: String] = ProcessInfo.processInfo.environment,
         captureDirectory: URL? = AgentCLISessionBindingService.defaultCaptureDirectory()
@@ -149,7 +198,7 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
 
     public static func defaultCaptureDirectory() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("AgentIDE", isDirectory: true)
+        return base.appendingPathComponent("YAAW", isDirectory: true)
             .appendingPathComponent("AgentCLICaptures", isDirectory: true)
     }
 
@@ -292,7 +341,7 @@ private enum AgentCLIOutputParser {
                 in: line,
                 lowercased: lowercased,
                 prefixes: [
-                    "agent_ide_session_id=",
+                    "yaaw_session_id=",
                     "session_id=",
                     "\(kind.rawValue)_session_id=",
                     "\(kind.rawValue) session id:",
@@ -303,7 +352,7 @@ private enum AgentCLIOutputParser {
                 in: line,
                 lowercased: lowercased,
                 prefixes: [
-                    "agent_ide_session_name=",
+                    "yaaw_session_name=",
                     "session_name=",
                     "\(kind.rawValue)_session_name=",
                     "\(kind.rawValue) session name:",
@@ -315,7 +364,7 @@ private enum AgentCLIOutputParser {
                 in: line,
                 lowercased: lowercased,
                 prefixes: [
-                    "agent_ide_session_title=",
+                    "yaaw_session_title=",
                     "session_title=",
                     "\(kind.rawValue)_session_title=",
                     "\(kind.rawValue) session title:",

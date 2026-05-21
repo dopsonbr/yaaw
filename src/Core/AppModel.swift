@@ -16,17 +16,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var selectedProjectID: UUID
     @Published public private(set) var selectedThreadID: UUID?
     @Published public private(set) var rightPanelModesByThreadID: [UUID: RightPanelMode]
+    @Published public private(set) var bottomTerminalExpandedThreadIDs: Set<UUID>
     @Published public private(set) var layoutState: LayoutState
     @Published public private(set) var fileBrowserState: FileBrowserState
 
     public let projectTerminal: TerminalSurfaceDescriptor
     public private(set) var navigationHistory: NavigationHistory
-    private let store: AgentIDEStore
+    private let store: YAAWStore
     private let terminalManager: TerminalSessionManaging
     private let agentCLIBindings: AgentCLISessionBindingService
     private let fileIndexer: FileIndexing
     private let externalToolResolver: any AgentCLIExecutableResolving
-    private let configuration: AgentIDEConfiguration
+    private let configuration: YAAWConfiguration
     private let diagnosticRecorder: DiagnosticEventRecording
     private let environment: [String: String]
     private let homeDirectory: URL
@@ -39,12 +40,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var pendingTerminalTitlesByThreadID: [UUID: String] = [:]
 
     public init(
-        store: AgentIDEStore = InMemoryAgentIDEStore.helloWorld(),
+        store: YAAWStore = InMemoryYAAWStore.helloWorld(),
         terminalManager: TerminalSessionManaging = PlaceholderTerminalSessionManager(),
         agentCLIBindings: AgentCLISessionBindingService = AgentCLISessionBindingService(),
         fileIndexer: FileIndexing = BackgroundFileIndexer(),
         externalToolResolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
-        configuration: AgentIDEConfiguration = AgentIDEConfiguration(),
+        configuration: YAAWConfiguration = YAAWConfiguration(),
         diagnosticRecorder: DiagnosticEventRecording = LoggerDiagnosticEventRecorder.shared,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -70,6 +71,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             : snapshot.threads.first { $0.projectID == selectedProjectID && !$0.isArchived }?.id
         self.selectedProjectID = selectedProjectID
         self.selectedThreadID = selectedThreadID
+        self.bottomTerminalExpandedThreadIDs = snapshot.bottomTerminalExpandedThreadIDs
         var rightPanelModesByThreadID = snapshot.rightPanelModesByThreadID
         if let selectedThreadID, rightPanelModesByThreadID[selectedThreadID] == nil {
             rightPanelModesByThreadID[selectedThreadID] = snapshot.selectedRightPanelMode
@@ -110,8 +112,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public var windowTitle: String {
-        guard let project = selectedProject else { return "Agent IDE" }
-        guard let thread = selectedThread else { return "\(project.displayName) - Agent IDE" }
+        guard let project = selectedProject else { return "YAAW" }
+        guard let thread = selectedThread else { return "\(project.displayName) - YAAW" }
         return "\(project.displayName) - \(thread.displayName)"
     }
 
@@ -128,8 +130,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         return rightPanelModesByThreadID[selectedThreadID] ?? .files
     }
 
+    public var isBottomTerminalExpanded: Bool {
+        selectedThreadID.map { bottomTerminalExpandedThreadIDs.contains($0) } ?? false
+    }
+
     public var isGlobalTerminalExpanded: Bool {
-        layoutState.isGlobalTerminalExpanded
+        isBottomTerminalExpanded
     }
 
     public var activeThreadsForSelectedProject: [AgentThread] {
@@ -162,14 +168,26 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectRightPanelMode(selectedRightPanelMode.previous)
     }
 
-    public func toggleGlobalTerminal() {
-        layoutState.isGlobalTerminalExpanded.toggle()
+    public func toggleBottomTerminal() {
+        guard let selectedThreadID else { return }
+        if bottomTerminalExpandedThreadIDs.contains(selectedThreadID) {
+            bottomTerminalExpandedThreadIDs.remove(selectedThreadID)
+        } else {
+            bottomTerminalExpandedThreadIDs.insert(selectedThreadID)
+        }
         recordDiagnostic(
             category: "Layout",
-            name: "global_terminal_toggled",
-            metadata: ["expanded": "\(layoutState.isGlobalTerminalExpanded)"]
+            name: "bottom_terminal_toggled",
+            metadata: [
+                "thread_id": selectedThreadID.uuidString,
+                "expanded": "\(bottomTerminalExpandedThreadIDs.contains(selectedThreadID))"
+            ]
         )
         persist()
+    }
+
+    public func toggleGlobalTerminal() {
+        toggleBottomTerminal()
     }
 
     public func toggleSidebarCollapsed() {
@@ -211,12 +229,22 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func terminalLaunchRequest(for role: TerminalRole) -> TerminalLaunchRequest? {
         switch role {
-        case .global:
+        case .bottom(let threadID):
+            guard let thread = activeThread(id: threadID) else { return nil }
+            guard isExistingDirectory(thread.workingDirectory) else {
+                recordTerminalLaunchFailure(
+                    role: role,
+                    path: thread.workingDirectory.path,
+                    reason: "missing_working_directory"
+                )
+                return nil
+            }
             return TerminalLaunchRequest(
-                role: .global,
-                title: "Global Terminal",
-                workingDirectory: homeDirectory,
-                command: [defaultShellPath()]
+                role: role,
+                title: "Bottom Terminal",
+                workingDirectory: thread.workingDirectory,
+                command: [defaultShellPath()],
+                agentCLI: thread.agentCLI
             )
         case .project(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
@@ -240,7 +268,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 role: role,
                 title: "\(thread.agentCLI.displayName) Terminal",
                 workingDirectory: thread.workingDirectory,
-                command: command
+                command: command,
+                agentCLI: thread.agentCLI
             )
         case .nvim(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
@@ -257,8 +286,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 role: role,
                 title: "nvim",
                 workingDirectory: thread.workingDirectory,
-                command: externalToolCommand(named: "nvim", arguments: arguments),
-                relaunchToken: nvimRelaunchTokensByThreadID[threadID]
+                command: externalToolCommand(preferredNames: ["nvim", "vim", "vi"], arguments: arguments),
+                relaunchToken: nvimRelaunchTokensByThreadID[threadID],
+                agentCLI: thread.agentCLI
             )
         case .lazygit(let threadID):
             guard let thread = activeThread(id: threadID) else { return nil }
@@ -274,7 +304,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 role: role,
                 title: "Git",
                 workingDirectory: thread.workingDirectory,
-                command: externalToolCommand(named: "lazygit")
+                command: gitToolCommand(),
+                agentCLI: thread.agentCLI
             )
         }
     }
@@ -300,8 +331,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     @discardableResult
+    public func activateSelectedBottomTerminal() -> TerminalSessionRecord? {
+        guard let selectedThreadID else { return nil }
+        return activateTerminal(role: .bottom(threadID: selectedThreadID))
+    }
+
     public func activateGlobalTerminal() -> TerminalSessionRecord? {
-        activateTerminal(role: .global)
+        activateSelectedBottomTerminal()
     }
 
     @discardableResult
@@ -687,16 +723,34 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         ] + arguments
     }
 
+    private func externalToolCommand(preferredNames: [String], arguments: [String] = []) -> [String] {
+        for name in preferredNames {
+            if let path = externalToolResolver.executablePath(named: name, environment: environment) {
+                return [path] + arguments
+            }
+        }
+        return [preferredNames[0]] + arguments
+    }
+
+    private func gitToolCommand() -> [String] {
+        if let lazygit = externalToolResolver.executablePath(named: "lazygit", environment: environment) {
+            return [lazygit]
+        }
+        let git = externalToolResolver.executablePath(named: "git", environment: environment) ?? "git"
+        return [git, "diff"]
+    }
+
     private func persist() {
         store.save(
-            AgentIDESnapshot(
+            YAAWSnapshot(
                 projects: projects,
                 threads: threads,
                 selectedProjectID: selectedProjectID,
                 selectedThreadID: selectedThreadID,
                 rightPanelModesByThreadID: rightPanelModesByThreadID,
                 selectedRightPanelMode: selectedRightPanelMode,
-                isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
+                bottomTerminalExpandedThreadIDs: bottomTerminalExpandedThreadIDs,
+                isGlobalTerminalExpanded: isBottomTerminalExpanded,
                 layoutState: layoutState,
                 fileIndexMetadataByThreadID: fileIndexMetadataByThreadID
             )
@@ -732,8 +786,8 @@ private extension TerminalRole {
         switch self {
         case .project:
             return "project"
-        case .global:
-            return "global"
+        case .bottom:
+            return "bottom"
         case .nvim:
             return "nvim"
         case .lazygit:

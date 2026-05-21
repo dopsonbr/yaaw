@@ -22,7 +22,7 @@ public final class LoggerDiagnosticEventRecorder: DiagnosticEventRecording, @unc
 
     private let subsystem: String
 
-    public init(subsystem: String = "dev.dopsonbr.AgentIDE") {
+    public init(subsystem: String = "dev.dopsonbr.YAAW") {
         self.subsystem = subsystem
     }
 

@@ -1,8 +1,8 @@
 # Design
 
-This document describes the first implementation shape for the native macOS Agent IDE.
+This document describes the first implementation shape for YAAW - Yet Another Agent Wrapper.
 
-The design favors a small, terminal-first app over a full IDE. The first version should make project/thread context, bound `codex` or `claude` session state, file discovery, lightweight `nvim` editing, and `lazygit` Git workflows feel native and reliable before adding larger editor or automation features.
+The design favors a small, terminal-first desktop wrapper over a full IDE or agent harness. YAAW should make project/thread context, bound local CLI agent session state, file discovery, lightweight `nvim` editing, and `lazygit` Git workflows feel native and reliable while leaving agent behavior inside the user's chosen CLI.
 
 ## Product Principles
 
@@ -10,6 +10,8 @@ The design favors a small, terminal-first app over a full IDE. The first version
 - Dracula theme everywhere.
 - Terminal-first workflow.
 - One agent CLI session terminal per thread.
+- Full-power local CLI agents, starting with `codex` and `claude` and expanding to `copilot` and `opencode`.
+- No prompt orchestration, tool-call mediation, or agent harness behavior.
 - `nvim` for file editing in the right panel.
 - `lazygit` for Git workflows in the right panel.
 - Resizeable and collapsible panels.
@@ -58,7 +60,7 @@ The shell has four resizeable regions:
 - Left project/thread sidebar.
 - Main agent CLI session terminal.
 - Right tool panel.
-- Bottom global terminal when expanded.
+- Selected-thread bottom terminal when expanded.
 
 Each region should use native split-view handles. Collapsed regions become narrow icon rails instead of disappearing from the user's mental model.
 
@@ -79,7 +81,7 @@ Project metadata should include:
 
 ### Thread
 
-A thread belongs to one project and owns one terminal-backed agent CLI session. Each thread is bound to exactly one `codex` or `claude` session.
+A thread belongs to one project and owns one terminal-backed agent CLI session. Each thread is bound to exactly one CLI family.
 
 Thread metadata should include:
 
@@ -87,7 +89,7 @@ Thread metadata should include:
 - Project id.
 - Display name.
 - Working directory.
-- Agent CLI kind, either `codex` or `claude`.
+- Agent CLI kind.
 - CLI session identity for resume.
 - Canonical CLI session name.
 - Created timestamp.
@@ -104,14 +106,14 @@ All embedded terminal surfaces should use `libghostty`.
 
 The MVP needs four terminal roles:
 
-- **Agent CLI session terminal:** one terminal per thread, launched in the thread working directory and running the bound `codex` or `claude` session.
+- **Agent CLI session terminal:** one terminal per thread, launched in the thread working directory and running the bound local CLI agent session.
 - **Global terminal:** shared terminal, launched in the user's home directory, collapsed by default.
 - **Editor terminal:** right-panel terminal used to run `nvim` for an opened file.
 - **Git terminal:** right-panel terminal used to run `lazygit` for the active project.
 
 Agent CLI session terminals should remain associated with their thread. Switching threads should restore the matching terminal surface rather than starting a new shell every time.
 
-Live terminal process state is runtime state. It should be kept while the app process is running, but the first version does not need to restore live PTY processes after app restart. Agent CLI resume metadata is durable state and should be stored so reopening a thread resumes the same `codex` or `claude` session.
+Live terminal process state is runtime state. It should be kept while the app process is running, but the first version does not need to restore live PTY processes after app restart. Agent CLI resume metadata is durable state and should be stored so reopening a thread resumes the same CLI agent session.
 
 ## Right Tool Panel
 
@@ -188,7 +190,7 @@ Terminal scrollback persistence is optional for the first version.
 
 | Shortcut | Behavior |
 | --- | --- |
-| `Cmd+J` | Toggle the global terminal. |
+| `Cmd+J` | Toggle the selected-thread bottom terminal. |
 | `Cmd+[` | Navigate back. |
 | `Cmd+]` | Navigate forward. |
 | `Cmd+Shift+[` | Cycle right-panel modes backward. |
@@ -200,27 +202,27 @@ Add more shortcuts only after the interaction model stabilizes.
 
 - SwiftUI is suitable for the high-level app shell, sidebar lists, modal sheets, and simple controls.
 - AppKit is likely needed for split-view control, focus handling, and terminal embedding.
-- `libghostty` should be the terminal rendering path for project, global, editor, and Git terminals.
-- Thread creation should prompt for `codex` or `claude`, then launch the selected CLI in the thread working directory.
+- `libghostty` should be the terminal rendering path for project, bottom, editor, and Git terminals.
+- Thread creation should prompt for an available CLI family, then launch the selected CLI in the thread working directory.
 - Thread reopening should use the stored CLI session identity to resume the bound session.
-- The right editor panel should use `nvim` rather than a custom editor.
-- The right Git panel should use `lazygit` rather than a custom source control UI.
+- The right editor panel should use `nvim`, with `vim` and `vi` fallbacks, rather than a custom editor.
+- The right Git panel should use `lazygit`, with `git diff` fallback, rather than a custom source control UI.
 - Keep all MVP state local and simple before adding sync, collaboration, or remote development.
 
 ## MVP Acceptance Criteria
 
 - A user can create a project from a local directory and give it a name.
 - A user can create and switch between threads under a project.
-- Creating a thread asks whether to invoke `codex` or `claude`.
+- Creating a thread asks which available CLI family to invoke.
 - Each thread gets one agent CLI session terminal in the thread working directory.
 - Each thread is named from the bound CLI session name, title, or id.
 - Reopening a thread resumes the bound CLI session identity.
-- The global terminal starts collapsed and toggles with `Cmd+J`.
-- The sidebar, right panel, and global terminal can be resized.
+- The selected-thread bottom terminal starts collapsed and toggles with `Cmd+J`.
+- The sidebar, right panel, and bottom terminal can be resized.
 - The sidebar and right panel can be collapsed.
 - The right panel shows project files and supports fuzzy matching.
-- Opening a file launches `nvim` inside the right panel.
-- Opening Git mode launches `lazygit` inside the right panel.
+- Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
+- Opening Git mode launches `lazygit` or `git diff` inside the right panel.
 - Users can switch the right panel between file tree, `nvim`, and `lazygit` by cycling tabs or clicking icons.
 - The full app uses the Dracula theme.
 - A user can archive inactive threads.

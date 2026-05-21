@@ -1,8 +1,8 @@
-import AgentIDEKit
+import YAAWKit
 import Foundation
 
 @main
-struct AgentIDEE2E {
+struct YAAWE2E {
     static func main() throws {
         let options = try E2EOptions(arguments: CommandLine.arguments)
         let runner = E2ERunner(artifactsDirectory: options.artifactsDirectory)
@@ -16,7 +16,7 @@ private struct E2EOptions {
     init(arguments: [String]) throws {
         guard let artifactsIndex = arguments.firstIndex(of: "--artifacts"),
               artifactsIndex + 1 < arguments.count else {
-            throw E2EFailure("usage: AgentIDEE2E --artifacts <directory>")
+            throw E2EFailure("usage: YAAWE2E --artifacts <directory>")
         }
         artifactsDirectory = URL(fileURLWithPath: arguments[artifactsIndex + 1], isDirectory: true)
     }
@@ -35,7 +35,7 @@ private final class E2ERunner {
         try resetArtifacts()
         try writeFixtureProject()
         try writeCommandDoubles()
-        try JSONConfigurationStore(path: paths.configPath).save(AgentIDEConfiguration())
+        try JSONConfigurationStore(path: paths.configPath).save(YAAWConfiguration())
 
         let focusedBehavior = try runFocusedBehaviorAssertions()
         try writeVisualStateDatabases(selectedThreadID: focusedBehavior.codexThreadID)
@@ -59,7 +59,7 @@ private final class E2ERunner {
             at: paths.projectDirectory.appendingPathComponent("src/App", isDirectory: true),
             withIntermediateDirectories: true
         )
-        try "Agent IDE E2E README\n".write(
+        try "YAAW E2E README\n".write(
             to: paths.projectDirectory.appendingPathComponent("README.md"),
             atomically: true,
             encoding: .utf8
@@ -91,12 +91,19 @@ private final class E2ERunner {
             contents: """
             #!/usr/bin/env bash
             set -euo pipefail
+            if [[ "${YAAW_E2E_KEYBOARD_PROBE:-}" == "1" ]]; then
+              printf 'YAAW_KEYBOARD_PROBE_READY\\n'
+              IFS= read -r line
+              printf 'YAAW_ENTER_RECEIVED=%s\\n' "$line"
+              sleep 1
+              exit 0
+            fi
             if [[ "${1:-}" == "resume" ]]; then
-              printf 'AGENT_IDE_SESSION_ID=%s\\n' "$2"
-              printf 'AGENT_IDE_SESSION_NAME=Codex Resumed %s\\n' "$2"
+              printf 'YAAW_SESSION_ID=%s\\n' "$2"
+              printf 'YAAW_SESSION_NAME=Codex Resumed %s\\n' "$2"
             else
-              printf 'AGENT_IDE_SESSION_ID=codex-e2e-001\\n'
-              printf 'AGENT_IDE_SESSION_NAME=Codex E2E Session\\n'
+              printf 'YAAW_SESSION_ID=codex-e2e-001\\n'
+              printf 'YAAW_SESSION_NAME=Codex E2E Session\\n'
             fi
             """
         )
@@ -106,11 +113,40 @@ private final class E2ERunner {
             #!/usr/bin/env bash
             set -euo pipefail
             if [[ "${1:-}" == "--resume" ]]; then
-              printf 'AGENT_IDE_SESSION_ID=%s\\n' "$2"
-              printf 'AGENT_IDE_SESSION_NAME=Claude Resumed %s\\n' "$2"
+              printf 'YAAW_SESSION_ID=%s\\n' "$2"
+              printf 'YAAW_SESSION_NAME=Claude Resumed %s\\n' "$2"
             else
-              printf 'AGENT_IDE_SESSION_ID=claude-e2e-001\\n'
-              printf 'AGENT_IDE_SESSION_NAME=Claude E2E Session\\n'
+              printf 'YAAW_SESSION_ID=claude-e2e-001\\n'
+              printf 'YAAW_SESSION_NAME=Claude E2E Session\\n'
+            fi
+            """
+        )
+        try writeExecutable(
+            named: "opencode",
+            contents: """
+            #!/usr/bin/env bash
+            set -euo pipefail
+            if [[ "${1:-}" == "--session" ]]; then
+              printf 'YAAW_SESSION_ID=%s\\n' "$2"
+              printf 'YAAW_SESSION_NAME=OpenCode Resumed %s\\n' "$2"
+            else
+              printf 'YAAW_SESSION_ID=opencode-e2e-001\\n'
+              printf 'YAAW_SESSION_NAME=OpenCode E2E Session\\n'
+            fi
+            """
+        )
+        try writeExecutable(
+            named: "copilot",
+            contents: """
+            #!/usr/bin/env bash
+            set -euo pipefail
+            if [[ "${1:-}" == --resume=* ]]; then
+              session="${1#--resume=}"
+              printf 'YAAW_SESSION_ID=%s\\n' "$session"
+              printf 'YAAW_SESSION_NAME=Copilot Resumed %s\\n' "$session"
+            else
+              printf 'YAAW_SESSION_ID=copilot-e2e-001\\n'
+              printf 'YAAW_SESSION_NAME=Copilot E2E Session\\n'
             fi
             """
         )
@@ -132,7 +168,34 @@ private final class E2ERunner {
             sleep 1
             """
         )
-        for tool in ["codex", "claude", "nvim"] {
+        try writeExecutable(
+            named: "vim",
+            contents: """
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'VIM_DOUBLE %s\\n' "${*:-}"
+            sleep 1
+            """
+        )
+        try writeExecutable(
+            named: "vi",
+            contents: """
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'VI_DOUBLE %s\\n' "${*:-}"
+            sleep 1
+            """
+        )
+        try writeExecutable(
+            named: "git",
+            contents: """
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'GIT_DOUBLE %s\\n' "${*:-}"
+            sleep 1
+            """
+        )
+        for tool in ["codex", "claude", "opencode", "copilot", "nvim", "vim", "vi", "git"] {
             let source = paths.binDirectory.appendingPathComponent(tool)
             let target = paths.missingToolBinDirectory.appendingPathComponent(tool)
             if fileManager.fileExists(atPath: target.path) {
@@ -160,16 +223,30 @@ private final class E2ERunner {
         try assert(model.selectedThread?.agentCLI == .codex, "codex choice created a codex-backed thread")
         model.recordAgentCLIOutput(
             threadID: codexThreadID,
-            output: "AGENT_IDE_SESSION_ID=codex-e2e-001\nAGENT_IDE_SESSION_NAME=Codex E2E Session\n"
+            output: "YAAW_SESSION_ID=codex-e2e-001\nYAAW_SESSION_NAME=Codex E2E Session\n"
         )
         try assert(model.selectedThread?.displayName == "Codex E2E Session", "codex CLI metadata renamed the thread")
 
         let claudeThreadID = try model.createThread(agentCLI: .claude)
         model.recordAgentCLIOutput(
             threadID: claudeThreadID,
-            output: "AGENT_IDE_SESSION_ID=claude-e2e-001\nAGENT_IDE_SESSION_NAME=Claude E2E Session\n"
+            output: "YAAW_SESSION_ID=claude-e2e-001\nYAAW_SESSION_NAME=Claude E2E Session\n"
         )
         try assert(model.selectedThread?.displayName == "Claude E2E Session", "claude CLI metadata renamed the thread")
+
+        let opencodeThreadID = try model.createThread(agentCLI: .opencode)
+        model.recordAgentCLIOutput(
+            threadID: opencodeThreadID,
+            output: "YAAW_SESSION_ID=opencode-e2e-001\nYAAW_SESSION_NAME=OpenCode E2E Session\n"
+        )
+        try assert(model.selectedThread?.displayName == "OpenCode E2E Session", "opencode CLI metadata renamed the thread")
+
+        let copilotThreadID = try model.createThread(agentCLI: .copilot)
+        model.recordAgentCLIOutput(
+            threadID: copilotThreadID,
+            output: "YAAW_SESSION_ID=copilot-e2e-001\nYAAW_SESSION_NAME=Copilot E2E Session\n"
+        )
+        try assert(model.selectedThread?.displayName == "Copilot E2E Session", "copilot CLI metadata renamed the thread")
 
         model.selectThread(id: codexThreadID)
         model.refreshSelectedFileBrowser()
@@ -199,10 +276,12 @@ private final class E2ERunner {
             "git request exists"
         )
         try assert(gitRequest.command.last?.hasSuffix("/lazygit") == true, "git mode launched lazygit")
-        try assertMissingLazygitFallsBackToRawCommand()
+        try assertMissingLazygitFallsBackToGitDiff()
+        try assertMissingNvimFallsBackToVimThenVi()
+        try assertImagePasteFormattingUsesAppOwnedStorage()
         try assertMissingDirectoryRecovery()
 
-        model.toggleGlobalTerminal()
+        model.toggleBottomTerminal()
         model.setRightPanelWidth(420)
         model.setSidebarWidth(280)
         model.toggleRightPanelCollapsed()
@@ -226,6 +305,26 @@ private final class E2ERunner {
         try assert(
             resumedClaudeMetadata.canonicalName == "Claude Resumed claude-e2e-001",
             "claude command double reported deterministic resume metadata"
+        )
+        let resumedOpenCodeMetadata = try service.captureMetadataByRunningCLI(
+            kind: .opencode,
+            resumeIdentity: "opencode-e2e-001",
+            workingDirectory: paths.projectDirectory,
+            environment: environment
+        )
+        try assert(
+            resumedOpenCodeMetadata.canonicalName == "OpenCode Resumed opencode-e2e-001",
+            "opencode command double reported deterministic resume metadata"
+        )
+        let resumedCopilotMetadata = try service.captureMetadataByRunningCLI(
+            kind: .copilot,
+            resumeIdentity: "copilot-e2e-001",
+            workingDirectory: paths.projectDirectory,
+            environment: environment
+        )
+        try assert(
+            resumedCopilotMetadata.canonicalName == "Copilot Resumed copilot-e2e-001",
+            "copilot command double reported deterministic resume metadata"
         )
 
         let reloadedModel = try makeModel(databasePath: databasePath)
@@ -259,7 +358,7 @@ private final class E2ERunner {
             let threadID = try model.createThread(agentCLI: .codex)
             model.recordAgentCLIOutput(
                 threadID: threadID,
-                output: "AGENT_IDE_SESSION_ID=codex-e2e-001\nAGENT_IDE_SESSION_NAME=Codex E2E Session\n"
+                output: "YAAW_SESSION_ID=codex-e2e-001\nYAAW_SESSION_NAME=Codex E2E Session\n"
             )
             if state == .missingDirectory {
                 let missingRoot = paths.missingDirectory
@@ -283,22 +382,24 @@ private final class E2ERunner {
                 model.selectRightPanelMode(.git)
             case .missingTool:
                 model.selectRightPanelMode(.git)
-            case .globalTerminal:
-                model.toggleGlobalTerminal()
+            case .bottomTerminal:
+                model.toggleBottomTerminal()
             case .panelCollapse:
                 model.toggleSidebarCollapsed()
                 model.toggleRightPanelCollapsed()
+            case .keyboardInput:
+                break
             }
         }
         _ = selectedThreadID
     }
 
-    private func assertMissingLazygitFallsBackToRawCommand() throws {
+    private func assertMissingLazygitFallsBackToGitDiff() throws {
         let databasePath = paths.stateDirectory.appendingPathComponent("missing-lazygit.sqlite")
-        let store = try SQLiteAgentIDEStore(databasePath: databasePath)
+        let store = try SQLiteYAAWStore(databasePath: databasePath)
         let configuration = JSONConfigurationStore(path: paths.configPath).load()
         var missingToolEnvironment = environment
-        missingToolEnvironment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        missingToolEnvironment["PATH"] = paths.missingToolBinDirectory.path + ":/usr/bin:/bin:/usr/sbin:/sbin"
         let model = AppModel(
             store: store,
             agentCLIBindings: AgentCLISessionBindingService(
@@ -313,7 +414,74 @@ private final class E2ERunner {
         let threadID = try model.createThread(agentCLI: .codex)
         model.selectRightPanelMode(.git)
         let request = try unwrap(model.terminalLaunchRequest(for: .lazygit(threadID: threadID)), "missing lazygit request")
-        try assert(request.command == ["lazygit"], "missing lazygit fell back to the raw command name")
+        try assert(
+            Array(request.command.suffix(2)) == ["git", "diff"]
+                || Array(request.command.suffix(2)) == [paths.missingToolBinDirectory.appendingPathComponent("git").path, "diff"]
+                || Array(request.command.suffix(2)) == ["/usr/bin/git", "diff"],
+            "missing lazygit fell back to git diff"
+        )
+    }
+
+    private func assertMissingNvimFallsBackToVimThenVi() throws {
+        let databasePath = paths.stateDirectory.appendingPathComponent("missing-nvim.sqlite")
+        let configuration = JSONConfigurationStore(path: paths.configPath).load()
+        let nvimPath = paths.missingToolBinDirectory.appendingPathComponent("nvim")
+        if fileManager.fileExists(atPath: nvimPath.path) {
+            try fileManager.removeItem(at: nvimPath)
+        }
+        var missingToolEnvironment = environment
+        missingToolEnvironment["PATH"] = paths.missingToolBinDirectory.path
+        let model = AppModel(
+            store: try SQLiteYAAWStore(databasePath: databasePath),
+            agentCLIBindings: AgentCLISessionBindingService(
+                environment: missingToolEnvironment,
+                captureDirectory: paths.captureDirectory
+            ),
+            fileIndexer: ImmediateFileIndexer(),
+            configuration: configuration,
+            environment: missingToolEnvironment
+        )
+        try model.createProject(displayName: "Missing nvim Project", rootDirectory: paths.projectDirectory)
+        let threadID = try model.createThread(agentCLI: .codex)
+        model.openFileInNvim(relativePath: "README.md")
+        let request = try unwrap(model.terminalLaunchRequest(for: .nvim(threadID: threadID)), "missing nvim request")
+        try assert(
+            Array(request.command.suffix(2)) == [paths.missingToolBinDirectory.appendingPathComponent("vim").path, "README.md"],
+            "missing nvim fell back to vim"
+        )
+
+        let vimPath = paths.missingToolBinDirectory.appendingPathComponent("vim")
+        try fileManager.removeItem(at: vimPath)
+        let viRequest = try unwrap(model.terminalLaunchRequest(for: .nvim(threadID: threadID)), "missing nvim and vim request")
+        try assert(
+            Array(viRequest.command.suffix(2)) == [paths.missingToolBinDirectory.appendingPathComponent("vi").path, "README.md"],
+            "missing nvim and vim fell back to vi"
+        )
+    }
+
+    private func assertImagePasteFormattingUsesAppOwnedStorage() throws {
+        let storeRoot = paths.root.appendingPathComponent("pasted-images", isDirectory: true)
+        let imageStore = YAAWPastedImageStore(rootDirectory: storeRoot)
+        let formatter = TerminalPasteTextFormatter()
+        let pngData = Data([
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82
+        ])
+
+        for cli in AgentCLIKind.allCases {
+            let imageURL = try imageStore.savePNGData(pngData, role: .project(threadID: UUID()))
+            let text = formatter.text(for: .image(imageURL), agentCLI: cli)
+            try assert(text == "Attached image: \(imageURL.path)", "\(cli.displayName) image paste text used CLI-neutral format")
+            try assert(imageURL.path.hasPrefix(storeRoot.path), "\(cli.displayName) image paste stored under app-owned root")
+            try assert(!imageURL.path.hasPrefix(paths.projectDirectory.path), "\(cli.displayName) image paste avoided project root")
+        }
     }
 
     private func assertMissingDirectoryRecovery() throws {
@@ -349,7 +517,7 @@ private final class E2ERunner {
 
     private func writeManifest(focusedBehavior: FocusedBehaviorResult) throws {
         let manifest = """
-        Agent IDE E2E artifacts
+        YAAW E2E artifacts
 
         focused_behavior_database=\(focusedBehavior.databasePath.path)
         codex_thread_id=\(focusedBehavior.codexThreadID.uuidString)
@@ -369,8 +537,8 @@ private final class E2ERunner {
     private var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = paths.binDirectory.path + ":" + (env["PATH"] ?? "")
-        env["AGENT_IDE_CONFIG_PATH"] = paths.configPath.path
-        env["AGENT_IDE_CAPTURE_DIRECTORY"] = paths.captureDirectory.path
+        env["YAAW_CONFIG_PATH"] = paths.configPath.path
+        env["YAAW_CAPTURE_DIRECTORY"] = paths.captureDirectory.path
         return env
     }
 
@@ -382,7 +550,7 @@ private final class E2ERunner {
     }
 
     private func makeModel(databasePath: URL) throws -> AppModel {
-        let store = try SQLiteAgentIDEStore(databasePath: databasePath)
+        let store = try SQLiteYAAWStore(databasePath: databasePath)
         let configuration = JSONConfigurationStore(path: paths.configPath).load()
         return AppModel(
             store: store,
@@ -442,8 +610,9 @@ private enum VisualState: String, CaseIterable {
     case git
     case missingDirectory = "missing-directory"
     case missingTool = "missing-tool"
-    case globalTerminal = "global-terminal"
+    case bottomTerminal = "bottom-terminal"
     case panelCollapse = "panel-collapse"
+    case keyboardInput = "keyboard-input"
 }
 
 private struct E2EFailure: Error, CustomStringConvertible {

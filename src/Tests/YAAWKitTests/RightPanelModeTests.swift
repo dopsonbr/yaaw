@@ -1,5 +1,5 @@
 import XCTest
-@testable import AgentIDEKit
+@testable import YAAWKit
 
 final class RightPanelModeTests: XCTestCase {
     func testRightPanelModeCyclesForwardInRequiredOrder() {

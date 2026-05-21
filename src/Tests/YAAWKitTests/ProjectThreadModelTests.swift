@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import AgentIDEKit
+@testable import YAAWKit
 
 final class ProjectThreadModelTests: XCTestCase {
     func testProjectPreservesPublicMetadata() {

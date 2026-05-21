@@ -8,7 +8,7 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - Scope shipped: explicit project/thread selection, navigation history, archive/unarchive actions, `AgentCLIKind`, per-thread right-panel modes, command routing, Codex Run action bootstrap, and generated bundle output ignored.
 - Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 14 tests; `./script/build_and_run.sh --verify` passed.
 - External review: `codex review --uncommitted` found and then cleared issues for optional CLI state, right-panel mode fallback, cross-project thread lists, generated `dist/`, and same-project reselection.
-- Screenshot/UX evidence: Computer Use inspected the running `AgentIDE` window and confirmed the Dracula shell rendered with visible project, thread, right-panel mode controls, and collapsed global terminal. Shell `screencapture` was blocked by local display capture permissions (`could not create image from display`), so no filesystem screenshot artifact was created for this plan.
+- Screenshot/UX evidence: Computer Use inspected the running `YAAW` window and confirmed the Dracula shell rendered with visible project, thread, right-panel mode controls, and collapsed global terminal. Shell `screencapture` was blocked by local display capture permissions (`could not create image from display`), so no filesystem screenshot artifact was created for this plan.
 - UX findings: Initial layout is readable, but still scaffold-like and fixed-width; deeper polish belongs to Plans 04, 10, and 11.
 - Lesson learned: External review needs a triage policy so critical current-plan issues are fixed immediately while low-priority or later-plan issues are tracked instead of creating a review loop.
 - Follow-up: Plan 02 should persist exactly the Plan 01 state through SQLite and JSON config without adding later-plan schema.
@@ -19,7 +19,7 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 - Scope shipped: SQLite store at an app-owned Application Support path, injectable test database paths, migration v1 for Plan 01 state, transactional snapshot saves, JSON configuration defaults with Dracula and ignore rules, and SQLite-backed app startup.
 - Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 21 tests; `./script/build_and_run.sh --verify` passed.
 - External review: `codex review --uncommitted` found current-plan issues for atomic migration, global-terminal expansion persistence, and invalid UUID crash handling; those were fixed. A later-plan CLI metadata persistence finding was recorded as D-001 in `docs/plans/DEFERRED_ISSUES.md`.
-- Screenshot/UX evidence: `docs/examples/screenshots/plan-02/sqlite-persistence.png`; Computer Use confirmed the running `AgentIDE` window renders the SQLite-backed Dracula scaffold with project/thread selection, Files mode, and collapsed global terminal.
+- Screenshot/UX evidence: `docs/examples/screenshots/plan-02/sqlite-persistence.png`; Computer Use confirmed the running `YAAW` window renders the SQLite-backed Dracula scaffold with project/thread selection, Files mode, and collapsed global terminal.
 - UX findings: No new visual regression from moving startup to SQLite. The UI still needs the real layout shell, resize/collapse behavior, and polished controls in later plans.
 - Lesson learned: A model field existing in Plan 01 does not mean every field belongs in SQLite v1; schema scope should follow the producer plan, with explicit deferrals for reviewer-visible future gaps.
 - Follow-up: Plan 03 must add migration v2 for `agent_cli` and prove `.claude` thread selection survives relaunch.
@@ -104,7 +104,7 @@ This file captures one retro per implementation plan in `docs/plans/implementati
 ## Plan 10: Behavior E2E Suite
 
 - Date: 2026-05-20
-- Scope shipped: `scripts/test-e2e.sh`, `AgentIDEE2E` fixture/assertion runner, deterministic `codex`/`claude`/`nvim`/`lazygit` command doubles, isolated SQLite/config/capture paths, real app-process visual screenshot states, UI-driven project/thread/tool/archive smoke journey, E2E launch environment overrides, and script documentation.
+- Scope shipped: `scripts/test-e2e.sh`, `YAAWE2E` fixture/assertion runner, deterministic `codex`/`claude`/`nvim`/`lazygit` command doubles, isolated SQLite/config/capture paths, real app-process visual screenshot states, UI-driven project/thread/tool/archive smoke journey, E2E launch environment overrides, and script documentation.
 - Verification: `./scripts/build.sh` passed; `./scripts/test.sh` passed with 64 tests; `./scripts/test-e2e.sh` passed and wrote screenshots under `.build/e2e-artifacts/latest/screenshots`; `./script/build_and_run.sh --verify` passed.
 - External review: Two `codex review --uncommitted` passes found current-plan gaps for failure screenshots and over-claiming model-driven checks as the full E2E journey. The script now captures a launch screenshot on runner failure, drives a real app-process UI journey, and the Swift runner is scoped as focused behavior assertions rather than full-journey UI coverage.
 - Screenshot/UX evidence: `docs/examples/screenshots/plan-10/e2e-files-mode.png`; generated E2E artifacts included launch, project creation, Files, `nvim`, Git, global terminal, panel collapse, and UI journey screenshots.

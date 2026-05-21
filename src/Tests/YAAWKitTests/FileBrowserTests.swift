@@ -1,9 +1,9 @@
 import XCTest
-@testable import AgentIDEKit
+@testable import YAAWKit
 
 final class FileBrowserTests: XCTestCase {
     func testDefaultIgnoreRulesSkipHeavyDirectoriesButKeepHiddenFiles() throws {
-        let matcher = FileBrowserIgnoreMatcher(rules: AgentIDEConfiguration.defaultIgnoreRules)
+        let matcher = FileBrowserIgnoreMatcher(rules: YAAWConfiguration.defaultIgnoreRules)
 
         XCTAssertTrue(matcher.shouldIgnore(relativePath: ".git", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "src/node_modules", isDirectory: true))
@@ -54,7 +54,7 @@ final class FileBrowserTests: XCTestCase {
         let result = try BackgroundFileIndexer.buildIndex(
             threadID: threadID,
             root: root,
-            ignoreRules: AgentIDEConfiguration.defaultIgnoreRules,
+            ignoreRules: YAAWConfiguration.defaultIgnoreRules,
             indexedAt: Date(timeIntervalSince1970: 123)
         )
 
@@ -67,7 +67,7 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(result.entries.contains(FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false)))
         XCTAssertFalse(result.entries.contains { $0.relativePath.contains("node_modules") })
         XCTAssertFalse(result.entries.contains { $0.relativePath.contains(".git") })
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".agent-ide").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".yaaw").path))
     }
 
     func testAppModelFileIndexingDoesNotBlockSelectionChanges() throws {
@@ -113,7 +113,7 @@ final class FileBrowserTests: XCTestCase {
 
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AgentIDEKitTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("YAAWKitTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -163,15 +163,15 @@ private struct AppModelFixtureForFiles {
     let firstThreadID = UUID()
     let secondThreadID = UUID()
     let firstRoot = FileManager.default.temporaryDirectory
-        .appendingPathComponent("AgentIDEKitTests-first-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("YAAWKitTests-first-\(UUID().uuidString)", isDirectory: true)
     let secondRoot = FileManager.default.temporaryDirectory
-        .appendingPathComponent("AgentIDEKitTests-second-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("YAAWKitTests-second-\(UUID().uuidString)", isDirectory: true)
 
-    var store: InMemoryAgentIDEStore {
+    var store: InMemoryYAAWStore {
         try? FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: secondRoot, withIntermediateDirectories: true)
-        return InMemoryAgentIDEStore(
-            snapshot: AgentIDESnapshot(
+        return InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: firstRoot)],
                 threads: [
                     AgentThread(

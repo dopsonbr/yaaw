@@ -42,7 +42,7 @@ Global back/forward navigation needs a concrete history model so `Cmd+[` and `Cm
 
 ## Acceptance Criteria
 
-- The app can represent at least one project, multiple threads, active selection, archived threads, right-panel mode, and global-terminal visibility in `AgentIDEKit`.
+- The app can represent at least one project, multiple threads, active selection, archived threads, right-panel mode, and global-terminal visibility in `YAAWKit`.
 - `AgentThread` exposes `agentCLI` so later plans can populate `codex` / `claude` selection without further model migrations.
 - Public action APIs exist for navigation, right-panel cycling, archive state, and global-terminal toggle.
 - Global back/forward navigation has a defined push/forward-truncate/bounded-depth model with passing tests.

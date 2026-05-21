@@ -1,6 +1,6 @@
 # Testing Requirements
 
-This document defines testing requirements for the first version of the native macOS Agent IDE.
+This document defines testing requirements for the first version of YAAW - Yet Another Agent Wrapper.
 
 The testing strategy is behavior-first. Tests should validate what a user can do and what the app visibly produces. Tests should avoid asserting private functions, implementation details, or framework-specific internals.
 
@@ -32,14 +32,15 @@ E2E tests MUST cover the primary user workflows:
 - Switch between project threads.
 - Use the agent CLI session terminal.
 - Close and reopen a thread and verify the stored agent CLI session identity is resumed.
-- Toggle the global terminal with `Cmd+J`.
+- Toggle the selected-thread bottom terminal with `Cmd+J`.
 - Resize major panels.
 - Collapse and expand the sidebar.
 - Collapse and expand the right tool panel.
 - Use the right panel in Files mode.
 - Search files with fuzzy matching.
-- Open a file in `nvim` mode.
-- Open Git mode and launch `lazygit`.
+- Open a file in editor mode and verify `nvim` fallback behavior.
+- Open Git mode and verify `lazygit` or `git diff`.
+- Paste an image into each supported CLI terminal and verify the inserted path points to app-owned storage.
 - Cycle right-panel modes with `Cmd+Shift+[` and `Cmd+Shift+]`.
 - Navigate globally with `Cmd+[` and `Cmd+]`.
 - Archive a thread.
@@ -63,10 +64,10 @@ This test MUST:
 10. Verify reopening resumes the stored Codex session identity.
 11. Open the right panel in Files mode.
 12. Search for a file.
-13. Open that file in `nvim`.
+13. Open that file in editor mode.
 14. Switch to Git mode.
-15. Launch `lazygit`.
-16. Toggle the global terminal.
+15. Launch `lazygit` or `git diff`.
+16. Toggle the selected-thread bottom terminal.
 17. Resize or collapse panels.
 18. Archive the thread.
 19. Quit and relaunch the app.
@@ -74,9 +75,9 @@ This test MUST:
 
 The full user journey test MUST NOT mock app storage, terminal surfaces, file browser behavior, or right-panel mode switching.
 
-The full user journey test MAY skip `lazygit` assertions when `lazygit` is not installed, but it MUST verify that the app surfaces the raw missing-tool error.
+The full user journey test MAY skip live `lazygit` assertions when `lazygit` is not installed, but it MUST verify fallback to `git diff`.
 
-The full user journey test MAY use test-safe `codex` and `claude` command doubles or controlled CLI fixtures so session names and resume identities can be asserted deterministically.
+The full user journey test MAY use test-safe command doubles or controlled CLI fixtures so session names and resume identities can be asserted deterministically.
 
 ## Inputs And Outputs
 
@@ -87,7 +88,7 @@ Examples of valid inputs:
 - User clicks.
 - Keyboard shortcuts.
 - Text typed into fields.
-- Agent CLI choice, either `codex` or `claude`.
+- Agent CLI choice from the available adapter set.
 - Controlled agent CLI session names and session identities.
 - Directory selections.
 - Files created in a temporary project.
@@ -105,7 +106,7 @@ Examples of valid outputs:
 - Visible terminal output.
 - Visible file search results.
 - Visible `nvim` state.
-- Visible `lazygit` or raw missing-tool error output.
+- Visible `lazygit` or `git diff` fallback output.
 - Persisted project/thread records after relaunch.
 - Screenshots captured by the test harness.
 
@@ -123,7 +124,7 @@ Screenshots MUST be captured:
 - In Files mode.
 - In `nvim` mode.
 - In Git mode.
-- With the global terminal expanded.
+- With the selected-thread bottom terminal expanded.
 - After panel resize or collapse behavior.
 
 Screenshots SHOULD be written to a deterministic test artifact directory.
@@ -147,17 +148,17 @@ Recommended tests:
 | Project creation | A selected directory becomes a named project in the sidebar. |
 | Codex thread creation | A new Codex thread appears under the selected project and gets an agent CLI session terminal. |
 | Claude thread creation | A new Claude thread appears under the selected project and gets an agent CLI session terminal. |
-| CLI choice prompt | Creating a thread asks whether to invoke `codex` or `claude`. |
+| CLI choice prompt | Creating a thread asks which available CLI family to invoke. |
 | Thread naming | The visible thread name matches the bound CLI session name, title, or id. |
 | Thread resume | Closing and reopening a thread resumes the stored CLI session identity. |
 | Thread switching | Switching threads changes the active agent CLI session terminal and right-panel context. |
 | Right-panel modes | Files, `nvim`, and Git modes can be selected by icon/tab. |
 | Right-panel shortcuts | `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes. |
 | Global navigation | `Cmd+[` and `Cmd+]` move through app navigation history. |
-| Global terminal | `Cmd+J` expands and collapses the global terminal. |
+| Bottom terminal | `Cmd+J` expands and collapses the selected-thread bottom terminal. |
 | File search | Hidden files are visible and fuzzy search returns expected matches. |
 | nvim open | Opening a file launches `nvim` in the right panel. |
-| lazygit open | Git mode launches `lazygit` or shows the raw missing-tool error. |
+| Git open | Git mode launches `lazygit` or falls back to `git diff`. |
 | Persistence | Project/thread/agent CLI session/layout metadata survive app relaunch. |
 
 ## Mocking Policy

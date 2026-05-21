@@ -1,18 +1,26 @@
 import Foundation
 
-public struct AgentIDESnapshot: Equatable, Sendable {
+public struct YAAWSnapshot: Equatable, Sendable {
     public var projects: [Project]
     public var threads: [AgentThread]
     public var selectedProjectID: UUID
     public var selectedThreadID: UUID?
     public var rightPanelModesByThreadID: [UUID: RightPanelMode]
     public var selectedRightPanelMode: RightPanelMode
+    public var bottomTerminalExpandedThreadIDs: Set<UUID>
     public var layoutState: LayoutState
     public var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
 
     public var isGlobalTerminalExpanded: Bool {
-        get { layoutState.isGlobalTerminalExpanded }
-        set { layoutState.isGlobalTerminalExpanded = newValue }
+        get { selectedThreadID.map { bottomTerminalExpandedThreadIDs.contains($0) } ?? false }
+        set {
+            guard let selectedThreadID else { return }
+            if newValue {
+                bottomTerminalExpandedThreadIDs.insert(selectedThreadID)
+            } else {
+                bottomTerminalExpandedThreadIDs.remove(selectedThreadID)
+            }
+        }
     }
 
     public init(
@@ -22,6 +30,7 @@ public struct AgentIDESnapshot: Equatable, Sendable {
         selectedThreadID: UUID?,
         rightPanelModesByThreadID: [UUID: RightPanelMode] = [:],
         selectedRightPanelMode: RightPanelMode,
+        bottomTerminalExpandedThreadIDs: Set<UUID> = [],
         isGlobalTerminalExpanded: Bool,
         layoutState: LayoutState? = nil,
         fileIndexMetadataByThreadID: [UUID: FileIndexMetadata] = [:]
@@ -32,33 +41,37 @@ public struct AgentIDESnapshot: Equatable, Sendable {
         self.selectedThreadID = selectedThreadID
         self.rightPanelModesByThreadID = rightPanelModesByThreadID
         self.selectedRightPanelMode = selectedRightPanelMode
+        self.bottomTerminalExpandedThreadIDs = bottomTerminalExpandedThreadIDs
         self.layoutState = layoutState ?? LayoutState(isGlobalTerminalExpanded: isGlobalTerminalExpanded)
-        self.layoutState.isGlobalTerminalExpanded = isGlobalTerminalExpanded
+        if isGlobalTerminalExpanded, let selectedThreadID {
+            self.bottomTerminalExpandedThreadIDs.insert(selectedThreadID)
+        }
+        self.layoutState.isGlobalTerminalExpanded = false
         self.fileIndexMetadataByThreadID = fileIndexMetadataByThreadID
     }
 }
 
-public protocol AgentIDEStore: AnyObject {
-    func load() -> AgentIDESnapshot
-    func save(_ snapshot: AgentIDESnapshot)
+public protocol YAAWStore: AnyObject {
+    func load() -> YAAWSnapshot
+    func save(_ snapshot: YAAWSnapshot)
 }
 
-public final class InMemoryAgentIDEStore: AgentIDEStore {
-    private var snapshot: AgentIDESnapshot
+public final class InMemoryYAAWStore: YAAWStore {
+    private var snapshot: YAAWSnapshot
 
-    public init(snapshot: AgentIDESnapshot) {
+    public init(snapshot: YAAWSnapshot) {
         self.snapshot = snapshot
     }
 
-    public func load() -> AgentIDESnapshot {
+    public func load() -> YAAWSnapshot {
         snapshot
     }
 
-    public func save(_ snapshot: AgentIDESnapshot) {
+    public func save(_ snapshot: YAAWSnapshot) {
         self.snapshot = snapshot
     }
 
-    public static func helloWorld() -> InMemoryAgentIDEStore {
+    public static func helloWorld() -> InMemoryYAAWStore {
         let projectID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let threadID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         let createdAt = Date(timeIntervalSince1970: 0)
@@ -82,8 +95,8 @@ public final class InMemoryAgentIDEStore: AgentIDEStore {
             isArchived: false
         )
 
-        return InMemoryAgentIDEStore(
-            snapshot: AgentIDESnapshot(
+        return InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
                 projects: [project],
                 threads: [thread],
                 selectedProjectID: projectID,

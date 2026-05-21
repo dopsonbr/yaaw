@@ -2,9 +2,10 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="AgentIDE"
-BUNDLE_ID="dev.dopsonbr.AgentIDE"
+APP_NAME="YAAW"
+BUNDLE_ID="dev.dopsonbr.YAAW"
 MIN_SYSTEM_VERSION="26.0"
+BUILD_CONFIGURATION="${YAAW_BUILD_CONFIGURATION:-debug}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -12,19 +13,30 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
+APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
+APP_ICON="$ROOT_DIR/resources/YAAW.icns"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 cd "$ROOT_DIR"
-swift build
-BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+if [[ "$BUILD_CONFIGURATION" != "debug" ]]; then
+  swift build -c "$BUILD_CONFIGURATION"
+  BUILD_BINARY="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)/$APP_NAME"
+else
+  swift build
+  BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+fi
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS"
+mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+
+if [[ -f "$APP_ICON" ]]; then
+  cp "$APP_ICON" "$APP_RESOURCES/YAAW.icns"
+fi
 
 VENDORED_GHOSTTY="$ROOT_DIR/Vendor/Ghostty"
 if [[ -d "$VENDORED_GHOSTTY" ]]; then
@@ -48,6 +60,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
+  <key>CFBundleIconFile</key>
+  <string>YAAW</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
   <key>CFBundlePackageType</key>
@@ -98,6 +112,7 @@ case "$MODE" in
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--build-only]" >&2
+    echo "set YAAW_BUILD_CONFIGURATION=release for a release-staged app bundle" >&2
     exit 2
     ;;
 esac

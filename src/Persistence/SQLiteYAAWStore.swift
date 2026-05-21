@@ -8,8 +8,8 @@ public enum SQLiteStoreError: Error, Equatable {
     case missingDatabase
 }
 
-public final class SQLiteAgentIDEStore: AgentIDEStore {
-    public static let schemaVersion = 5
+public final class SQLiteYAAWStore: YAAWStore {
+    public static let schemaVersion = 7
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -38,21 +38,21 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
         sqlite3_close(database)
     }
 
-    public static func defaultStore() throws -> AgentIDEStore {
-        try SQLiteAgentIDEStore(databasePath: defaultDatabasePath())
+    public static func defaultStore() throws -> YAAWStore {
+        try SQLiteYAAWStore(databasePath: defaultDatabasePath())
     }
 
     public static func defaultDatabasePath() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("AgentIDE", isDirectory: true)
-            .appendingPathComponent("AgentIDE.sqlite")
+        return base.appendingPathComponent("YAAW", isDirectory: true)
+            .appendingPathComponent("YAAW.sqlite")
     }
 
-    public func load() -> AgentIDESnapshot {
+    public func load() -> YAAWSnapshot {
         do {
             let projects = try loadProjects()
             if projects.isEmpty {
-                let seed = InMemoryAgentIDEStore.helloWorld().load()
+                let seed = InMemoryYAAWStore.helloWorld().load()
                 save(seed)
                 return seed
             }
@@ -68,28 +68,31 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                 fallbackGlobalTerminalExpanded: fallbackGlobalTerminalExpanded
             )
             let fileIndexMetadata = try loadFileIndexMetadata()
+            let bottomTerminalExpandedThreadIDs = try loadBottomTerminalExpandedThreadIDs()
 
-            return AgentIDESnapshot(
+            return YAAWSnapshot(
                 projects: projects,
                 threads: threads,
                 selectedProjectID: selectedProjectID,
                 selectedThreadID: selectedThreadID,
                 rightPanelModesByThreadID: modes,
                 selectedRightPanelMode: selectedMode,
+                bottomTerminalExpandedThreadIDs: bottomTerminalExpandedThreadIDs,
                 isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
                 layoutState: layoutState,
                 fileIndexMetadataByThreadID: fileIndexMetadata
             )
         } catch {
             recordSQLiteError(name: "sqlite_load_failed", error: error)
-            return InMemoryAgentIDEStore.helloWorld().load()
+            return InMemoryYAAWStore.helloWorld().load()
         }
     }
 
-    public func save(_ snapshot: AgentIDESnapshot) {
+    public func save(_ snapshot: YAAWSnapshot) {
         do {
             try transaction {
                 try execute("DELETE FROM right_panel_modes")
+                try execute("DELETE FROM bottom_terminal_state")
                 try execute("DELETE FROM file_index_metadata")
                 try execute("DELETE FROM layout_state")
                 try execute("DELETE FROM app_state")
@@ -104,6 +107,9 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
                 }
                 for (threadID, mode) in snapshot.rightPanelModesByThreadID {
                     try insertRightPanelMode(threadID: threadID, mode: mode)
+                }
+                for threadID in snapshot.bottomTerminalExpandedThreadIDs {
+                    try insertBottomTerminalState(threadID: threadID, isExpanded: true)
                 }
                 for metadata in snapshot.fileIndexMetadataByThreadID.values {
                     try insertFileIndexMetadata(metadata)
@@ -124,7 +130,7 @@ public final class SQLiteAgentIDEStore: AgentIDEStore {
     }
 }
 
-private extension SQLiteAgentIDEStore {
+private extension SQLiteYAAWStore {
     func recordSQLiteError(name: String, error: Error) {
         diagnosticRecorder.record(
             DiagnosticEvent(
@@ -181,6 +187,19 @@ private extension SQLiteAgentIDEStore {
             try transaction {
                 try createFileIndexMetadataSchema()
                 try execute("PRAGMA user_version = 5")
+            }
+        }
+        if currentVersion < 6 {
+            try transaction {
+                try migrateToVersionSixAgentCLIValues()
+                try execute("PRAGMA user_version = 6")
+            }
+        }
+        if currentVersion < 7 {
+            try transaction {
+                try createBottomTerminalStateSchema()
+                try seedBottomTerminalStateFromLegacyLayout()
+                try execute("PRAGMA user_version = 7")
             }
         }
     }
@@ -295,6 +314,77 @@ private extension SQLiteAgentIDEStore {
         )
     }
 
+    func migrateToVersionSixAgentCLIValues() throws {
+        try execute("PRAGMA defer_foreign_keys = ON")
+        try execute(
+            """
+            CREATE TABLE threads_v6 (
+                id TEXT PRIMARY KEY NOT NULL,
+                display_name TEXT NOT NULL,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                working_directory TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                last_opened_at REAL NOT NULL,
+                is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1)),
+                agent_cli TEXT NOT NULL CHECK (agent_cli IN ('codex', 'claude', 'opencode', 'copilot')),
+                session_identity TEXT,
+                canonical_session_name TEXT
+            )
+            """
+        )
+        try execute(
+            """
+            INSERT INTO threads_v6 (
+                id,
+                display_name,
+                project_id,
+                working_directory,
+                created_at,
+                last_opened_at,
+                is_archived,
+                agent_cli,
+                session_identity,
+                canonical_session_name
+            )
+            SELECT
+                id,
+                display_name,
+                project_id,
+                working_directory,
+                created_at,
+                last_opened_at,
+                is_archived,
+                agent_cli,
+                session_identity,
+                canonical_session_name
+            FROM threads
+            """
+        )
+        try execute("DROP TABLE threads")
+        try execute("ALTER TABLE threads_v6 RENAME TO threads")
+    }
+
+    func createBottomTerminalStateSchema() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS bottom_terminal_state (
+                thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                is_expanded INTEGER NOT NULL CHECK (is_expanded IN (0, 1))
+            )
+            """
+        )
+    }
+
+    func seedBottomTerminalStateFromLegacyLayout() throws {
+        let isExpanded = try loadLayoutBool(key: "global_terminal_expanded")
+            ?? (try loadBool(key: "is_global_terminal_expanded") ?? false)
+        guard isExpanded,
+              let selectedThreadID = try loadUUID(key: "selected_thread_id") else {
+            return
+        }
+        try insertBottomTerminalState(threadID: selectedThreadID, isExpanded: true)
+    }
+
     func userVersion() throws -> Int {
         try querySingleInt("PRAGMA user_version") ?? 0
     }
@@ -407,6 +497,16 @@ private extension SQLiteAgentIDEStore {
         try stepDone(statement)
     }
 
+    func insertBottomTerminalState(threadID: UUID, isExpanded: Bool) throws {
+        let statement = try prepare(
+            "INSERT INTO bottom_terminal_state (thread_id, is_expanded) VALUES (?, ?)"
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(threadID.uuidString, at: 1, in: statement)
+        sqlite3_bind_int(statement, 2, isExpanded ? 1 : 0)
+        try stepDone(statement)
+    }
+
     func insertAppState(key: String, value: String) throws {
         let statement = try prepare("INSERT INTO app_state (key, value) VALUES (?, ?)")
         defer { sqlite3_finalize(statement) }
@@ -458,6 +558,20 @@ private extension SQLiteAgentIDEStore {
         sqlite3_bind_int(statement, 4, Int32(metadata.fileCount))
         sqlite3_bind_int(statement, 5, Int32(metadata.ignoredDirectoryCount))
         try stepDone(statement)
+    }
+
+    func loadBottomTerminalExpandedThreadIDs() throws -> Set<UUID> {
+        let statement = try prepare(
+            "SELECT thread_id FROM bottom_terminal_state WHERE is_expanded = 1"
+        )
+        defer { sqlite3_finalize(statement) }
+        var threadIDs = Set<UUID>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let id = UUID(uuidString: text(at: 0, in: statement)) {
+                threadIDs.insert(id)
+            }
+        }
+        return threadIDs
     }
 
     func loadProjects() throws -> [Project] {

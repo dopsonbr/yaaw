@@ -1,4 +1,4 @@
-import AgentIDEKit
+import YAAWKit
 import AppKit
 import SwiftUI
 
@@ -66,16 +66,16 @@ struct RootView: View {
                     }
                 }
 
-                GlobalTerminalBar(
-                    isExpanded: model.isGlobalTerminalExpanded,
+                BottomTerminalBar(
+                    isExpanded: model.isBottomTerminalExpanded,
                     height: model.layoutState.globalTerminalHeight,
-                    request: model.terminalLaunchRequest(for: .global),
-                    onToggle: model.toggleGlobalTerminal,
+                    request: selectedBottomTerminalRequest,
+                    onToggle: model.toggleBottomTerminal,
                     onResize: { delta in
                         model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
                     },
                     onAppearExpanded: {
-                        model.activateGlobalTerminal()
+                        model.activateSelectedBottomTerminal()
                     }
                 )
             }
@@ -86,6 +86,11 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             GhosttyTerminalRuntime.closeAll()
         }
+    }
+
+    private var selectedBottomTerminalRequest: TerminalLaunchRequest? {
+        guard let selectedThreadID = model.selectedThreadID else { return nil }
+        return model.terminalLaunchRequest(for: .bottom(threadID: selectedThreadID))
     }
 }
 
@@ -98,7 +103,7 @@ private struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Agent IDE")
+            Text("YAAW")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(dracula(.purple))
 
@@ -357,16 +362,13 @@ private struct ThreadChoiceSheet: View {
                 .foregroundStyle(dracula(.comment))
 
             HStack(spacing: 12) {
-                Button("Codex") {
-                    createThread(agentCLI: .codex)
+                ForEach(AgentCLIKind.allCases) { agentCLI in
+                    Button(agentCLI.displayName) {
+                        createThread(agentCLI: agentCLI)
+                    }
+                    .keyboardShortcut(agentCLI == AgentCLIKind.allCases.first ? .defaultAction : nil)
+                    .accessibilityLabel("Create \(agentCLI.displayName) thread")
                 }
-                .keyboardShortcut(.defaultAction)
-                .accessibilityLabel("Create Codex thread")
-
-                Button("Claude") {
-                    createThread(agentCLI: .claude)
-                }
-                .accessibilityLabel("Create Claude thread")
             }
 
             if let errorMessage {
@@ -891,7 +893,7 @@ private struct TerminalPlaceholderView: View {
     }
 }
 
-private struct GlobalTerminalBar: View {
+private struct BottomTerminalBar: View {
     let isExpanded: Bool
     let height: Double
     let request: TerminalLaunchRequest?
@@ -903,14 +905,14 @@ private struct GlobalTerminalBar: View {
         VStack(alignment: .leading, spacing: 8) {
             if isExpanded {
                 HorizontalResizeHandle(
-                    accessibilityLabel: "Resize global terminal",
+                    accessibilityLabel: "Resize bottom terminal",
                     onDrag: onResize
                 )
             }
 
             Button(action: onToggle) {
                 HStack {
-                    Text("Global Terminal")
+                    Text("Bottom Terminal")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(dracula(.purple))
 
@@ -922,12 +924,12 @@ private struct GlobalTerminalBar: View {
                 }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isExpanded ? "Collapse global terminal" : "Expand global terminal")
+            .accessibilityLabel(isExpanded ? "Collapse bottom terminal" : "Expand bottom terminal")
 
             if isExpanded {
                 TerminalPlaceholderView(
                     request: request,
-                    unavailableMessage: "Terminal unavailable for the user home directory"
+                    unavailableMessage: "Terminal unavailable for the selected thread"
                 )
                     .frame(height: height)
                     .onAppear(perform: onAppearExpanded)

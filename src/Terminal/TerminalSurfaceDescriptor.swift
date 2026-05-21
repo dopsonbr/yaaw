@@ -2,7 +2,7 @@ import Foundation
 
 public enum TerminalSurfaceKind: String, Equatable, Sendable {
     case project
-    case global
+    case bottom
     case nvim
     case lazygit
 }

@@ -1,6 +1,6 @@
 # Agent Guidance
 
-This repo contains a native macOS Agent IDE scaffold. Keep changes aligned with the documented hierarchy and requirements.
+This repo contains YAAW - Yet Another Agent Wrapper, a native macOS desktop wrapper for local CLI agents. Keep changes aligned with the documented hierarchy and requirements.
 
 ## Repo Rules
 
@@ -13,6 +13,7 @@ This repo contains a native macOS Agent IDE scaffold. Keep changes aligned with 
 - Do not write app metadata into user project directories.
 - Preserve Apple Silicon/latest macOS scope unless requirements change.
 - Preserve Dracula as the initial visual system.
+- Preserve the "not an agent harness" boundary unless requirements change.
 - Prefer E2E behavior tests over internals tests.
 
 ## Implementation Bias
@@ -20,4 +21,4 @@ This repo contains a native macOS Agent IDE scaffold. Keep changes aligned with 
 - Keep terminal, persistence, indexing, theme, and UI layout concerns separated.
 - Use `libghostty` for embedded terminal surfaces.
 - Keep right-panel state scoped to the selected thread.
-- Treat `nvim` and `lazygit` as terminal-backed right-panel tools.
+- Treat `nvim` and `lazygit` as terminal-backed right-panel tools, with `vim`/`vi` and `git diff` fallbacks.

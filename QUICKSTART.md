@@ -1,6 +1,6 @@
 # Quickstart
 
-This repo is a SwiftPM-only native macOS scaffold for Agent IDE. Use the
+This repo is a SwiftPM-only native macOS scaffold for YAAW - Yet Another Agent Wrapper. Use the
 repository scripts for build, run, and test workflows.
 
 ## Requirements
@@ -17,7 +17,7 @@ Build:
 scripts/build.sh
 ```
 
-Run the Hello World app shell:
+Run the YAAW app shell:
 
 ```sh
 scripts/run.sh
@@ -37,9 +37,9 @@ scripts/check.sh
 
 ## Layout
 
-- `Package.swift` defines the `AgentIDE` executable and `AgentIDEKit` library.
+- `Package.swift` defines the `YAAW` executable and `YAAWKit` library.
 - `src/App/` contains the thin SwiftUI app entrypoint and root composition.
 - `src/Core/`, `src/Projects/`, `src/Threads/`, `src/RightPanel/`,
   `src/FileBrowser/`, `src/Persistence/`, `src/Terminal/`, and `src/Theme/`
   contain compile-ready Hello World placeholders.
-- `src/Tests/AgentIDEKitTests/` contains public behavior tests.
+- `src/Tests/YAAWKitTests/` contains public behavior tests.

@@ -2,5 +2,5 @@
 
 - Run `lazygit` inside the right panel through an embedded terminal.
 - Resolve `lazygit` from the user's `PATH`.
-- Show raw missing-tool or launch errors as terminal output.
+- Fall back to `git diff` when `lazygit` is unavailable.
 - Do not implement a custom source control UI for the MVP.

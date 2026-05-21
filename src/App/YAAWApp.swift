@@ -1,15 +1,15 @@
-import AgentIDEKit
+import YAAWKit
 import SwiftUI
 
 @main
-struct AgentIDEApp: App {
+struct YAAWApp: App {
     @StateObject private var model: AppModel
     private let startupError: Error?
     private let databasePath: URL
 
     init() {
         var environment = ProcessInfo.processInfo.environment
-        if let pathOverride = environment["AGENT_IDE_PATH"] {
+        if let pathOverride = environment["YAAW_PATH"] {
             environment["PATH"] = pathOverride
         }
         let diagnostics = LoggerDiagnosticEventRecorder.shared
@@ -17,7 +17,7 @@ struct AgentIDEApp: App {
         self.databasePath = databasePath
         do {
             diagnostics.record(DiagnosticEvent(category: "Lifecycle", name: "app_starting"))
-            let store = try SQLiteAgentIDEStore(databasePath: databasePath, diagnosticRecorder: diagnostics)
+            let store = try SQLiteYAAWStore(databasePath: databasePath, diagnosticRecorder: diagnostics)
             let configuration = JSONConfigurationStore(path: Self.configurationPath(environment: environment)).load()
             let agentCLIBindings = AgentCLISessionBindingService(
                 environment: environment,
@@ -42,13 +42,13 @@ struct AgentIDEApp: App {
                     metadata: ["error": String(describing: error)]
                 )
             )
-            _model = StateObject(wrappedValue: AppModel(store: InMemoryAgentIDEStore.helloWorld()))
+            _model = StateObject(wrappedValue: AppModel(store: InMemoryYAAWStore.helloWorld()))
             startupError = error
         }
     }
 
     var body: some Scene {
-        WindowGroup("Agent IDE") {
+        WindowGroup("YAAW") {
             Group {
                 if let startupError {
                     PersistenceStartupFailureView(
@@ -65,8 +65,8 @@ struct AgentIDEApp: App {
         .commands {
             if startupError == nil {
                 CommandMenu("Terminal") {
-                    Button("Toggle Global Terminal") {
-                        model.toggleGlobalTerminal()
+                    Button("Toggle Bottom Terminal") {
+                        model.toggleBottomTerminal()
                     }
                     .keyboardShortcut("j", modifiers: [.command])
                 }
@@ -109,19 +109,19 @@ struct AgentIDEApp: App {
     }
 
     private static func databasePath(environment: [String: String]) -> URL {
-        environment["AGENT_IDE_DATABASE_PATH"]
+        environment["YAAW_DATABASE_PATH"]
             .map { URL(fileURLWithPath: $0) }
-            ?? SQLiteAgentIDEStore.defaultDatabasePath()
+            ?? SQLiteYAAWStore.defaultDatabasePath()
     }
 
     private static func configurationPath(environment: [String: String]) -> URL {
-        environment["AGENT_IDE_CONFIG_PATH"]
+        environment["YAAW_CONFIG_PATH"]
             .map { URL(fileURLWithPath: $0) }
             ?? JSONConfigurationStore.defaultPath()
     }
 
     private static func captureDirectory(environment: [String: String]) -> URL? {
-        environment["AGENT_IDE_CAPTURE_DIRECTORY"]
+        environment["YAAW_CAPTURE_DIRECTORY"]
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? AgentCLISessionBindingService.defaultCaptureDirectory()
     }
@@ -133,7 +133,7 @@ private struct PersistenceStartupFailureView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Agent IDE")
+            Text("YAAW")
                 .font(.title.weight(.semibold))
                 .foregroundStyle(dracula(.purple))
 

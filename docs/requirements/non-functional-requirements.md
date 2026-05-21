@@ -1,6 +1,6 @@
 # Non-Functional Requirements
 
-This document defines quality requirements for the first version of the native macOS Agent IDE.
+This document defines quality requirements for the first version of YAAW - Yet Another Agent Wrapper.
 
 Requirements use:
 
@@ -29,7 +29,7 @@ Requirements use:
 
 - The app MUST preserve project, thread, agent CLI session, archive, and layout metadata across app restarts.
 - The app MUST tolerate missing project directories and show a clear app-level state when a directory no longer exists.
-- The app MUST tolerate missing external tools such as `codex`, `claude`, `nvim`, or `lazygit`.
+- The app MUST tolerate missing external tools such as `codex`, `claude`, `copilot`, `opencode`, `nvim`, or `lazygit` when their corresponding adapter or panel is available.
 - External tool errors MUST be visible without crashing the app.
 - Agent CLI sessions and terminal sessions MUST remain isolated by thread while the app is running.
 - The app SHOULD recover cleanly from terminal process exits.
@@ -46,8 +46,8 @@ Requirements use:
 
 - The app MUST keep all first-version project and thread metadata local.
 - The app MUST keep thread agent CLI selection and CLI session identity local.
-- The app MUST NOT send project paths, file names, terminal output, agent CLI session metadata, or repository content to a remote service outside of the user's chosen local `codex` or `claude` CLI process.
-- The app itself MUST NOT require network access for core first-version workflows outside of any network behavior performed by the user's chosen local `codex` or `claude` CLI process.
+- The app MUST NOT send project paths, file names, terminal output, agent CLI session metadata, or repository content to a remote service outside of the user's chosen local CLI process.
+- The app itself MUST NOT require network access for core first-version workflows outside of any network behavior performed by the user's chosen local CLI process.
 - The app MUST use the user's local shell and local tools.
 - The app SHOULD avoid storing terminal scrollback unless explicitly added in a later plan.
 
@@ -65,7 +65,7 @@ Requirements use:
 - The app MUST make the active right-panel mode visible.
 - The app MUST keep Files, `nvim`, and Git mode controls available in the right panel.
 - The app MUST use familiar shortcuts for global back/forward navigation.
-- The app MUST use `Cmd+J` for the global terminal.
+- The app MUST use `Cmd+J` for the selected-thread bottom terminal.
 - The app SHOULD remember the user's last selected project, thread, panel layout, and right-panel mode.
 - The app SHOULD avoid modal workflows except for project creation and destructive confirmations.
 
@@ -84,14 +84,14 @@ Requirements use:
 - SQLite schema changes SHOULD be versioned through migrations.
 - JSON config parsing SHOULD validate unknown or malformed values safely.
 - Agent CLI terminal integrations SHOULD share common lifecycle management where possible.
-- `codex` and `claude` resume behavior SHOULD be isolated behind a small terminal/session boundary rather than mixed into UI layout code.
+- CLI-specific launch and resume behavior SHOULD be isolated behind a small terminal/session boundary rather than mixed into UI layout code.
 
 ## Testability
 
 - The app MUST prioritize E2E tests that validate user-visible behavior.
 - The app MUST support screenshot capture for E2E failures and key UI states.
 - The app SHOULD include one high-level no-mock E2E journey through the full app workflow.
-- The app SHOULD include focused E2E tests for project/thread storage, agent CLI selection and resume, file indexing, fuzzy matching, right-panel modes, terminal launch, `nvim`, `lazygit`, panel collapse, resize, and shortcut handling.
+- The app SHOULD include focused E2E tests for project/thread storage, agent CLI selection and resume, file indexing, fuzzy matching, right-panel modes, terminal launch, editor fallback, Git fallback, panel collapse, resize, paste behavior, and shortcut handling.
 - Unit tests MAY be added for high-value input/output behavior, but they MUST NOT test internals or private functions.
 
 Detailed testing expectations are defined in [Testing Requirements](testing-requirements.md).
@@ -106,9 +106,9 @@ Detailed testing expectations are defined in [Testing Requirements](testing-requ
 ## Packaging
 
 - The app SHOULD package as a standard macOS `.app`.
-- The first version SHOULD assume `codex`, `claude`, `nvim`, and `lazygit` are user-installed tools resolved from `PATH`.
+- The first version SHOULD assume supported agent CLIs and preferred terminal tools are user-installed tools resolved from `PATH`, while falling back to `vim`/`vi` and `git diff` where specified.
 - The app SHOULD make missing tool failures visible in the relevant terminal panel.
-- The app itself MUST NOT require network setup or cloud authentication for core workflows outside of any authentication required by the user's chosen local `codex` or `claude` CLI process.
+- The app itself MUST NOT require network setup or cloud authentication for core workflows outside of any authentication required by the user's chosen local CLI process.
 
 ## Non-Goals
 
@@ -120,4 +120,5 @@ Detailed testing expectations are defined in [Testing Requirements](testing-requ
 - Built-in source control UI.
 - Built-in text editor.
 - Persistent live PTY sessions after app restart.
-- Agent orchestration beyond one bound `codex` or `claude` CLI session per thread.
+- Agent orchestration beyond one bound CLI agent session per thread.
+- Agent harness behavior, prompt orchestration, or tool-call mediation.

@@ -1,5 +1,5 @@
 import XCTest
-@testable import AgentIDEKit
+@testable import YAAWKit
 
 final class AgentCLIAdapterTests: XCTestCase {
     func testResumeCommandConstructionUsesStoredIdentity() {
@@ -56,6 +56,42 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(command, ["/tmp/bin/claude", "--resume", "claude-session-123"])
     }
 
+    func testOpenCodeResumeCommandUsesSessionFlag() {
+        let service = AgentCLISessionBindingService(
+            resolver: StaticExecutableResolver(paths: ["opencode": "/tmp/bin/opencode"]),
+            captureDirectory: nil
+        )
+        let thread = AgentThread(
+            displayName: "Existing",
+            projectID: UUID(),
+            workingDirectory: FileManager.default.temporaryDirectory,
+            agentCLI: .opencode,
+            sessionIdentity: "opencode-session-123"
+        )
+
+        let command = service.terminalCommand(for: thread)
+
+        XCTAssertEqual(command, ["/tmp/bin/opencode", "--session", "opencode-session-123"])
+    }
+
+    func testCopilotResumeCommandUsesEqualsResumeFlag() {
+        let service = AgentCLISessionBindingService(
+            resolver: StaticExecutableResolver(paths: ["copilot": "/tmp/bin/copilot"]),
+            captureDirectory: nil
+        )
+        let thread = AgentThread(
+            displayName: "Existing",
+            projectID: UUID(),
+            workingDirectory: FileManager.default.temporaryDirectory,
+            agentCLI: .copilot,
+            sessionIdentity: "copilot-session-123"
+        )
+
+        let command = service.terminalCommand(for: thread)
+
+        XCTAssertEqual(command, ["/tmp/bin/copilot", "--resume=copilot-session-123"])
+    }
+
     func testCanonicalNamePrefersReportedNameThenTitleThenIdentity() throws {
         let service = AgentCLISessionBindingService(captureDirectory: nil)
 
@@ -63,9 +99,9 @@ final class AgentCLIAdapterTests: XCTestCase {
             service.metadata(
                 for: .codex,
                 output: """
-                AGENT_IDE_SESSION_ID=codex-123
-                AGENT_IDE_SESSION_NAME=Refactor Session
-                AGENT_IDE_SESSION_TITLE=Terminal Title
+                YAAW_SESSION_ID=codex-123
+                YAAW_SESSION_NAME=Refactor Session
+                YAAW_SESSION_TITLE=Terminal Title
                 """
             )
         )
@@ -86,6 +122,16 @@ final class AgentCLIAdapterTests: XCTestCase {
             service.metadata(for: .codex, output: "session id: codex-identity-only")
         )
         XCTAssertEqual(identityOnly.canonicalName, "codex-identity-only")
+
+        let opencode = try XCTUnwrap(
+            service.metadata(for: .opencode, output: "opencode session id: opencode-123")
+        )
+        XCTAssertEqual(opencode.identity, "opencode-123")
+
+        let copilot = try XCTUnwrap(
+            service.metadata(for: .copilot, output: "copilot_session_id=copilot-123")
+        )
+        XCTAssertEqual(copilot.identity, "copilot-123")
     }
 
     func testMetadataParserIgnoresScriptTerminalControls() throws {
@@ -94,7 +140,7 @@ final class AgentCLIAdapterTests: XCTestCase {
         let metadata = try XCTUnwrap(
             service.metadata(
                 for: .codex,
-                output: "\u{04}\u{08}\u{08}AGENT_IDE_SESSION_ID=codex-script-123\nAGENT_IDE_SESSION_NAME=Script Capture"
+                output: "\u{04}\u{08}\u{08}YAAW_SESSION_ID=codex-script-123\nYAAW_SESSION_NAME=Script Capture"
             )
         )
 
@@ -111,11 +157,11 @@ final class AgentCLIAdapterTests: XCTestCase {
             contents: """
             #!/bin/sh
             if [ "$1" = "resume" ]; then
-              printf 'AGENT_IDE_SESSION_ID=%s\\n' "$2"
-              printf 'AGENT_IDE_SESSION_NAME=Codex Resumed\\n'
+              printf 'YAAW_SESSION_ID=%s\\n' "$2"
+              printf 'YAAW_SESSION_NAME=Codex Resumed\\n'
             else
-              printf 'AGENT_IDE_SESSION_ID=codex-new-123\\n'
-              printf 'AGENT_IDE_SESSION_NAME=Codex New\\n'
+              printf 'YAAW_SESSION_ID=codex-new-123\\n'
+              printf 'YAAW_SESSION_NAME=Codex New\\n'
             fi
             """
         )
@@ -185,12 +231,12 @@ final class AgentCLIAdapterTests: XCTestCase {
 
     func testCapturedMetadataPersistsThroughSQLiteReload() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
-        let store = try SQLiteAgentIDEStore(databasePath: path)
+        let store = try SQLiteYAAWStore(databasePath: path)
         let projectID = UUID()
         let threadID = UUID()
         let root = try temporaryDirectory()
         store.save(
-            AgentIDESnapshot(
+            YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
                 threads: [
                     AgentThread(
@@ -220,7 +266,7 @@ final class AgentCLIAdapterTests: XCTestCase {
 
         model.pollSelectedAgentCLICaptureLog()
 
-        let reloaded = try SQLiteAgentIDEStore(databasePath: path).load()
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
         let reloadedThread = try XCTUnwrap(reloaded.threads.first { $0.id == threadID })
         XCTAssertEqual(reloadedThread.sessionIdentity, "codex-session-456")
         XCTAssertEqual(reloadedThread.canonicalSessionName, "Stored Codex Session")
@@ -229,7 +275,7 @@ final class AgentCLIAdapterTests: XCTestCase {
 
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AgentIDEKitTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("YAAWKitTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
