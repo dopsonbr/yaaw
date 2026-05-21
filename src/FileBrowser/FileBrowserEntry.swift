@@ -13,24 +13,44 @@ public struct FileBrowserEntry: Identifiable, Equatable, Sendable {
 }
 
 public struct FileIndexMetadata: Equatable, Sendable {
+    public static let currentSchemaVersion = 1
+
     public var threadID: UUID
+    public var cacheKey: String?
     public var rootPath: String
+    public var gitIdentity: String
+    public var ignoreRulesFingerprint: String
+    public var schemaVersion: Int
     public var indexedAt: Date
     public var fileCount: Int
     public var ignoredDirectoryCount: Int
 
     public init(
         threadID: UUID,
+        cacheKey: String? = nil,
         rootPath: String,
+        gitIdentity: String = FileIndexGitIdentity.notRepository.cacheComponent,
+        ignoreRulesFingerprint: String = "",
+        schemaVersion: Int = FileIndexMetadata.currentSchemaVersion,
         indexedAt: Date,
         fileCount: Int,
         ignoredDirectoryCount: Int
     ) {
         self.threadID = threadID
+        self.cacheKey = cacheKey
         self.rootPath = rootPath
+        self.gitIdentity = gitIdentity
+        self.ignoreRulesFingerprint = ignoreRulesFingerprint
+        self.schemaVersion = schemaVersion
         self.indexedAt = indexedAt
         self.fileCount = fileCount
         self.ignoredDirectoryCount = ignoredDirectoryCount
+    }
+
+    public func forThread(_ threadID: UUID) -> FileIndexMetadata {
+        var metadata = self
+        metadata.threadID = threadID
+        return metadata
     }
 }
 

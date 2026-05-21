@@ -268,6 +268,12 @@ private final class E2ERunner {
         try waitUntil("file index contains README.md") {
             model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" }
         }
+        model.selectThread(id: claudeThreadID)
+        try assert(
+            model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" },
+            "same-directory thread reused the shared file index cache without a blank files state"
+        )
+        model.selectThread(id: codexThreadID)
         model.updateFileSearchQuery("root")
         try assert(
             model.fileBrowserState.visibleEntries.first?.relativePath == "src/App/RootView.swift",

@@ -76,6 +76,79 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".yaaw").path))
     }
 
+    func testCacheKeyIncludesDirectoryBranchAndIgnoreRules() throws {
+        let root = try temporaryDirectory()
+        try writeFile(root.appendingPathComponent(".git/HEAD"), contents: "ref: refs/heads/main\n")
+
+        let mainKey = FileIndexCacheKey(root: root, ignoreRules: [".git", "node_modules"])
+        let sameMainKey = FileIndexCacheKey(root: root, ignoreRules: ["node_modules", ".git"])
+
+        XCTAssertEqual(mainKey.value, sameMainKey.value)
+        XCTAssertEqual(mainKey.gitIdentity, "branch:refs/heads/main")
+
+        try writeFile(root.appendingPathComponent(".git/HEAD"), contents: "ref: refs/heads/feature\n")
+        let featureKey = FileIndexCacheKey(root: root, ignoreRules: [".git", "node_modules"])
+
+        XCTAssertNotEqual(mainKey.value, featureKey.value)
+        XCTAssertEqual(featureKey.gitIdentity, "branch:refs/heads/feature")
+
+        let detachedCommit = "0123456789abcdef0123456789abcdef01234567"
+        try writeFile(root.appendingPathComponent(".git/HEAD"), contents: "\(detachedCommit)\n")
+        let detachedKey = FileIndexCacheKey(root: root, ignoreRules: [".git", "node_modules"])
+
+        XCTAssertEqual(detachedKey.gitIdentity, "detached:\(detachedCommit)")
+        XCTAssertNotEqual(featureKey.value, detachedKey.value)
+
+        let nonGitRoot = try temporaryDirectory()
+        let nonGitKey = FileIndexCacheKey(root: nonGitRoot, ignoreRules: [".git", "node_modules"])
+
+        XCTAssertEqual(nonGitKey.gitIdentity, "nogit")
+        XCTAssertNotEqual(mainKey.value, nonGitKey.value)
+    }
+
+    func testCacheCoordinatorDeduplicatesSameKeyRefreshesAndSharesResult() throws {
+        let root = try temporaryDirectory()
+        let store = InMemoryYAAWStore.helloWorld()
+        let indexer = ManualFileIndexer()
+        let coordinator = FileIndexCacheCoordinator(store: store, fileIndexer: indexer)
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let cacheKey = coordinator.cacheKey(root: root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
+        let entry = FileBrowserEntry(relativePath: "README.md", isDirectory: false)
+        let firstResult = FileIndexResultBox()
+        let secondResult = FileIndexResultBox()
+
+        coordinator.refreshIndex(
+            threadID: firstThreadID,
+            root: root,
+            ignoreRules: YAAWConfiguration.defaultIgnoreRules,
+            key: cacheKey
+        ) { result in
+            firstResult.value = try? result.get()
+        }
+        coordinator.refreshIndex(
+            threadID: secondThreadID,
+            root: root,
+            ignoreRules: YAAWConfiguration.defaultIgnoreRules,
+            key: cacheKey
+        ) { result in
+            secondResult.value = try? result.get()
+        }
+
+        XCTAssertEqual(indexer.requestCount, 1)
+
+        indexer.completeRequest(
+            at: 0,
+            result: .success(indexer.result(threadID: firstThreadID, root: root, entries: [entry]))
+        )
+
+        XCTAssertEqual(firstResult.value?.metadata.threadID, firstThreadID)
+        XCTAssertEqual(secondResult.value?.metadata.threadID, secondThreadID)
+        XCTAssertEqual(firstResult.value?.metadata.cacheKey, cacheKey.value)
+        XCTAssertEqual(secondResult.value?.entries, [entry])
+        XCTAssertEqual(store.cachedFileIndex(cacheKey: cacheKey.value)?.entries, [entry])
+    }
+
     func testAppModelFileIndexingDoesNotBlockSelectionChanges() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = DelayedFileIndexer()
@@ -90,22 +163,54 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(model.fileBrowserState.isIndexing == false || model.fileBrowserState.rootPath == fixture.secondRoot.path)
     }
 
-    func testAppModelIgnoresStaleSameThreadIndexResults() throws {
+    func testAppModelShowsSharedCachedEntriesWhileRefreshIsInProgress() throws {
+        let fixture = AppModelFixtureForSharedFiles()
+        let store = fixture.store
+        let cacheKey = FileIndexCacheKey(root: fixture.root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
+        let cachedEntry = FileBrowserEntry(relativePath: "cached.swift", isDirectory: false)
+        store.upsertCachedFileIndex(
+            CachedFileIndex(
+                metadata: FileIndexMetadata(
+                    threadID: fixture.firstThreadID,
+                    cacheKey: cacheKey.value,
+                    rootPath: cacheKey.rootPath,
+                    gitIdentity: cacheKey.gitIdentity,
+                    ignoreRulesFingerprint: cacheKey.ignoreRulesFingerprint,
+                    schemaVersion: cacheKey.schemaVersion,
+                    indexedAt: Date(timeIntervalSince1970: 42),
+                    fileCount: 1,
+                    ignoredDirectoryCount: 0
+                ),
+                entries: [cachedEntry]
+            )
+        )
+        let indexer = DelayedFileIndexer()
+        let model = AppModel(store: store, fileIndexer: indexer)
+
+        model.selectThread(id: fixture.secondThreadID)
+        model.refreshSelectedFileBrowser()
+
+        XCTAssertEqual(model.fileBrowserState.entries, [cachedEntry])
+        XCTAssertEqual(model.fileBrowserState.visibleEntries, [cachedEntry])
+        XCTAssertTrue(model.fileBrowserState.isIndexing)
+        XCTAssertEqual(model.fileBrowserState.metadata?.threadID, fixture.secondThreadID)
+        XCTAssertEqual(model.fileBrowserState.metadata?.cacheKey, cacheKey.value)
+    }
+
+    func testAppModelDeduplicatesSameThreadIndexRefreshes() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
         let model = AppModel(store: fixture.store, fileIndexer: indexer)
-        let firstEntry = FileBrowserEntry(relativePath: "old.swift", isDirectory: false)
         let secondEntry = FileBrowserEntry(relativePath: "new.swift", isDirectory: false)
 
         model.refreshSelectedFileBrowser()
         model.refreshSelectedFileBrowser()
-        indexer.completeRequest(
-            at: 1,
-            result: .success(indexer.result(threadID: fixture.firstThreadID, root: fixture.firstRoot, entries: [secondEntry]))
-        )
+
+        XCTAssertEqual(indexer.requestCount, 1)
+
         indexer.completeRequest(
             at: 0,
-            result: .success(indexer.result(threadID: fixture.firstThreadID, root: fixture.firstRoot, entries: [firstEntry]))
+            result: .success(indexer.result(threadID: fixture.firstThreadID, root: fixture.firstRoot, entries: [secondEntry]))
         )
 
         XCTAssertEqual(model.fileBrowserState.entries, [secondEntry])
@@ -136,6 +241,7 @@ private final class DelayedFileIndexer: FileIndexing {
 
 private final class ManualFileIndexer: FileIndexing {
     private var completions: [@Sendable (Result<FileIndexResult, Error>) -> Void] = []
+    var requestCount: Int { completions.count }
 
     func indexFiles(
         threadID: UUID,
@@ -159,6 +265,46 @@ private final class ManualFileIndexer: FileIndexing {
                 indexedAt: Date(timeIntervalSince1970: TimeInterval(entries.count)),
                 fileCount: entries.count,
                 ignoredDirectoryCount: 0
+            )
+        )
+    }
+}
+
+private final class FileIndexResultBox: @unchecked Sendable {
+    var value: FileIndexResult?
+}
+
+private struct AppModelFixtureForSharedFiles {
+    let projectID = UUID()
+    let firstThreadID = UUID()
+    let secondThreadID = UUID()
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("YAAWKitTests-shared-\(UUID().uuidString)", isDirectory: true)
+
+    var store: InMemoryYAAWStore {
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(
+                        id: firstThreadID,
+                        displayName: "First",
+                        projectID: projectID,
+                        workingDirectory: root
+                    ),
+                    AgentThread(
+                        id: secondThreadID,
+                        displayName: "Second",
+                        projectID: projectID,
+                        workingDirectory: root
+                    )
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: firstThreadID,
+                rightPanelModesByThreadID: [firstThreadID: .files, secondThreadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
             )
         )
     }

@@ -9,7 +9,7 @@ public enum SQLiteStoreError: Error, Equatable {
 }
 
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 9
+    public static let schemaVersion = 10
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -278,11 +278,23 @@ public final class SQLiteYAAWStore: YAAWStore {
             let statement = try prepare(
                 """
                 INSERT INTO file_index_metadata (
-                    thread_id, root_path, indexed_at, file_count, ignored_directory_count
+                    thread_id,
+                    cache_key,
+                    root_path,
+                    git_identity,
+                    ignore_rules_fingerprint,
+                    schema_version,
+                    indexed_at,
+                    file_count,
+                    ignored_directory_count
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(thread_id) DO UPDATE SET
+                    cache_key = excluded.cache_key,
                     root_path = excluded.root_path,
+                    git_identity = excluded.git_identity,
+                    ignore_rules_fingerprint = excluded.ignore_rules_fingerprint,
+                    schema_version = excluded.schema_version,
                     indexed_at = excluded.indexed_at,
                     file_count = excluded.file_count,
                     ignored_directory_count = excluded.ignored_directory_count
@@ -290,11 +302,35 @@ public final class SQLiteYAAWStore: YAAWStore {
             )
             defer { sqlite3_finalize(statement) }
             bind(metadata.threadID.uuidString, at: 1, in: statement)
-            bind(metadata.rootPath, at: 2, in: statement)
-            sqlite3_bind_double(statement, 3, metadata.indexedAt.timeIntervalSince1970)
-            sqlite3_bind_int(statement, 4, Int32(metadata.fileCount))
-            sqlite3_bind_int(statement, 5, Int32(metadata.ignoredDirectoryCount))
+            bindOptional(metadata.cacheKey, at: 2, in: statement)
+            bind(metadata.rootPath, at: 3, in: statement)
+            bind(metadata.gitIdentity, at: 4, in: statement)
+            bind(metadata.ignoreRulesFingerprint, at: 5, in: statement)
+            sqlite3_bind_int(statement, 6, Int32(metadata.schemaVersion))
+            sqlite3_bind_double(statement, 7, metadata.indexedAt.timeIntervalSince1970)
+            sqlite3_bind_int(statement, 8, Int32(metadata.fileCount))
+            sqlite3_bind_int(statement, 9, Int32(metadata.ignoredDirectoryCount))
             try stepDone(statement)
+        }
+    }
+
+    public func cachedFileIndex(cacheKey: String) -> CachedFileIndex? {
+        do {
+            return try loadCachedFileIndex(cacheKey: cacheKey)
+        } catch {
+            recordSQLiteError(name: "sqlite_load_cached_file_index_failed", error: error)
+            return nil
+        }
+    }
+
+    public func upsertCachedFileIndex(_ index: CachedFileIndex) {
+        runIncremental(name: "upsert_cached_file_index") {
+            guard let cacheKey = index.metadata.cacheKey else { return }
+            try deleteCachedFileIndexEntries(cacheKey: cacheKey)
+            try upsertCachedFileIndexMetadata(index.metadata)
+            for (entryOrder, entry) in index.entries.enumerated() {
+                try insertCachedFileIndexEntry(cacheKey: cacheKey, entry: entry, entryOrder: entryOrder)
+            }
         }
     }
 }
@@ -384,6 +420,12 @@ private extension SQLiteYAAWStore {
                 try execute("PRAGMA user_version = 9")
             }
         }
+        if currentVersion < 10 {
+            try transaction {
+                try migrateToVersionTen()
+                try execute("PRAGMA user_version = 10")
+            }
+        }
     }
 
     func migrateToVersionNine() throws {
@@ -393,6 +435,25 @@ private extension SQLiteYAAWStore {
         try execute(
             "CREATE INDEX IF NOT EXISTS idx_threads_last_opened ON threads(last_opened_at)"
         )
+    }
+
+    func migrateToVersionTen() throws {
+        let columns = try tableColumns("file_index_metadata")
+        if !columns.contains("cache_key") {
+            try execute("ALTER TABLE file_index_metadata ADD COLUMN cache_key TEXT")
+        }
+        if !columns.contains("git_identity") {
+            try execute("ALTER TABLE file_index_metadata ADD COLUMN git_identity TEXT NOT NULL DEFAULT 'nogit'")
+        }
+        if !columns.contains("ignore_rules_fingerprint") {
+            try execute("ALTER TABLE file_index_metadata ADD COLUMN ignore_rules_fingerprint TEXT NOT NULL DEFAULT ''")
+        }
+        if !columns.contains("schema_version") {
+            try execute(
+                "ALTER TABLE file_index_metadata ADD COLUMN schema_version INTEGER NOT NULL DEFAULT \(FileIndexMetadata.currentSchemaVersion)"
+            )
+        }
+        try createFileIndexCacheSchema()
     }
 
     func createVersionOneSchema() throws {
@@ -496,12 +557,47 @@ private extension SQLiteYAAWStore {
             """
             CREATE TABLE IF NOT EXISTS file_index_metadata (
                 thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                cache_key TEXT,
                 root_path TEXT NOT NULL,
+                git_identity TEXT NOT NULL DEFAULT 'nogit',
+                ignore_rules_fingerprint TEXT NOT NULL DEFAULT '',
+                schema_version INTEGER NOT NULL DEFAULT 1,
                 indexed_at REAL NOT NULL,
                 file_count INTEGER NOT NULL,
                 ignored_directory_count INTEGER NOT NULL
             )
             """
+        )
+    }
+
+    func createFileIndexCacheSchema() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS file_index_cache_metadata (
+                cache_key TEXT PRIMARY KEY NOT NULL,
+                root_path TEXT NOT NULL,
+                git_identity TEXT NOT NULL,
+                ignore_rules_fingerprint TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                indexed_at REAL NOT NULL,
+                file_count INTEGER NOT NULL,
+                ignored_directory_count INTEGER NOT NULL
+            )
+            """
+        )
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS file_index_cache_entries (
+                cache_key TEXT NOT NULL REFERENCES file_index_cache_metadata(cache_key) ON DELETE CASCADE,
+                relative_path TEXT NOT NULL,
+                is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)),
+                entry_order INTEGER NOT NULL,
+                PRIMARY KEY (cache_key, relative_path)
+            )
+            """
+        )
+        try execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_index_cache_entries_order ON file_index_cache_entries(cache_key, entry_order)"
         )
     }
 
@@ -900,20 +996,92 @@ private extension SQLiteYAAWStore {
             """
             INSERT INTO file_index_metadata (
                 thread_id,
+                cache_key,
                 root_path,
+                git_identity,
+                ignore_rules_fingerprint,
+                schema_version,
                 indexed_at,
                 file_count,
                 ignored_directory_count
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         defer { sqlite3_finalize(statement) }
         bind(metadata.threadID.uuidString, at: 1, in: statement)
+        bindOptional(metadata.cacheKey, at: 2, in: statement)
+        bind(metadata.rootPath, at: 3, in: statement)
+        bind(metadata.gitIdentity, at: 4, in: statement)
+        bind(metadata.ignoreRulesFingerprint, at: 5, in: statement)
+        sqlite3_bind_int(statement, 6, Int32(metadata.schemaVersion))
+        sqlite3_bind_double(statement, 7, metadata.indexedAt.timeIntervalSince1970)
+        sqlite3_bind_int(statement, 8, Int32(metadata.fileCount))
+        sqlite3_bind_int(statement, 9, Int32(metadata.ignoredDirectoryCount))
+        try stepDone(statement)
+    }
+
+    func deleteCachedFileIndexEntries(cacheKey: String) throws {
+        let statement = try prepare("DELETE FROM file_index_cache_entries WHERE cache_key = ?")
+        defer { sqlite3_finalize(statement) }
+        bind(cacheKey, at: 1, in: statement)
+        try stepDone(statement)
+    }
+
+    func upsertCachedFileIndexMetadata(_ metadata: FileIndexMetadata) throws {
+        guard let cacheKey = metadata.cacheKey else { return }
+        let statement = try prepare(
+            """
+            INSERT INTO file_index_cache_metadata (
+                cache_key,
+                root_path,
+                git_identity,
+                ignore_rules_fingerprint,
+                schema_version,
+                indexed_at,
+                file_count,
+                ignored_directory_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(cache_key) DO UPDATE SET
+                root_path = excluded.root_path,
+                git_identity = excluded.git_identity,
+                ignore_rules_fingerprint = excluded.ignore_rules_fingerprint,
+                schema_version = excluded.schema_version,
+                indexed_at = excluded.indexed_at,
+                file_count = excluded.file_count,
+                ignored_directory_count = excluded.ignored_directory_count
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(cacheKey, at: 1, in: statement)
         bind(metadata.rootPath, at: 2, in: statement)
-        sqlite3_bind_double(statement, 3, metadata.indexedAt.timeIntervalSince1970)
-        sqlite3_bind_int(statement, 4, Int32(metadata.fileCount))
-        sqlite3_bind_int(statement, 5, Int32(metadata.ignoredDirectoryCount))
+        bind(metadata.gitIdentity, at: 3, in: statement)
+        bind(metadata.ignoreRulesFingerprint, at: 4, in: statement)
+        sqlite3_bind_int(statement, 5, Int32(metadata.schemaVersion))
+        sqlite3_bind_double(statement, 6, metadata.indexedAt.timeIntervalSince1970)
+        sqlite3_bind_int(statement, 7, Int32(metadata.fileCount))
+        sqlite3_bind_int(statement, 8, Int32(metadata.ignoredDirectoryCount))
+        try stepDone(statement)
+    }
+
+    func insertCachedFileIndexEntry(cacheKey: String, entry: FileBrowserEntry, entryOrder: Int) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO file_index_cache_entries (
+                cache_key,
+                relative_path,
+                is_directory,
+                entry_order
+            )
+            VALUES (?, ?, ?, ?)
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bind(cacheKey, at: 1, in: statement)
+        bind(entry.relativePath, at: 2, in: statement)
+        sqlite3_bind_int(statement, 3, entry.isDirectory ? 1 : 0)
+        sqlite3_bind_int(statement, 4, Int32(entryOrder))
         try stepDone(statement)
     }
 
@@ -1119,7 +1287,16 @@ private extension SQLiteYAAWStore {
     func loadFileIndexMetadata() throws -> [UUID: FileIndexMetadata] {
         let statement = try prepare(
             """
-            SELECT thread_id, root_path, indexed_at, file_count, ignored_directory_count
+            SELECT
+                thread_id,
+                cache_key,
+                root_path,
+                git_identity,
+                ignore_rules_fingerprint,
+                schema_version,
+                indexed_at,
+                file_count,
+                ignored_directory_count
             FROM file_index_metadata
             """
         )
@@ -1131,13 +1308,69 @@ private extension SQLiteYAAWStore {
             }
             metadataByThreadID[threadID] = FileIndexMetadata(
                 threadID: threadID,
-                rootPath: text(at: 1, in: statement),
-                indexedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
-                fileCount: Int(sqlite3_column_int(statement, 3)),
-                ignoredDirectoryCount: Int(sqlite3_column_int(statement, 4))
+                cacheKey: optionalText(at: 1, in: statement),
+                rootPath: text(at: 2, in: statement),
+                gitIdentity: text(at: 3, in: statement),
+                ignoreRulesFingerprint: text(at: 4, in: statement),
+                schemaVersion: Int(sqlite3_column_int(statement, 5)),
+                indexedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)),
+                fileCount: Int(sqlite3_column_int(statement, 7)),
+                ignoredDirectoryCount: Int(sqlite3_column_int(statement, 8))
             )
         }
         return metadataByThreadID
+    }
+
+    func loadCachedFileIndex(cacheKey: String) throws -> CachedFileIndex? {
+        let metadataStatement = try prepare(
+            """
+            SELECT
+                root_path,
+                git_identity,
+                ignore_rules_fingerprint,
+                schema_version,
+                indexed_at,
+                file_count,
+                ignored_directory_count
+            FROM file_index_cache_metadata
+            WHERE cache_key = ?
+            """
+        )
+        defer { sqlite3_finalize(metadataStatement) }
+        bind(cacheKey, at: 1, in: metadataStatement)
+        guard sqlite3_step(metadataStatement) == SQLITE_ROW else { return nil }
+        let metadata = FileIndexMetadata(
+            threadID: UUID(),
+            cacheKey: cacheKey,
+            rootPath: text(at: 0, in: metadataStatement),
+            gitIdentity: text(at: 1, in: metadataStatement),
+            ignoreRulesFingerprint: text(at: 2, in: metadataStatement),
+            schemaVersion: Int(sqlite3_column_int(metadataStatement, 3)),
+            indexedAt: Date(timeIntervalSince1970: sqlite3_column_double(metadataStatement, 4)),
+            fileCount: Int(sqlite3_column_int(metadataStatement, 5)),
+            ignoredDirectoryCount: Int(sqlite3_column_int(metadataStatement, 6))
+        )
+
+        let entriesStatement = try prepare(
+            """
+            SELECT relative_path, is_directory
+            FROM file_index_cache_entries
+            WHERE cache_key = ?
+            ORDER BY entry_order, relative_path
+            """
+        )
+        defer { sqlite3_finalize(entriesStatement) }
+        bind(cacheKey, at: 1, in: entriesStatement)
+        var entries: [FileBrowserEntry] = []
+        while sqlite3_step(entriesStatement) == SQLITE_ROW {
+            entries.append(
+                FileBrowserEntry(
+                    relativePath: text(at: 0, in: entriesStatement),
+                    isDirectory: sqlite3_column_int(entriesStatement, 1) == 1
+                )
+            )
+        }
+        return CachedFileIndex(metadata: metadata, entries: entries)
     }
 
     func bind(_ value: String, at index: Int32, in statement: OpaquePointer?) {

@@ -48,6 +48,7 @@ The SQLite database MUST store:
 - Panel collapsed states.
 - Panel sizes.
 - File index metadata.
+- Durable file index cache entries when caching is enabled.
 
 The database SHOULD store enough metadata to restore the app layout and navigation context after restart.
 
@@ -165,6 +166,9 @@ If two threads happen to share the same panel state because they point at the sa
 - Files mode MUST support fuzzy matching.
 - Files mode MUST ignore obviously heavy directories by default.
 - Ignore rules SHOULD include `.git`, `node_modules`, `dist`, `.build`, and derived-data folders.
+- File index entries MAY be cached durably in app-owned SQLite and shared by threads with the same canonical working directory, Git identity, ignore-rules fingerprint, and index schema version.
+- File index caches MUST remain read-only with respect to user project directories and MUST NOT write app metadata into repositories.
+- If a Git branch or detached `HEAD` identity changes for a working directory, Files mode MUST use a different cache key to avoid showing stale branch-specific results as current.
 - File search SHOULD prefer exact filename matches, then prefix matches, then fuzzy path matches.
 - Opening a file MUST switch the right panel to `nvim` mode.
 - Opening a file MUST launch `nvim <relative-file-path>` in the right-panel terminal.

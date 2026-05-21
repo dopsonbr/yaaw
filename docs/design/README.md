@@ -151,6 +151,8 @@ The first implementation should keep indexing simple:
 
 - Walk the active project directory.
 - Ignore common heavy folders such as `.git`, `node_modules`, `.build`, `dist`, and derived-data folders.
+- Reuse app-owned cached file entries for threads with the same canonical working directory, Git identity, ignore-rules fingerprint, and index schema version.
+- Keep cached entries in SQLite under YAAW storage, not in user repositories.
 - Match by path segments and filename.
 - Prefer exact filename matches, then prefix matches, then fuzzy path matches.
 
@@ -185,6 +187,7 @@ Persist:
 - Panel collapsed states.
 - Panel sizes, if feasible.
 - Last selected right-panel mode.
+- Shared file index cache entries keyed by working directory and Git identity.
 
 Terminal scrollback persistence is optional for the first version.
 

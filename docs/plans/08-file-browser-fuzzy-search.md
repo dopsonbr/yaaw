@@ -17,7 +17,7 @@ Replace sample file entries with a read-only file browser for the selected threa
 - Ignore heavy directories by default, including `.git`, `node_modules`, `dist`, `.build`, and derived-data folders. The default ignore list lives in the YAML settings file seeded by [Plan 02](02-sqlite-persistence.md).
 - Add deterministic ranking: exact filename matches, prefix matches, then fuzzy path matches.
 - Keep indexing read-only and never modify repository files.
-- Add a SQLite migration for file-index metadata (per-thread root path, last index timestamp, file count, and any other coarse stats useful for invalidation). Actual file entries do not need to be persisted; they MUST be safe to rebuild on demand. The migration version number is the next unused integer at the time this plan ships (the prior plans land migrations 1–4).
+- Add a SQLite migration for file-index metadata and durable cache entries. Cache entries are app-owned and may be shared by threads with the same canonical working directory, Git identity, ignore-rules fingerprint, and index schema version; they MUST remain safe to rebuild on demand.
 
 ## Tests
 
@@ -35,6 +35,6 @@ Replace sample file entries with a read-only file browser for the selected threa
 - File search returns exact filename matches before prefix matches and fuzzy path matches.
 - File indexing does not block primary UI state changes.
 - File indexing is read-only.
-- File-index metadata persists across app relaunch and is safe to rebuild from scratch.
+- File-index metadata and cache entries persist across app relaunch and are safe to rebuild from scratch.
 - `scripts/build.sh` passes.
 - `scripts/test.sh` passes with file browser and fuzzy search coverage.

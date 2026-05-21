@@ -28,6 +28,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private let terminalManager: TerminalSessionManaging
     private let agentCLIBindings: AgentCLISessionBindingService
     private let fileIndexer: FileIndexing
+    private let fileIndexCacheCoordinator: FileIndexCacheCoordinator
+    private let fileIndexDirectoryWatcher: FileIndexDirectoryWatcher
     private let externalToolResolver: any AgentCLIExecutableResolving
     private let diagnosticRecorder: DiagnosticEventRecording
     private let environment: [String: String]
@@ -59,6 +61,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.terminalManager = terminalManager
         self.agentCLIBindings = agentCLIBindings
         self.fileIndexer = fileIndexer
+        self.fileIndexCacheCoordinator = FileIndexCacheCoordinator(store: store, fileIndexer: fileIndexer)
+        self.fileIndexDirectoryWatcher = FileIndexDirectoryWatcher()
         self.externalToolResolver = externalToolResolver
         self.configuration = configuration.validated()
         self.diagnosticRecorder = diagnosticRecorder
@@ -764,12 +768,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private func refreshFileBrowser(for thread: AgentThread) {
         let requestID = UUID()
         latestFileBrowserRequestIDByThreadID[thread.id] = requestID
-        let metadata = fileIndexMetadataByThreadID[thread.id]
         guard isExistingDirectory(thread.workingDirectory) else {
+            fileIndexDirectoryWatcher.stop()
             fileBrowserState = FileBrowserState(
                 rootPath: thread.workingDirectory.path,
                 searchQuery: fileBrowserState.searchQuery,
-                metadata: metadata,
+                metadata: fileIndexMetadataByThreadID[thread.id],
                 errorMessage: "Missing working directory: \(thread.workingDirectory.path)"
             )
             recordDiagnostic(
@@ -782,19 +786,34 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             )
             return
         }
+        fileIndexDirectoryWatcher.watch(root: thread.workingDirectory) { [weak self] in
+            self?.refreshSelectedFileBrowser()
+        }
+        let cacheKey = fileIndexCacheCoordinator.cacheKey(
+            root: thread.workingDirectory,
+            ignoreRules: configuration.ignoreRules
+        )
+        let cachedResult = fileIndexCacheCoordinator.cachedIndex(threadID: thread.id, key: cacheKey)
+        let entries = cachedResult?.entries
+            ?? (fileBrowserState.rootPath == thread.workingDirectory.path ? fileBrowserState.entries : [])
+        let metadata = cachedResult?.metadata ?? fileIndexMetadataByThreadID[thread.id]
         fileBrowserState = FileBrowserState(
             rootPath: thread.workingDirectory.path,
             searchQuery: fileBrowserState.searchQuery,
-            entries: fileBrowserState.entries,
-            visibleEntries: fileBrowserState.visibleEntries,
+            entries: entries,
+            visibleEntries: FuzzyFileMatcher.rankedEntries(
+                entries,
+                query: fileBrowserState.searchQuery
+            ),
             isIndexing: true,
             metadata: metadata,
             errorMessage: nil
         )
-        fileIndexer.indexFiles(
+        fileIndexCacheCoordinator.refreshIndex(
             threadID: thread.id,
             root: thread.workingDirectory,
-            ignoreRules: configuration.ignoreRules
+            ignoreRules: configuration.ignoreRules,
+            key: cacheKey
         ) { [weak self] result in
             self?.finishFileBrowserRefresh(threadID: thread.id, requestID: requestID, result: result)
         }
@@ -842,13 +861,26 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func resetFileBrowserForSelectedThread() {
         guard let selectedThread else {
+            fileIndexDirectoryWatcher.stop()
             fileBrowserState = FileBrowserState()
             return
+        }
+        let cachedResult: FileIndexResult?
+        if isExistingDirectory(selectedThread.workingDirectory) {
+            let cacheKey = fileIndexCacheCoordinator.cacheKey(
+                root: selectedThread.workingDirectory,
+                ignoreRules: configuration.ignoreRules
+            )
+            cachedResult = fileIndexCacheCoordinator.cachedIndex(threadID: selectedThread.id, key: cacheKey)
+        } else {
+            cachedResult = nil
         }
         fileBrowserState = FileBrowserState(
             rootPath: selectedThread.workingDirectory.path,
             searchQuery: "",
-            metadata: fileIndexMetadataByThreadID[selectedThread.id]
+            entries: cachedResult?.entries ?? [],
+            visibleEntries: cachedResult?.entries ?? [],
+            metadata: cachedResult?.metadata ?? fileIndexMetadataByThreadID[selectedThread.id]
         )
     }
 

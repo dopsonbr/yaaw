@@ -75,10 +75,13 @@ public protocol YAAWStore: AnyObject {
     func setSelectedThread(_ threadID: UUID?)
     func setLayoutState(_ state: LayoutState)
     func upsertFileIndexMetadata(_ metadata: FileIndexMetadata)
+    func cachedFileIndex(cacheKey: String) -> CachedFileIndex?
+    func upsertCachedFileIndex(_ index: CachedFileIndex)
 }
 
 public final class InMemoryYAAWStore: YAAWStore {
     private var snapshot: YAAWSnapshot
+    private var cachedFileIndexesByKey: [String: CachedFileIndex] = [:]
 
     public init(snapshot: YAAWSnapshot) {
         self.snapshot = snapshot
@@ -149,6 +152,15 @@ public final class InMemoryYAAWStore: YAAWStore {
 
     public func upsertFileIndexMetadata(_ metadata: FileIndexMetadata) {
         snapshot.fileIndexMetadataByThreadID[metadata.threadID] = metadata
+    }
+
+    public func cachedFileIndex(cacheKey: String) -> CachedFileIndex? {
+        cachedFileIndexesByKey[cacheKey]
+    }
+
+    public func upsertCachedFileIndex(_ index: CachedFileIndex) {
+        guard let cacheKey = index.metadata.cacheKey else { return }
+        cachedFileIndexesByKey[cacheKey] = index
     }
 
     public static func helloWorld() -> InMemoryYAAWStore {

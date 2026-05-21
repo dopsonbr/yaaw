@@ -478,9 +478,22 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
         XCTAssertTrue(columns.contains("thread_id"))
         XCTAssertTrue(columns.contains("root_path"))
+        XCTAssertTrue(columns.contains("cache_key"))
+        XCTAssertTrue(columns.contains("git_identity"))
+        XCTAssertTrue(columns.contains("ignore_rules_fingerprint"))
+        XCTAssertTrue(columns.contains("schema_version"))
         XCTAssertTrue(columns.contains("indexed_at"))
         XCTAssertTrue(columns.contains("file_count"))
         XCTAssertTrue(columns.contains("ignored_directory_count"))
+    }
+
+    func testSQLiteMigrationAddsSharedFileIndexCacheTables() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        _ = try SQLiteYAAWStore(databasePath: path)
+
+        XCTAssertTrue(try sqliteTableColumns(path: path, table: "file_index_cache_metadata").contains("cache_key"))
+        XCTAssertTrue(try sqliteTableColumns(path: path, table: "file_index_cache_entries").contains("relative_path"))
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
     }
 
     func testSQLiteFileIndexMetadataPersistsThroughReload() throws {
@@ -518,6 +531,41 @@ final class PersistenceTests: XCTestCase {
         let reloaded = try SQLiteYAAWStore(databasePath: path).load()
 
         XCTAssertEqual(reloaded.fileIndexMetadataByThreadID[threadID], metadata)
+    }
+
+    func testSQLiteCachedFileIndexPersistsThroughReload() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: path)
+        let threadID = UUID()
+        let metadata = FileIndexMetadata(
+            threadID: threadID,
+            cacheKey: "file-index:v1:test",
+            rootPath: "/tmp/yaaw",
+            gitIdentity: "branch:refs/heads/main",
+            ignoreRulesFingerprint: "abc123",
+            schemaVersion: 1,
+            indexedAt: Date(timeIntervalSince1970: 789),
+            fileCount: 2,
+            ignoredDirectoryCount: 1
+        )
+        let entries = [
+            FileBrowserEntry(relativePath: "src", isDirectory: true),
+            FileBrowserEntry(relativePath: "src/App.swift", isDirectory: false)
+        ]
+
+        store.upsertCachedFileIndex(CachedFileIndex(metadata: metadata, entries: entries))
+
+        let cached = try XCTUnwrap(SQLiteYAAWStore(databasePath: path).cachedFileIndex(cacheKey: "file-index:v1:test"))
+
+        XCTAssertEqual(cached.metadata.cacheKey, metadata.cacheKey)
+        XCTAssertEqual(cached.metadata.rootPath, metadata.rootPath)
+        XCTAssertEqual(cached.metadata.gitIdentity, metadata.gitIdentity)
+        XCTAssertEqual(cached.metadata.ignoreRulesFingerprint, metadata.ignoreRulesFingerprint)
+        XCTAssertEqual(cached.metadata.schemaVersion, metadata.schemaVersion)
+        XCTAssertEqual(cached.metadata.indexedAt, metadata.indexedAt)
+        XCTAssertEqual(cached.metadata.fileCount, metadata.fileCount)
+        XCTAssertEqual(cached.metadata.ignoredDirectoryCount, metadata.ignoredDirectoryCount)
+        XCTAssertEqual(cached.entries, entries)
     }
 
     func testSQLiteAcceptsAllSupportedAgentCLIKinds() throws {

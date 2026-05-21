@@ -84,6 +84,8 @@ Use it to:
 - Find files by name.
 - Use fuzzy matching to narrow large file lists.
 
+When multiple threads use the same directory and Git branch, the file list can reuse the same app-owned cache. Switching between those threads should keep the file list available while YAAW refreshes it in the background.
+
 The file browser can be collapsed when it is not needed.
 
 ## Switch Right Panel Modes
