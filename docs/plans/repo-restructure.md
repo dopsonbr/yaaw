@@ -167,7 +167,7 @@ Recommended source modules:
 | `src/Threads/` | Thread creation, worktree association, archive behavior. |
 | `src/FileBrowser/` | File tree, hidden files, fuzzy matching, ignore rules. |
 | `src/RightPanel/` | Files / `nvim` / `lazygit` mode switching and state. |
-| `src/Persistence/` | SQLite schema, migrations, repositories, JSON config. |
+| `src/Persistence/` | SQLite schema, migrations, repositories, YAML settings. |
 | `src/Theme/` | Dracula tokens and shared visual system. |
 | `src/Tests/` | Test fixtures and test utilities if the native test target needs shared helpers. |
 

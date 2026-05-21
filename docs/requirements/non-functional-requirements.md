@@ -40,7 +40,7 @@ Requirements use:
 - The app MUST NOT write metadata into user project directories for the first version.
 - The app MUST NOT modify repository files unless the user does so through a terminal tool such as `nvim`, shell commands, or `lazygit`.
 - File indexing MUST be read-only.
-- JSON config writes SHOULD be atomic.
+- YAML settings writes SHOULD be atomic.
 
 ## Security And Privacy
 
@@ -67,7 +67,7 @@ Requirements use:
 - The app MUST use familiar shortcuts for global back/forward navigation.
 - The app MUST use `Cmd+J` for the selected-thread bottom terminal.
 - The app SHOULD remember the user's last selected project, thread, panel layout, and right-panel mode.
-- The app SHOULD avoid modal workflows except for project creation and destructive confirmations.
+- The app SHOULD avoid modal workflows except for project creation, settings inspection, and destructive confirmations.
 
 ## Compatibility
 
@@ -82,7 +82,7 @@ Requirements use:
 - The implementation MUST keep app state, terminal management, file indexing, and UI layout concerns separated.
 - Theme colors SHOULD be centralized as Dracula tokens.
 - SQLite schema changes SHOULD be versioned through migrations.
-- JSON config parsing SHOULD validate unknown or malformed values safely.
+- YAML settings parsing SHOULD tolerate unknown or malformed values safely.
 - Agent CLI terminal integrations SHOULD share common lifecycle management where possible.
 - CLI-specific launch and resume behavior SHOULD be isolated behind a small terminal/session boundary rather than mixed into UI layout code.
 

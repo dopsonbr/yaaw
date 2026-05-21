@@ -188,7 +188,7 @@ Good unit test targets:
 - Fuzzy file matching.
 - Ignore-rule evaluation.
 - Path normalization.
-- JSON config parsing and validation.
+- YAML settings parsing and validation.
 - SQLite migration behavior against a real temporary database.
 - Public project/thread storage APIs.
 - Agent CLI session metadata persistence.
@@ -242,7 +242,7 @@ Artifacts SHOULD include:
 - App logs.
 - Test runner logs.
 - SQLite database copy when safe.
-- JSON config copy when safe.
+- YAML settings copy when safe.
 
 Artifacts MUST NOT include sensitive terminal output unless explicitly enabled for a local debugging run.
 

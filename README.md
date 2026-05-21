@@ -21,6 +21,7 @@ The first implementation stays small: it gives users a project list, one active 
 - Open `lazygit` in a terminal inside the right panel, falling back to `git diff` when `lazygit` is unavailable.
 - Switch the right panel between file tree, `nvim`, and `lazygit` by cycling tabs or clicking mode icons.
 - Support fuzzy matching in the file browser.
+- Provide a title-bar settings gear for the app-owned YAML settings file.
 - Make every major panel resizeable.
 - Allow old or completed threads to be archived.
 
@@ -109,6 +110,8 @@ When the Git mode is opened, the right panel launches `lazygit` in the selected 
 
 When an agent terminal has focus, `Cmd+V` can paste text through the normal terminal path or attach an image from the pasteboard. Image paste stores a normalized PNG under YAAW's Application Support directory and inserts `Attached image: <absolute-path>` without submitting the prompt. `Ctrl+V` uses the same image attach path when the terminal has focus.
 
+User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml` by default. The title-bar gear opens a lightweight settings sheet with actions to open and reload that YAML file.
+
 Users can switch right-panel modes by cycling tabs or clicking mode icons:
 
 - File tree.
@@ -174,7 +177,6 @@ Generated Dracula-themed example pages are available under `docs/examples/screen
 - Multi-pane editor layouts.
 - Custom source control UI.
 - Extension marketplace.
-- Rich settings system.
 - Remote development.
 - Multi-agent orchestration beyond one bound CLI agent session per thread.
 - Deep semantic code indexing.

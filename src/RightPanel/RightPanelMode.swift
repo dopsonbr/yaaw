@@ -21,10 +21,10 @@ public enum RightPanelMode: String, CaseIterable, Identifiable, Equatable, Senda
     public var next: RightPanelMode {
         switch self {
         case .files:
-            .nvim
-        case .nvim:
             .git
         case .git:
+            .nvim
+        case .nvim:
             .files
         }
     }
@@ -32,11 +32,11 @@ public enum RightPanelMode: String, CaseIterable, Identifiable, Equatable, Senda
     public var previous: RightPanelMode {
         switch self {
         case .files:
-            .git
-        case .nvim:
-            .files
-        case .git:
             .nvim
+        case .git:
+            .files
+        case .nvim:
+            .git
         }
     }
 }

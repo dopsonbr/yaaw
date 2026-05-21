@@ -14,7 +14,7 @@ Replace sample file entries with a read-only file browser for the selected threa
 
 - Index files from the selected thread working directory without blocking the main UI thread.
 - Show hidden files by default.
-- Ignore heavy directories by default, including `.git`, `node_modules`, `dist`, `.build`, and derived-data folders. The default ignore list lives in the JSON config seeded by [Plan 02](02-sqlite-persistence.md).
+- Ignore heavy directories by default, including `.git`, `node_modules`, `dist`, `.build`, and derived-data folders. The default ignore list lives in the YAML settings file seeded by [Plan 02](02-sqlite-persistence.md).
 - Add deterministic ranking: exact filename matches, prefix matches, then fuzzy path matches.
 - Keep indexing read-only and never modify repository files.
 - Add a SQLite migration for file-index metadata (per-thread root path, last index timestamp, file count, and any other coarse stats useful for invalidation). Actual file entries do not need to be persisted; they MUST be safe to rebuild on demand. The migration version number is the next unused integer at the time this plan ships (the prior plans land migrations 1–4).

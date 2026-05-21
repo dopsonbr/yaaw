@@ -36,7 +36,7 @@ External review findings MUST be handled as follows to avoid review loops:
 
 ## Persistence Strategy
 
-Plan 02 establishes the SQLite store and migrates only what Plan 01 produces (projects, threads, archive state, last selection, right-panel mode per thread) plus the JSON configuration boundary. Later plans extend the schema through additive migrations as they produce new durable state:
+Plan 02 establishes the SQLite store and migrates only what Plan 01 produces (projects, threads, archive state, last selection, right-panel mode per thread) plus the YAML settings boundary. Later plans extend the schema through additive migrations as they produce new durable state:
 
 - Plan 03 adds `agent_cli` per thread.
 - Plan 04 adds panel sizes and collapsed states.

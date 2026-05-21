@@ -9,7 +9,7 @@ public enum SQLiteStoreError: Error, Equatable {
 }
 
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 7
+    public static let schemaVersion = 8
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -62,7 +62,8 @@ public final class SQLiteYAAWStore: YAAWStore {
             let selectedThreadID = try loadUUID(key: "selected_thread_id")
                 ?? threads.first { $0.projectID == selectedProjectID && !$0.isArchived }?.id
             let modes = try loadRightPanelModes()
-            let selectedMode = selectedThreadID.flatMap { modes[$0] } ?? .files
+            let rightPanelStates = try loadRightPanelStates(fallbackModes: modes)
+            let selectedMode = selectedThreadID.map { rightPanelStates[$0]?.selectedMode ?? modes[$0] ?? .files } ?? .files
             let fallbackGlobalTerminalExpanded = try loadBool(key: "is_global_terminal_expanded") ?? false
             let layoutState = try loadLayoutState(
                 fallbackGlobalTerminalExpanded: fallbackGlobalTerminalExpanded
@@ -76,6 +77,7 @@ public final class SQLiteYAAWStore: YAAWStore {
                 selectedProjectID: selectedProjectID,
                 selectedThreadID: selectedThreadID,
                 rightPanelModesByThreadID: modes,
+                rightPanelStatesByThreadID: rightPanelStates,
                 selectedRightPanelMode: selectedMode,
                 bottomTerminalExpandedThreadIDs: bottomTerminalExpandedThreadIDs,
                 isGlobalTerminalExpanded: layoutState.isGlobalTerminalExpanded,
@@ -92,6 +94,8 @@ public final class SQLiteYAAWStore: YAAWStore {
         do {
             try transaction {
                 try execute("DELETE FROM right_panel_modes")
+                try execute("DELETE FROM right_panel_tab_state")
+                try execute("DELETE FROM right_panel_tabs")
                 try execute("DELETE FROM bottom_terminal_state")
                 try execute("DELETE FROM file_index_metadata")
                 try execute("DELETE FROM layout_state")
@@ -107,6 +111,13 @@ public final class SQLiteYAAWStore: YAAWStore {
                 }
                 for (threadID, mode) in snapshot.rightPanelModesByThreadID {
                     try insertRightPanelMode(threadID: threadID, mode: mode)
+                }
+                for thread in snapshot.threads {
+                    let state = snapshot.rightPanelStatesByThreadID[thread.id]
+                        ?? RightPanelState.defaultState(
+                            selectedMode: snapshot.rightPanelModesByThreadID[thread.id] ?? .files
+                        )
+                    try insertRightPanelState(threadID: thread.id, state: state)
                 }
                 for threadID in snapshot.bottomTerminalExpandedThreadIDs {
                     try insertBottomTerminalState(threadID: threadID, isExpanded: true)
@@ -200,6 +211,13 @@ private extension SQLiteYAAWStore {
                 try createBottomTerminalStateSchema()
                 try seedBottomTerminalStateFromLegacyLayout()
                 try execute("PRAGMA user_version = 7")
+            }
+        }
+        if currentVersion < 8 {
+            try transaction {
+                try createRightPanelTabStateSchema()
+                try seedRightPanelTabStateFromLegacyModes()
+                try execute("PRAGMA user_version = 8")
             }
         }
     }
@@ -375,6 +393,30 @@ private extension SQLiteYAAWStore {
         )
     }
 
+    func createRightPanelTabStateSchema() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS right_panel_tabs (
+                thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                tab_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('files', 'git', 'nvim')),
+                title TEXT NOT NULL,
+                relative_path TEXT,
+                tab_order INTEGER NOT NULL,
+                PRIMARY KEY (thread_id, tab_id)
+            )
+            """
+        )
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS right_panel_tab_state (
+                thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                selected_tab_id TEXT NOT NULL
+            )
+            """
+        )
+    }
+
     func seedBottomTerminalStateFromLegacyLayout() throws {
         let isExpanded = try loadLayoutBool(key: "global_terminal_expanded")
             ?? (try loadBool(key: "is_global_terminal_expanded") ?? false)
@@ -383,6 +425,16 @@ private extension SQLiteYAAWStore {
             return
         }
         try insertBottomTerminalState(threadID: selectedThreadID, isExpanded: true)
+    }
+
+    func seedRightPanelTabStateFromLegacyModes() throws {
+        let modes = try loadRightPanelModes()
+        for thread in try loadThreads() {
+            try insertRightPanelState(
+                threadID: thread.id,
+                state: RightPanelState.defaultState(selectedMode: modes[thread.id] ?? .files)
+            )
+        }
     }
 
     func userVersion() throws -> Int {
@@ -495,6 +547,41 @@ private extension SQLiteYAAWStore {
         bind(threadID.uuidString, at: 1, in: statement)
         bind(mode.rawValue, at: 2, in: statement)
         try stepDone(statement)
+    }
+
+    func insertRightPanelState(threadID: UUID, state: RightPanelState) throws {
+        let tabs = RightPanelState.normalizedTabs(state.tabs)
+        for (index, tab) in tabs.enumerated() {
+            let statement = try prepare(
+                """
+                INSERT INTO right_panel_tabs (
+                    thread_id,
+                    tab_id,
+                    kind,
+                    title,
+                    relative_path,
+                    tab_order
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+            bind(threadID.uuidString, at: 1, in: statement)
+            bind(tab.id, at: 2, in: statement)
+            bind(tab.kind.rawValue, at: 3, in: statement)
+            bind(tab.title, at: 4, in: statement)
+            bindOptional(tab.relativePath, at: 5, in: statement)
+            sqlite3_bind_int(statement, 6, Int32(index))
+            try stepDone(statement)
+        }
+
+        let stateStatement = try prepare(
+            "INSERT INTO right_panel_tab_state (thread_id, selected_tab_id) VALUES (?, ?)"
+        )
+        defer { sqlite3_finalize(stateStatement) }
+        bind(threadID.uuidString, at: 1, in: stateStatement)
+        bind(state.selectedTabID, at: 2, in: stateStatement)
+        try stepDone(stateStatement)
     }
 
     func insertBottomTerminalState(threadID: UUID, isExpanded: Bool) throws {
@@ -713,6 +800,50 @@ private extension SQLiteYAAWStore {
             }
         }
         return modes
+    }
+
+    func loadRightPanelStates(fallbackModes: [UUID: RightPanelMode]) throws -> [UUID: RightPanelState] {
+        let tabsStatement = try prepare(
+            """
+            SELECT thread_id, tab_id, kind, title, relative_path
+            FROM right_panel_tabs
+            ORDER BY thread_id, tab_order, title
+            """
+        )
+        defer { sqlite3_finalize(tabsStatement) }
+        var tabsByThreadID: [UUID: [RightPanelTab]] = [:]
+        while sqlite3_step(tabsStatement) == SQLITE_ROW {
+            guard let threadID = UUID(uuidString: text(at: 0, in: tabsStatement)),
+                  let kind = RightPanelTabKind(rawValue: text(at: 2, in: tabsStatement)) else {
+                continue
+            }
+            tabsByThreadID[threadID, default: []].append(
+                RightPanelTab(
+                    id: text(at: 1, in: tabsStatement),
+                    kind: kind,
+                    title: text(at: 3, in: tabsStatement),
+                    relativePath: optionalText(at: 4, in: tabsStatement)
+                )
+            )
+        }
+
+        let stateStatement = try prepare("SELECT thread_id, selected_tab_id FROM right_panel_tab_state")
+        defer { sqlite3_finalize(stateStatement) }
+        var selectedTabIDsByThreadID: [UUID: String] = [:]
+        while sqlite3_step(stateStatement) == SQLITE_ROW {
+            guard let threadID = UUID(uuidString: text(at: 0, in: stateStatement)) else { continue }
+            selectedTabIDsByThreadID[threadID] = text(at: 1, in: stateStatement)
+        }
+
+        var states: [UUID: RightPanelState] = [:]
+        for thread in try loadThreads() {
+            let tabs = tabsByThreadID[thread.id] ?? RightPanelState.defaultTabs
+            let selectedTabID = selectedTabIDsByThreadID[thread.id]
+                ?? fallbackModes[thread.id]?.defaultTabID
+                ?? RightPanelTab.filesID
+            states[thread.id] = RightPanelState(tabs: tabs, selectedTabID: selectedTabID)
+        }
+        return states
     }
 
     func loadFileIndexMetadata() throws -> [UUID: FileIndexMetadata] {

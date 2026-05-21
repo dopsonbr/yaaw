@@ -202,8 +202,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             .appendingPathComponent("AgentCLICaptures", isDirectory: true)
     }
 
-    public func terminalCommand(for thread: AgentThread) -> [String] {
-        let command = invocation(for: thread).command
+    public func terminalCommand(for thread: AgentThread, executableNameOverride: String? = nil) -> [String] {
+        let command = invocation(for: thread, executableNameOverride: executableNameOverride).command
         guard let captureLogURL = captureLogURL(for: thread),
               FileManager.default.isExecutableFile(atPath: "/usr/bin/script") else {
             return command
@@ -221,18 +221,25 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         return [shellPath, "-lic", shellCommand]
     }
 
-    public func invocation(for thread: AgentThread) -> AgentCLIInvocation {
+    public func invocation(for thread: AgentThread, executableNameOverride: String? = nil) -> AgentCLIInvocation {
         guard let adapter = adaptersByKind[thread.agentCLI] else {
+            let executableName = executableNameOverride ?? thread.agentCLI.rawValue
             return AgentCLIInvocation(
-                executableName: thread.agentCLI.rawValue,
-                resolvedExecutablePath: nil,
+                executableName: executableName,
+                resolvedExecutablePath: resolver.executablePath(named: executableName, environment: environment),
                 arguments: []
             )
         }
-        let resolvedPath = resolver.executablePath(named: adapter.executableName, environment: environment)
-        return adapter.invocation(
+        let executableName = executableNameOverride ?? adapter.executableName
+        let resolvedPath = resolver.executablePath(named: executableName, environment: environment)
+        let invocation = adapter.invocation(
             sessionIdentity: thread.sessionIdentity,
             resolvedExecutablePath: resolvedPath
+        )
+        return AgentCLIInvocation(
+            executableName: executableName,
+            resolvedExecutablePath: invocation.resolvedExecutablePath,
+            arguments: invocation.arguments
         )
     }
 

@@ -64,6 +64,8 @@ The shell has four resizeable regions:
 
 Each region should use native split-view handles. Collapsed regions become narrow icon rails instead of disappearing from the user's mental model.
 
+The title bar includes a settings gear. The gear opens a lightweight settings sheet that shows the app-owned YAML settings path, current effective defaults, and actions to open or reload the file.
+
 ## Navigation Model
 
 ### Project
@@ -185,6 +187,22 @@ Persist:
 - Last selected right-panel mode.
 
 Terminal scrollback persistence is optional for the first version.
+
+## Settings
+
+User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml` unless `YAAW_CONFIG_PATH` points to another file.
+
+The YAML file is the source of truth for:
+
+- Keyboard shortcuts.
+- Dracula theme selection.
+- Default agent CLI.
+- Editor fallback order.
+- Git and diff tool commands.
+- Agent executable command names.
+- File indexing ignore rules.
+
+The generated file should be heavily commented so users can see each default and which represented fields are not changeable yet. The app should parse settings forgivingly: unknown keys are ignored, missing keys use defaults, and malformed YAML recovers to defaults with a local diagnostic event. Normal startup should not rewrite a user-edited settings file.
 
 ## Keyboard Shortcuts
 

@@ -13,6 +13,7 @@ Read the documentation in this order:
 7. [Implementation Plans](plans/)
    - [Implementation Order](plans/implementation-order.md)
 8. [Standards](standards/)
+   - [Settings](standards/settings.md)
 9. [Decisions](decisions/) — open product/architecture questions and the defaults plans assume until they are resolved.
 
 Implementation plans should reference the relevant requirements and standards.

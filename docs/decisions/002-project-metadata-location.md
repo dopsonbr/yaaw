@@ -9,7 +9,7 @@
 
 ## Options
 
-1. **App-owned only.** All metadata in app SQLite + JSON config. No files written to project directories. Survives `git clean`. Does not survive moving the project root unless the user re-adds it.
+1. **App-owned only.** All metadata in app SQLite + YAML settings. No files written to project directories. Survives `git clean`. Does not survive moving the project root unless the user re-adds it.
 2. **Hybrid.** A lightweight `.yaaw/` (or similar) in the project root for portable per-repo state plus app-owned metadata for everything else.
 
 ## Recommended Default

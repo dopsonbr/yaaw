@@ -35,7 +35,7 @@ private final class E2ERunner {
         try resetArtifacts()
         try writeFixtureProject()
         try writeCommandDoubles()
-        try JSONConfigurationStore(path: paths.configPath).save(YAAWConfiguration())
+        try YAMLConfigurationStore(path: paths.configPath).save(YAAWConfiguration())
 
         let focusedBehavior = try runFocusedBehaviorAssertions()
         try writeVisualStateDatabases(selectedThreadID: focusedBehavior.codexThreadID)
@@ -409,7 +409,7 @@ private final class E2ERunner {
     private func assertMissingLazygitFallsBackToGitDiff() throws {
         let databasePath = paths.stateDirectory.appendingPathComponent("missing-lazygit.sqlite")
         let store = try makeSandboxSeededStore(databasePath: databasePath)
-        let configuration = JSONConfigurationStore(path: paths.configPath).load()
+        let configuration = YAMLConfigurationStore(path: paths.configPath).load()
         var missingToolEnvironment = environment
         missingToolEnvironment["PATH"] = paths.missingToolBinDirectory.path + ":/usr/bin:/bin:/usr/sbin:/sbin"
         let model = AppModel(
@@ -436,7 +436,7 @@ private final class E2ERunner {
 
     private func assertMissingNvimFallsBackToVimThenVi() throws {
         let databasePath = paths.stateDirectory.appendingPathComponent("missing-nvim.sqlite")
-        let configuration = JSONConfigurationStore(path: paths.configPath).load()
+        let configuration = YAMLConfigurationStore(path: paths.configPath).load()
         let nvimPath = paths.missingToolBinDirectory.appendingPathComponent("nvim")
         if fileManager.fileExists(atPath: nvimPath.path) {
             try fileManager.removeItem(at: nvimPath)
@@ -600,7 +600,7 @@ private final class E2ERunner {
 
     private func makeModel(databasePath: URL) throws -> AppModel {
         let store = try makeSandboxSeededStore(databasePath: databasePath)
-        let configuration = JSONConfigurationStore(path: paths.configPath).load()
+        let configuration = YAMLConfigurationStore(path: paths.configPath).load()
         return AppModel(
             store: store,
             agentCLIBindings: makeAgentCLIService(),
@@ -687,7 +687,7 @@ private struct E2EPaths {
     var binDirectory: URL { root.appendingPathComponent("bin", isDirectory: true) }
     var missingToolBinDirectory: URL { root.appendingPathComponent("bin-missing-lazygit", isDirectory: true) }
     var captureDirectory: URL { root.appendingPathComponent("captures", isDirectory: true) }
-    var configPath: URL { root.appendingPathComponent("config/config.json") }
+    var configPath: URL { root.appendingPathComponent("config/settings.yaml") }
     var workspaceDirectory: URL { root.appendingPathComponent("sandbox-workspace", isDirectory: true) }
     var projectDirectory: URL { root.appendingPathComponent("fixture-project", isDirectory: true) }
     var missingDirectory: URL { root.appendingPathComponent("missing-directory-project", isDirectory: true) }

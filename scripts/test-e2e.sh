@@ -56,7 +56,7 @@ set_launch_environment() {
   local app_path="${2:-$ARTIFACT_DIR/bin:$PATH}"
   local zdotdir="${3:-$E2E_ZDOTDIR}"
   launchctl setenv YAAW_DATABASE_PATH "$database_path"
-  launchctl setenv YAAW_CONFIG_PATH "$ARTIFACT_DIR/config/config.json"
+  launchctl setenv YAAW_CONFIG_PATH "$ARTIFACT_DIR/config/settings.yaml"
   launchctl setenv YAAW_CAPTURE_DIRECTORY "$ARTIFACT_DIR/captures"
   launchctl setenv YAAW_PATH "$app_path"
   launchctl setenv HOME "$E2E_HOME"
@@ -79,9 +79,11 @@ wait_for_window() {
 tell application "System Events"
   repeat 150 times
     if exists process "$APP_NAME" then
-      tell process "$APP_NAME"
-        if (count of windows) > 0 then return
-      end tell
+      try
+        tell process "$APP_NAME"
+          if (count of windows) > 0 then return
+        end tell
+      end try
     end if
     delay 0.1
   end repeat
@@ -127,7 +129,12 @@ capture_window() {
   window_info="$(osascript <<APPLESCRIPT 2>/dev/null || true
 tell application "System Events"
   tell process "$APP_NAME"
-    set frontmost to true
+    try
+      set frontmost to true
+    end try
+    try
+      perform action "AXRaise" of window 1
+    end try
     set windowPosition to position of window 1
     set windowSize to size of window 1
     set windowID to ""
@@ -265,6 +272,7 @@ run_keyboard_input_probe() {
 
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
+  set frontmost of process "$APP_NAME" to true
   tell process "$APP_NAME"
     perform action "AXRaise" of window 1
     set position of window 1 to {0, 25}
@@ -274,43 +282,9 @@ tell application "System Events"
     set baseX to item 1 of windowPosition
     set baseY to item 2 of windowPosition
     click at {baseX + 470, baseY + 360}
+    delay 1
+    keystroke "$expected"
     delay 0.2
-    key code 40
-    delay 0.05
-    key code 14
-    delay 0.05
-    key code 16
-    delay 0.05
-    key code 11
-    delay 0.05
-    key code 31
-    delay 0.05
-    key code 0
-    delay 0.05
-    key code 15
-    delay 0.05
-    key code 2
-    delay 0.05
-    key code 35
-    delay 0.05
-    key code 15
-    delay 0.05
-    key code 31
-    delay 0.05
-    key code 11
-    delay 0.05
-    key code 14
-    delay 0.05
-    key code 14
-    delay 0.05
-    key code 45
-    delay 0.05
-    key code 17
-    delay 0.05
-    key code 14
-    delay 0.05
-    key code 15
-    delay 0.05
     key code 36
   end tell
 end tell

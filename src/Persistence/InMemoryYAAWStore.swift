@@ -6,6 +6,7 @@ public struct YAAWSnapshot: Equatable, Sendable {
     public var selectedProjectID: UUID
     public var selectedThreadID: UUID?
     public var rightPanelModesByThreadID: [UUID: RightPanelMode]
+    public var rightPanelStatesByThreadID: [UUID: RightPanelState]
     public var selectedRightPanelMode: RightPanelMode
     public var bottomTerminalExpandedThreadIDs: Set<UUID>
     public var layoutState: LayoutState
@@ -29,6 +30,7 @@ public struct YAAWSnapshot: Equatable, Sendable {
         selectedProjectID: UUID,
         selectedThreadID: UUID?,
         rightPanelModesByThreadID: [UUID: RightPanelMode] = [:],
+        rightPanelStatesByThreadID: [UUID: RightPanelState] = [:],
         selectedRightPanelMode: RightPanelMode,
         bottomTerminalExpandedThreadIDs: Set<UUID> = [],
         isGlobalTerminalExpanded: Bool,
@@ -40,6 +42,14 @@ public struct YAAWSnapshot: Equatable, Sendable {
         self.selectedProjectID = selectedProjectID
         self.selectedThreadID = selectedThreadID
         self.rightPanelModesByThreadID = rightPanelModesByThreadID
+        var states = rightPanelStatesByThreadID
+        for (threadID, mode) in rightPanelModesByThreadID where states[threadID] == nil {
+            states[threadID] = RightPanelState.defaultState(selectedMode: mode)
+        }
+        if let selectedThreadID, states[selectedThreadID] == nil {
+            states[selectedThreadID] = RightPanelState.defaultState(selectedMode: selectedRightPanelMode)
+        }
+        self.rightPanelStatesByThreadID = states
         self.selectedRightPanelMode = selectedRightPanelMode
         self.bottomTerminalExpandedThreadIDs = bottomTerminalExpandedThreadIDs
         self.layoutState = layoutState ?? LayoutState(isGlobalTerminalExpanded: isGlobalTerminalExpanded)

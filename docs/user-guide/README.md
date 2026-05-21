@@ -10,6 +10,8 @@ YAAW wraps local CLIs; it does not act as an agent harness. Prompts, tool calls,
 
 The app uses the Dracula theme across all panels, terminals, file browsing, and editing surfaces.
 
+Settings are stored in an app-owned YAML file. Use the title-bar gear to inspect the current settings path, open the YAML file, or reload settings after editing it.
+
 ## Main Screen
 
 The main screen has three areas:
@@ -147,6 +149,20 @@ Archived threads should move out of the main sidebar view but remain available f
 | `Cmd+Shift+]` | Cycle right-panel tabs forward. |
 
 Additional shortcuts should be added only when the behavior is stable and clearly useful.
+
+## Configure Settings
+
+Open the title-bar gear to view the settings file path. By default, settings live at:
+
+```text
+~/Library/Application Support/YAAW/settings.yaml
+```
+
+The generated YAML file includes comments showing current defaults and which fields are active now. Current active settings include keyboard shortcuts, the default agent CLI, editor fallback order, Git and diff commands, agent command names, and file indexing ignore rules.
+
+Theme settings are represented in YAML, but only Dracula is implemented right now. Custom theme palettes are placeholders for future expansion.
+
+After editing the YAML file, return to the settings sheet and choose Reload. If the file is malformed, YAAW keeps running with defaults and records a local diagnostic event.
 
 ## Recommended First Workflow
 

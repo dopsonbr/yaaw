@@ -3,14 +3,14 @@ import XCTest
 
 final class RightPanelModeTests: XCTestCase {
     func testRightPanelModeCyclesForwardInRequiredOrder() {
-        XCTAssertEqual(RightPanelMode.files.next, .nvim)
-        XCTAssertEqual(RightPanelMode.nvim.next, .git)
-        XCTAssertEqual(RightPanelMode.git.next, .files)
+        XCTAssertEqual(RightPanelMode.files.next, .git)
+        XCTAssertEqual(RightPanelMode.git.next, .nvim)
+        XCTAssertEqual(RightPanelMode.nvim.next, .files)
     }
 
     func testRightPanelModeCyclesBackwardInRequiredOrder() {
-        XCTAssertEqual(RightPanelMode.files.previous, .git)
-        XCTAssertEqual(RightPanelMode.git.previous, .nvim)
-        XCTAssertEqual(RightPanelMode.nvim.previous, .files)
+        XCTAssertEqual(RightPanelMode.files.previous, .nvim)
+        XCTAssertEqual(RightPanelMode.git.previous, .files)
+        XCTAssertEqual(RightPanelMode.nvim.previous, .git)
     }
 }

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replace the in-memory placeholder store with an app-owned SQLite database that persists exactly what Plan 01 produces, plus the JSON configuration boundary. Later plans add additive migrations as they produce new durable state.
+Replace the in-memory placeholder store with an app-owned SQLite database that persists exactly what Plan 01 produces, plus the YAML settings boundary. Later plans add additive migrations as they produce new durable state.
 
 ## Requirements
 
@@ -39,27 +39,27 @@ Each later plan adds its own migration. This plan MUST NOT introduce columns or 
 
 ### JSON Configuration
 
-- Add a JSON configuration boundary under `src/Persistence/` separate from the SQLite store.
-- Migration `1` of the JSON config seeds Dracula as the only theme value and seeds the default ignore rules referenced by [Plan 08](08-file-browser-fuzzy-search.md).
-- Parse unknown or malformed values safely. The app MUST continue to launch when the JSON config is corrupt by falling back to defaults and logging a recovery event.
-- Write JSON config atomically (write to a temp file in the same directory, then rename).
-- Keep the JSON config path injectable for tests.
+- Add a YAML settings boundary under `src/Persistence/` separate from the SQLite store.
+- Migration `1` of the YAML settings seeds Dracula as the only active theme value and seeds the default ignore rules referenced by [Plan 08](08-file-browser-fuzzy-search.md).
+- Parse unknown or malformed values safely. The app MUST continue to launch when the YAML settings file is corrupt by falling back to defaults and logging a recovery event.
+- Write YAML settings atomically (write to a temp file in the same directory, then rename).
+- Keep the YAML settings path injectable for tests.
 
 ## Tests
 
 - Migration tests verify a fresh database initializes to schema version 1.
 - Repository tests verify projects, threads, archive state, last-selection, and right-panel modes survive store reinitialization against a real temporary SQLite file.
 - Transaction tests verify a failed multi-record write does not leave partial state.
-- JSON config tests verify default seeding, atomic write, recovery from a malformed file, and round-trip read/write against a real temporary path.
+- YAML settings tests verify default seeding, atomic write, recovery from a malformed file, and round-trip read/write against a real temporary path.
 
 ## Acceptance Criteria
 
 - App state loads from and saves to a real app-owned SQLite database at the injected path.
 - Migration version 1 creates exactly the tables/columns listed above and no others.
 - Project, thread, archive, last-selection, and right-panel mode records survive store reinitialization.
-- The JSON configuration boundary exists at an injectable path with Dracula seeded as the theme and default ignore rules seeded for later use.
-- A malformed JSON config does not prevent app launch and is recovered to defaults with a logged event.
-- Tests use real temporary SQLite files and real temporary JSON config paths, not mocks.
+- The YAML settings boundary exists at an injectable path with Dracula seeded as the theme and default ignore rules seeded for later use.
+- A malformed YAML settings file does not prevent app launch and is recovered to defaults with a logged event.
+- Tests use real temporary SQLite files and real temporary YAML settings paths, not mocks.
 - No implementation writes metadata into project directories.
 - `scripts/build.sh` passes.
 - `scripts/test.sh` passes with persistence coverage.

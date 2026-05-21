@@ -4,6 +4,7 @@ public enum TerminalRole: Hashable, Sendable {
     case project(threadID: UUID)
     case bottom(threadID: UUID)
     case nvim(threadID: UUID)
+    case nvimTab(threadID: UUID, tabID: String)
     case lazygit(threadID: UUID)
 
     public var surfaceKind: TerminalSurfaceKind {
@@ -12,7 +13,7 @@ public enum TerminalRole: Hashable, Sendable {
             return .project
         case .bottom:
             return .bottom
-        case .nvim:
+        case .nvim, .nvimTab:
             return .nvim
         case .lazygit:
             return .lazygit

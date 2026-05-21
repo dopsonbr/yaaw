@@ -238,7 +238,123 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.selectedThreadID, secondThreadID)
         XCTAssertEqual(reloaded.rightPanelModesByThreadID[firstThreadID], .git)
         XCTAssertEqual(reloaded.rightPanelModesByThreadID[secondThreadID], .nvim)
+        XCTAssertEqual(reloaded.rightPanelStatesByThreadID[firstThreadID]?.selectedTabID, RightPanelTab.gitID)
+        XCTAssertEqual(reloaded.rightPanelStatesByThreadID[secondThreadID]?.selectedTabID, RightPanelTab.defaultNvimID)
         XCTAssertTrue(reloaded.isGlobalTerminalExpanded)
+    }
+
+    func testSQLitePersistsRightPanelNvimTabsThroughReload() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: path)
+        let projectID = UUID()
+        let threadID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
+        var state = RightPanelState.defaultState(selectedMode: .files)
+        let selectedTab = state.openNvimTab(relativePath: "src/App/RootView.swift")
+
+        store.save(
+            YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .nvim],
+                rightPanelStatesByThreadID: [threadID: state],
+                selectedRightPanelMode: .nvim,
+                isGlobalTerminalExpanded: false
+            )
+        )
+
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
+        let reloadedState = try XCTUnwrap(reloaded.rightPanelStatesByThreadID[threadID])
+
+        XCTAssertEqual(reloadedState.selectedTabID, selectedTab.id)
+        XCTAssertEqual(reloadedState.tabs.map(\.id), state.tabs.map(\.id))
+        XCTAssertEqual(reloadedState.tabs.last?.relativePath, "src/App/RootView.swift")
+    }
+
+    func testSQLiteMigrationSeedsRightPanelTabsFromVersionSevenModes() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let projectID = UUID()
+        let threadID = UUID()
+        try withSQLiteDatabase(path: path) { database in
+            try executeSQL(
+                """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    root_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL
+                );
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    working_directory TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_opened_at REAL NOT NULL,
+                    is_archived INTEGER NOT NULL CHECK (is_archived IN (0, 1)),
+                    agent_cli TEXT NOT NULL CHECK (agent_cli IN ('codex', 'claude', 'opencode', 'copilot')),
+                    session_identity TEXT,
+                    canonical_session_name TEXT
+                );
+                CREATE TABLE app_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE right_panel_modes (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    mode TEXT NOT NULL CHECK (mode IN ('files', 'nvim', 'git'))
+                );
+                CREATE TABLE layout_state (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE file_index_metadata (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    root_path TEXT NOT NULL,
+                    indexed_at REAL NOT NULL,
+                    file_count INTEGER NOT NULL,
+                    ignored_directory_count INTEGER NOT NULL
+                );
+                CREATE TABLE bottom_terminal_state (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    is_expanded INTEGER NOT NULL CHECK (is_expanded IN (0, 1))
+                );
+                INSERT INTO projects (id, display_name, root_directory, created_at, last_opened_at)
+                VALUES ('\(projectID.uuidString)', 'Project', '/tmp', 0, 0);
+                INSERT INTO threads (
+                    id,
+                    display_name,
+                    project_id,
+                    working_directory,
+                    created_at,
+                    last_opened_at,
+                    is_archived,
+                    agent_cli
+                )
+                VALUES ('\(threadID.uuidString)', 'Thread', '\(projectID.uuidString)', '/tmp', 0, 0, 0, 'codex');
+                INSERT INTO app_state (key, value) VALUES ('selected_project_id', '\(projectID.uuidString)');
+                INSERT INTO app_state (key, value) VALUES ('selected_thread_id', '\(threadID.uuidString)');
+                INSERT INTO right_panel_modes (thread_id, mode) VALUES ('\(threadID.uuidString)', 'git');
+                PRAGMA user_version = 7;
+                """,
+                database: database
+            )
+        }
+
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
+
+        XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
+        XCTAssertTrue(try sqliteTableColumns(path: path, table: "right_panel_tabs").contains("tab_id"))
+        XCTAssertEqual(reloaded.rightPanelStatesByThreadID[threadID]?.selectedTabID, RightPanelTab.gitID)
+        XCTAssertEqual(
+            reloaded.rightPanelStatesByThreadID[threadID]?.tabs.map(\.id),
+            [RightPanelTab.filesID, RightPanelTab.gitID, RightPanelTab.defaultNvimID]
+        )
     }
 
     func testSQLiteLayoutStatePersistsThroughReload() throws {
@@ -532,41 +648,86 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.threads.first?.displayName, "Hello World")
     }
 
-    func testJSONConfigurationSeedsDefaultsAndRoundTrips() throws {
-        let path = try temporaryDirectory().appendingPathComponent("config.json")
-        let store = JSONConfigurationStore(path: path)
+    func testYAMLConfigurationSeedsDefaultsAndWritesCommentedTemplate() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
 
         let seeded = store.load()
-        try store.save(YAAWConfiguration(ignoreRules: seeded.ignoreRules + ["vendor"]))
-        let reloaded = store.load()
+        let template = try String(contentsOf: path, encoding: .utf8)
 
-        XCTAssertEqual(seeded.theme, "Dracula")
+        XCTAssertEqual(seeded.themeName, "dracula")
+        XCTAssertEqual(seeded.defaultAgentCLI, .codex)
         XCTAssertTrue(seeded.ignoreRules.contains(".git"))
         XCTAssertTrue(seeded.ignoreRules.contains("node_modules"))
         XCTAssertTrue(seeded.ignoreRules.contains("Music"))
+        XCTAssertTrue(template.contains("# YAAW settings."))
+        XCTAssertTrue(template.contains("# default: [nvim, vim, vi]"))
+        XCTAssertTrue(template.contains("# not changeable yet: custom palettes are reserved for future expansion."))
+    }
+
+    func testYAMLConfigurationLoadsOverridesAndUnknownKeys() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(
+            """
+            version: 1
+            unknownTopLevel: ignored
+            agent:
+              default: claude
+            theme:
+              active: dracula
+            keyboardShortcuts:
+              toggleBottomTerminal:
+                key: k
+                modifiers: [command, option]
+            tools:
+              editors:
+                preferred: [zed, nvim]
+              git:
+                preferred: tig
+              diff:
+                fallback: [delta, "--diff"]
+              agents:
+                codex: codex-nightly
+            fileIndexing:
+              ignoreRules:
+                - .git
+                - node_modules
+                - vendor
+            """.utf8
+        ).write(to: path)
+        let store = YAMLConfigurationStore(path: path)
+
+        let reloaded = store.load()
+
+        XCTAssertEqual(reloaded.defaultAgentCLI, .claude)
+        XCTAssertEqual(reloaded.shortcut(for: .toggleBottomTerminal).key, "k")
+        XCTAssertEqual(reloaded.shortcut(for: .toggleBottomTerminal).modifiers, [.command, .option])
+        XCTAssertEqual(reloaded.tools.editors.preferred, ["zed", "nvim"])
+        XCTAssertEqual(reloaded.tools.git.preferred, "tig")
+        XCTAssertEqual(reloaded.tools.diff.fallback, ["delta", "--diff"])
+        XCTAssertEqual(reloaded.tools.agents.codex, "codex-nightly")
         XCTAssertTrue(reloaded.ignoreRules.contains("vendor"))
         XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
     }
 
-    func testJSONConfigurationAddsNewPrivacyDefaultsToExistingConfig() throws {
-        let path = try temporaryDirectory().appendingPathComponent("config.json")
+    func testYAMLConfigurationMergesMissingDefaults() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(
             """
-            {
-              "ignoreRules" : [
-                ".git",
-                "node_modules"
-              ],
-              "theme" : "Dracula",
-              "version" : 1
-            }
+            fileIndexing:
+              ignoreRules:
+                - .git
+                - node_modules
             """.utf8
         ).write(to: path)
-        let store = JSONConfigurationStore(path: path)
+        let store = YAMLConfigurationStore(path: path)
 
         let reloaded = store.load()
 
+        XCTAssertEqual(reloaded.defaultAgentCLI, .codex)
+        XCTAssertEqual(reloaded.tools.editors.preferred, ["nvim", "vim", "vi"])
         XCTAssertTrue(reloaded.ignoreRules.contains(".git"))
         XCTAssertTrue(reloaded.ignoreRules.contains("node_modules"))
         XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
@@ -575,14 +736,22 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(reloaded.ignoreRules.contains("Photos Library.photoslibrary"))
     }
 
-    func testJSONConfigurationRecoversMalformedFile() throws {
-        let path = try temporaryDirectory().appendingPathComponent("config.json")
+    func testYAMLConfigurationRecoversMalformedFileAndRecordsDiagnostic() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let recorder = RecordingDiagnosticEventRecorder()
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("{ nope".utf8).write(to: path)
 
-        let recovered = JSONConfigurationStore(path: path).load()
+        let recovered = YAMLConfigurationStore(path: path, diagnosticRecorder: recorder).load()
 
         XCTAssertEqual(recovered, YAAWConfiguration())
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "Configuration"
+                    && $0.name == "settings_yaml_recovered"
+                    && $0.metadata["path"] == path.path
+            }
+        )
     }
 
     private func temporaryDirectory() throws -> URL {

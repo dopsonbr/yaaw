@@ -4,85 +4,76 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var model: AppModel
+    let settingsPath: URL
+    let onOpenSettingsFile: () -> Void
+    let onReloadSettings: () -> Void
+    @State private var isSettingsPresented = false
 
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    if model.layoutState.isSidebarCollapsed {
-                        CollapsedPanelRail(
-                            systemImage: "sidebar.left",
-                            accessibilityLabel: "Expand sidebar",
-                            action: model.toggleSidebarCollapsed
-                        )
-                        .frame(width: 44)
-                    } else {
-                        SidebarView(model: model)
-                            .frame(width: model.layoutState.sidebarWidth)
+                    AppChromeHeader(
+                        title: model.windowTitle,
+                        isSidebarCollapsed: model.layoutState.isSidebarCollapsed,
+                        isRightPanelCollapsed: model.layoutState.isRightPanelCollapsed,
+                        onToggleSidebar: model.toggleSidebarCollapsed,
+                        onToggleRightPanel: model.toggleRightPanelCollapsed,
+                        onNavigateBack: model.navigateBack,
+                        onNavigateForward: model.navigateForward,
+                        onOpenSettings: { isSettingsPresented = true }
+                    )
+                }
+                .frame(height: 44)
+                .background(dracula(.background))
 
-                        VerticalResizeHandle(
-                            accessibilityLabel: "Resize sidebar",
-                            onDrag: { delta in
-                                model.setSidebarWidth(model.layoutState.sidebarWidth + delta)
-                            }
-                        )
-                    }
+                Divider()
+                    .overlay(dracula(.currentLine))
 
-                    Divider()
-                        .overlay(dracula(.currentLine))
-
-                    MainWorkspaceView(model: model)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    sidebarRegion
 
                     Divider()
                         .overlay(dracula(.currentLine))
 
-                    if !model.layoutState.isRightPanelCollapsed && geometry.size.width < rightPanelAdaptiveMinimumWidth {
-                        CollapsedPanelRail(
-                            systemImage: "sidebar.right",
-                            accessibilityLabel: "Right panel hidden until the window is wider",
-                            action: {}
-                        )
-                        .frame(width: 44)
-                        .disabled(true)
-                        .opacity(0.65)
-                    } else if model.layoutState.isRightPanelCollapsed {
-                        CollapsedPanelRail(
-                            systemImage: "sidebar.right",
-                            accessibilityLabel: "Expand right panel",
-                            action: model.toggleRightPanelCollapsed
-                        )
-                        .frame(width: 44)
-                    } else {
-                        VerticalResizeHandle(
-                            accessibilityLabel: "Resize right panel",
-                            onDrag: { delta in
-                                model.setRightPanelWidth(model.layoutState.rightPanelWidth - delta)
+                    VStack(spacing: 0) {
+                        HStack(spacing: 0) {
+                            MainWorkspaceView(model: model)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                            Divider()
+                                .overlay(dracula(.currentLine))
+
+                            rightPanelRegion(windowWidth: geometry.size.width)
+                        }
+
+                        BottomTerminalBar(
+                            isExpanded: model.isBottomTerminalExpanded,
+                            height: model.layoutState.globalTerminalHeight,
+                            request: selectedBottomTerminalRequest,
+                            onToggle: model.toggleBottomTerminal,
+                            onResize: { delta in
+                                model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
+                            },
+                            onAppearExpanded: {
+                                model.activateSelectedBottomTerminal()
                             }
                         )
-
-                        RightPanelView(model: model)
-                            .frame(width: model.layoutState.rightPanelWidth)
                     }
                 }
-
-                BottomTerminalBar(
-                    isExpanded: model.isBottomTerminalExpanded,
-                    height: model.layoutState.globalTerminalHeight,
-                    request: selectedBottomTerminalRequest,
-                    onToggle: model.toggleBottomTerminal,
-                    onResize: { delta in
-                        model.setGlobalTerminalHeight(model.layoutState.globalTerminalHeight - delta)
-                    },
-                    onAppearExpanded: {
-                        model.activateSelectedBottomTerminal()
-                    }
-                )
             }
         }
         .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
         .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
+        .sheet(isPresented: $isSettingsPresented) {
+            SettingsSheet(
+                configuration: model.configuration,
+                settingsPath: settingsPath,
+                onOpenSettingsFile: onOpenSettingsFile,
+                onReloadSettings: onReloadSettings
+            )
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             GhosttyTerminalRuntime.closeAll()
         }
@@ -92,9 +83,229 @@ struct RootView: View {
         guard let selectedThreadID = model.selectedThreadID else { return nil }
         return model.terminalLaunchRequest(for: .bottom(threadID: selectedThreadID))
     }
+
+    @ViewBuilder
+    private var sidebarRegion: some View {
+        if model.layoutState.isSidebarCollapsed {
+            CollapsedPanelRail(
+                systemImage: "sidebar.left",
+                accessibilityLabel: "Expand sidebar",
+                action: model.toggleSidebarCollapsed
+            )
+            .frame(width: 44)
+        } else {
+            SidebarView(model: model)
+                .frame(width: model.layoutState.sidebarWidth)
+
+            VerticalResizeHandle(
+                accessibilityLabel: "Resize sidebar",
+                onDrag: { delta in
+                    model.setSidebarWidth(model.layoutState.sidebarWidth + delta)
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func rightPanelRegion(windowWidth: Double) -> some View {
+        if !model.layoutState.isRightPanelCollapsed && windowWidth < rightPanelAdaptiveMinimumWidth {
+            CollapsedPanelRail(
+                systemImage: "sidebar.right",
+                accessibilityLabel: "Right panel hidden until the window is wider",
+                action: {}
+            )
+            .frame(width: 44)
+            .disabled(true)
+            .opacity(0.65)
+        } else if model.layoutState.isRightPanelCollapsed {
+            CollapsedPanelRail(
+                systemImage: "sidebar.right",
+                accessibilityLabel: "Expand right panel",
+                action: model.toggleRightPanelCollapsed
+            )
+            .frame(width: 44)
+        } else {
+            VerticalResizeHandle(
+                accessibilityLabel: "Resize right panel",
+                onDrag: { delta in
+                    model.setRightPanelWidth(model.layoutState.rightPanelWidth - delta)
+                }
+            )
+
+            RightPanelView(model: model)
+                .frame(width: model.layoutState.rightPanelWidth)
+        }
+    }
 }
 
 private let rightPanelAdaptiveMinimumWidth = 1_680.0
+
+private struct AppChromeHeader: View {
+    let title: String
+    let isSidebarCollapsed: Bool
+    let isRightPanelCollapsed: Bool
+    let onToggleSidebar: () -> Void
+    let onToggleRightPanel: () -> Void
+    let onNavigateBack: () -> Void
+    let onNavigateForward: () -> Void
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onToggleSidebar) {
+                Image(systemName: "sidebar.left")
+                    .frame(width: 26, height: 26)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.foreground))
+            .help(isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
+            .accessibilityLabel(isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
+
+            Button(action: onNavigateBack) {
+                Image(systemName: "chevron.left")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.comment))
+            .help("Back")
+            .accessibilityLabel("Back")
+
+            Button(action: onNavigateForward) {
+                Image(systemName: "chevron.right")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.comment))
+            .help("Forward")
+            .accessibilityLabel("Forward")
+
+            Divider()
+                .overlay(dracula(.currentLine))
+                .frame(height: 28)
+
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(dracula(.foreground))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer()
+
+            Button(action: onOpenSettings) {
+                Image(systemName: "gearshape")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.foreground))
+            .help("Settings")
+            .accessibilityLabel("Open settings")
+
+            Button(action: onToggleRightPanel) {
+                Image(systemName: "sidebar.right")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.foreground))
+            .help(isRightPanelCollapsed ? "Expand right panel" : "Collapse right panel")
+            .accessibilityLabel(isRightPanelCollapsed ? "Expand right panel" : "Collapse right panel")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 12)
+    }
+}
+
+private struct SettingsSheet: View {
+    let configuration: YAAWConfiguration
+    let settingsPath: URL
+    let onOpenSettingsFile: () -> Void
+    let onReloadSettings: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Settings")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(dracula(.purple))
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(dracula(.comment))
+                .help("Close")
+                .accessibilityLabel("Close settings")
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("YAML File")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(dracula(.comment))
+
+                Text(settingsPath.path)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .foregroundStyle(dracula(.cyan))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider().overlay(dracula(.currentLine))
+
+            VStack(alignment: .leading, spacing: 10) {
+                SettingsSummaryRow(label: "Theme", value: "\(configuration.themeName) (only Dracula is active now)")
+                SettingsSummaryRow(label: "Default agent", value: configuration.defaultAgentCLI.displayName)
+                SettingsSummaryRow(label: "Editors", value: configuration.tools.editors.preferred.joined(separator: ", "))
+                SettingsSummaryRow(label: "Git", value: configuration.tools.git.preferred)
+                SettingsSummaryRow(label: "Diff fallback", value: configuration.tools.diff.fallback.joined(separator: " "))
+                SettingsSummaryRow(label: "Ignore rules", value: "\(configuration.ignoreRules.count) rules")
+            }
+
+            HStack {
+                Button {
+                    onOpenSettingsFile()
+                } label: {
+                    Label("Open YAML", systemImage: "doc.text")
+                }
+
+                Button {
+                    onReloadSettings()
+                } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
+
+                Spacer()
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+        .background(dracula(.background))
+        .foregroundStyle(dracula(.foreground))
+    }
+}
+
+private struct SettingsSummaryRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(dracula(.comment))
+                .frame(width: 110, alignment: .leading)
+
+            Text(value)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(dracula(.foreground))
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
 
 private struct SidebarView: View {
     @ObservedObject var model: AppModel
@@ -282,26 +493,53 @@ private struct ProjectCreationSheet: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var displayName = ""
-    @State private var path = NSHomeDirectory()
+    @State private var path = ""
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             Text("New Project")
-                .font(.title2.weight(.semibold))
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(dracula(.purple))
 
-            TextField("Display name", text: $displayName)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Project display name")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Directory")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(dracula(.foreground))
 
-            TextField("Directory path", text: $path)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Project directory path")
+                HStack(spacing: 10) {
+                    Text(path.isEmpty ? "Select a project directory" : path)
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundStyle(path.isEmpty ? dracula(.comment) : dracula(.foreground))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(dracula(.currentLine))
+
+                    Button("Choose...") {
+                        chooseDirectory()
+                    }
+                    .controlSize(.large)
+                    .accessibilityLabel("Choose project directory")
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Display name")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(dracula(.foreground))
+
+                TextField("Defaults to selected directory name", text: $displayName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 15))
+                    .accessibilityLabel("Project display name")
+            }
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.caption)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(dracula(.red))
             }
 
@@ -316,11 +554,27 @@ private struct ProjectCreationSheet: View {
                     createProject()
                 }
                 .keyboardShortcut(.defaultAction)
+                .disabled(path.isEmpty)
             }
         }
-        .padding(24)
-        .frame(width: 420)
+        .padding(28)
+        .frame(width: 560)
         .background(dracula(.background))
+    }
+
+    private func chooseDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = path.isEmpty ? FileManager.default.homeDirectoryForCurrentUser : URL(fileURLWithPath: path)
+        if panel.runModal() == .OK, let url = panel.url {
+            path = url.path
+            if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                displayName = url.lastPathComponent
+            }
+            errorMessage = nil
+        }
     }
 
     private func createProject() {
@@ -366,7 +620,7 @@ private struct ThreadChoiceSheet: View {
                     Button(agentCLI.displayName) {
                         createThread(agentCLI: agentCLI)
                     }
-                    .keyboardShortcut(agentCLI == AgentCLIKind.allCases.first ? .defaultAction : nil)
+                    .keyboardShortcut(agentCLI == model.defaultAgentCLI ? .defaultAction : nil)
                     .accessibilityLabel("Create \(agentCLI.displayName) thread")
                 }
             }
@@ -451,37 +705,42 @@ private struct RightPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
-                Button {
-                    model.toggleRightPanelCollapsed()
-                } label: {
-                    Image(systemName: "sidebar.right")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(dracula(.comment))
-                .help("Collapse right panel")
-                .accessibilityLabel("Collapse right panel")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(model.selectedRightPanelState.tabs) { tab in
+                        Button {
+                            model.selectRightPanelTab(id: tab.id)
+                        } label: {
+                            Label(tab.title, systemImage: iconName(for: tab))
+                                .labelStyle(.titleAndIcon)
+                                .font(.system(size: 13, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(model.selectedRightPanelTab.id == tab.id ? dracula(.currentLine) : dracula(.background))
+                        .foregroundStyle(model.selectedRightPanelTab.id == tab.id ? dracula(.pink) : dracula(.foreground))
+                        .accessibilityLabel("\(tab.title) right panel tab")
+                    }
 
-                ForEach(RightPanelMode.allCases) { mode in
                     Button {
-                        model.selectRightPanelMode(mode)
+                        chooseNvimFile()
                     } label: {
-                        Label(mode.displayName, systemImage: iconName(for: mode))
-                            .labelStyle(.titleAndIcon)
-                            .font(.caption.weight(.semibold))
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .bold))
+                            .frame(width: 24, height: 24)
                     }
                     .buttonStyle(.plain)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(model.selectedRightPanelMode == mode ? dracula(.currentLine) : dracula(.background))
-                    .foregroundStyle(model.selectedRightPanelMode == mode ? dracula(.pink) : dracula(.foreground))
-                    .accessibilityLabel("\(mode.displayName) right panel")
+                    .foregroundStyle(dracula(.cyan))
+                    .help("Open file in a new nvim tab")
+                    .accessibilityLabel("Open file in a new nvim tab")
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 7)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
 
-            switch model.selectedRightPanelMode {
+            switch model.selectedRightPanelTab.kind {
             case .files:
                 FileBrowserPanel(
                     state: model.fileBrowserState,
@@ -506,7 +765,7 @@ private struct RightPanelView: View {
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "nvim")
                 )
-                    .id(model.selectedThreadID)
+                    .id("\(model.selectedThreadID?.uuidString ?? "none")-\(model.selectedRightPanelTab.id)")
                     .onAppear {
                         model.activateSelectedRightPanelTerminal()
                     }
@@ -527,13 +786,15 @@ private struct RightPanelView: View {
 
     private var selectedRightPanelRequest: TerminalLaunchRequest? {
         guard let selectedThreadID = model.selectedThreadID else { return nil }
-        switch model.selectedRightPanelMode {
+        switch model.selectedRightPanelTab.kind {
         case .files:
             return nil
-        case .nvim:
-            return model.terminalLaunchRequest(for: .nvim(threadID: selectedThreadID))
         case .git:
             return model.terminalLaunchRequest(for: .lazygit(threadID: selectedThreadID))
+        case .nvim:
+            return model.terminalLaunchRequest(
+                for: .nvimTab(threadID: selectedThreadID, tabID: model.selectedRightPanelTab.id)
+            )
         }
     }
 
@@ -544,14 +805,29 @@ private struct RightPanelView: View {
         return "Terminal unavailable for \(tool)"
     }
 
-    private func iconName(for mode: RightPanelMode) -> String {
-        switch mode {
+    private func iconName(for tab: RightPanelTab) -> String {
+        switch tab.kind {
         case .files:
             return "doc.on.doc"
-        case .nvim:
-            return "terminal"
         case .git:
             return "arrow.triangle.branch"
+        case .nvim:
+            return "terminal"
+        }
+    }
+
+    private func chooseNvimFile() {
+        guard let root = model.selectedThread?.workingDirectory else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = root
+        if panel.runModal() == .OK, let url = panel.url {
+            let rootPath = root.standardizedFileURL.path
+            let filePath = url.standardizedFileURL.path
+            guard filePath.hasPrefix(rootPath + "/") else { return }
+            model.openFileInNvim(relativePath: String(filePath.dropFirst(rootPath.count + 1)))
         }
     }
 }

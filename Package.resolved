@@ -1,5 +1,5 @@
 {
-  "originHash" : "1c90f08c3aad1ef016223fd8fcec3b9e3896da3e60638a5b21903815bd9b6660",
+  "originHash" : "6dacc8df132a0966f6047d0fa2cee1bc355ff82dc64e2aab8ae2ca2c84715d98",
   "pins" : [
     {
       "identity" : "libghostty-spm",
@@ -17,6 +17,15 @@
       "state" : {
         "revision" : "1ba3e769b734e456317fa7e45321fa7f53eefb67",
         "version" : "2.1.0"
+      }
+    },
+    {
+      "identity" : "yams",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jpsim/Yams.git",
+      "state" : {
+        "revision" : "3d6871d5b4a5cd519adf233fbb576e0a2af71c17",
+        "version" : "5.4.0"
       }
     }
   ],

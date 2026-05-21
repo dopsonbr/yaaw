@@ -13,7 +13,8 @@ let package = Package(
         .library(name: "YAAWKit", targets: ["YAAWKit"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Lakr233/libghostty-spm.git", from: "1.1.4")
+        .package(url: "https://github.com/Lakr233/libghostty-spm.git", from: "1.1.4"),
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3")
     ],
     targets: [
         .executableTarget(
@@ -26,6 +27,9 @@ let package = Package(
         ),
         .target(
             name: "YAAWKit",
+            dependencies: [
+                .product(name: "Yams", package: "Yams")
+            ],
             path: "src",
             exclude: [
                 "AGENTS.md",

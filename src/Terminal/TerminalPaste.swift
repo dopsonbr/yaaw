@@ -59,6 +59,8 @@ private extension TerminalRole {
             return "bottom-\(threadID.uuidString)"
         case .nvim(let threadID):
             return "nvim-\(threadID.uuidString)"
+        case .nvimTab(let threadID, let tabID):
+            return "nvim-\(threadID.uuidString)-\(tabID)"
         case .lazygit(let threadID):
             return "git-\(threadID.uuidString)"
         }

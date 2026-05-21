@@ -175,6 +175,16 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.selectedThreadID)
     }
 
+    func testCreateProjectDefaultsBlankNameToDirectoryName() throws {
+        let model = AppModel()
+        let root = try temporaryDirectory()
+
+        let projectID = try model.createProject(displayName: "  ", rootDirectory: root)
+
+        XCTAssertEqual(model.selectedProjectID, projectID)
+        XCTAssertEqual(model.selectedProject?.displayName, root.lastPathComponent)
+    }
+
     func testCreateProjectRejectsMissingDirectory() {
         let model = AppModel()
         let missing = URL(fileURLWithPath: "/tmp/yaaw-missing-\(UUID().uuidString)", isDirectory: true)
@@ -236,12 +246,18 @@ final class AppModelTests: XCTestCase {
         )
     }
 
-    func testCreateThreadRequiresExplicitAgentCLIChoice() {
-        let model = AppModel()
+    func testCreateThreadUsesConfiguredDefaultAgentCLIWhenChoiceIsNotExplicit() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(
+            store: fixture.store,
+            configuration: YAAWConfiguration(agent: AgentSettings(default: .claude))
+        )
 
-        XCTAssertThrowsError(try model.createThread(agentCLI: nil)) { error in
-            XCTAssertEqual(error as? AppModelError, .missingAgentCLI)
-        }
+        let threadID = try model.createThread(agentCLI: nil)
+        let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
+
+        XCTAssertEqual(thread.agentCLI, .claude)
+        XCTAssertEqual(thread.displayName, "Starting Claude...")
     }
 
     func testCreateThreadDefaultsNameAndWorkingDirectory() throws {
@@ -251,7 +267,7 @@ final class AppModelTests: XCTestCase {
         let threadID = try model.createThread(agentCLI: .claude, now: Date(timeIntervalSince1970: 123))
         let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
 
-        XCTAssertEqual(thread.displayName, "New claude thread")
+        XCTAssertEqual(thread.displayName, "Starting Claude...")
         XCTAssertEqual(thread.agentCLI, .claude)
         XCTAssertEqual(thread.workingDirectory, fixture.root)
         XCTAssertEqual(model.selectedThreadID, threadID)
@@ -305,6 +321,71 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(firstActivation.request.command, ["/tmp/bin/codex"])
         XCTAssertEqual(thirdActivation.request.command, ["/tmp/bin/claude"])
         XCTAssertEqual(manager.lifecycleEvents.count, 5)
+    }
+
+    func testConfiguredAgentExecutableNameIsUsedForProjectTerminal() throws {
+        let fixture = AppModelFixture()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["codex-nightly": "/tools/codex-nightly"]),
+            captureDirectory: nil
+        )
+        let model = AppModel(
+            store: fixture.store,
+            agentCLIBindings: service,
+            configuration: YAAWConfiguration(
+                tools: ToolSettings(agents: AgentToolSettings(codex: "codex-nightly"))
+            )
+        )
+
+        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+
+        XCTAssertEqual(request.command, ["/tools/codex-nightly"])
+    }
+
+    func testConfiguredEditorAndGitToolsAreUsedForRightPanelTerminals() throws {
+        let fixture = AppModelFixture()
+        let resolver = StaticAppModelExecutableResolver(
+            paths: [
+                "zed": "/tools/zed",
+                "tig": "/tools/tig"
+            ]
+        )
+        let model = AppModel(
+            store: fixture.store,
+            externalToolResolver: resolver,
+            configuration: YAAWConfiguration(
+                tools: ToolSettings(
+                    editors: EditorToolSettings(preferred: ["zed", "nvim"]),
+                    git: GitToolSettings(preferred: "tig")
+                )
+            )
+        )
+
+        model.openFileInNvim(relativePath: "Package.swift")
+        let editorRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+
+        XCTAssertEqual(editorRequest.command, ["/tools/zed", "Package.swift"])
+        XCTAssertEqual(gitRequest.command, ["/tools/tig"])
+    }
+
+    func testConfiguredDiffFallbackIsUsedWhenGitToolIsMissing() throws {
+        let fixture = AppModelFixture()
+        let resolver = StaticAppModelExecutableResolver(paths: ["delta": "/tools/delta"])
+        let model = AppModel(
+            store: fixture.store,
+            externalToolResolver: resolver,
+            configuration: YAAWConfiguration(
+                tools: ToolSettings(
+                    git: GitToolSettings(preferred: "missing-lazygit"),
+                    diff: DiffToolSettings(fallback: ["delta", "--diff"])
+                )
+            )
+        )
+
+        let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+
+        XCTAssertEqual(gitRequest.command, ["/tools/delta", "--diff"])
     }
 
     func testAgentCLIMetadataDoesNotRebuildActiveProjectTerminalCommand() throws {
@@ -435,7 +516,7 @@ final class AppModelTests: XCTestCase {
 
         model.selectRightPanelMode(.nvim)
         let nvimSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
-        XCTAssertEqual(nvimSession.request.role, .nvim(threadID: fixture.firstThreadID))
+        XCTAssertEqual(nvimSession.request.role, .nvimTab(threadID: fixture.firstThreadID, tabID: RightPanelTab.defaultNvimID))
         XCTAssertEqual(nvimSession.request.workingDirectory, fixture.root)
         XCTAssertEqual(nvimSession.request.command, ["/opt/homebrew/bin/nvim"])
 
@@ -453,10 +534,31 @@ final class AppModelTests: XCTestCase {
 
         model.openFileInNvim(relativePath: "src/App/RootView.swift")
 
-        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        let tabID = RightPanelTab.nvimTabID(relativePath: "src/App/RootView.swift")
+        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .nvimTab(threadID: fixture.firstThreadID, tabID: tabID)))
         XCTAssertEqual(model.selectedRightPanelMode, .nvim)
+        XCTAssertEqual(model.selectedRightPanelTab.id, tabID)
         XCTAssertEqual(request.workingDirectory, fixture.root)
         XCTAssertEqual(request.command, ["/tools/nvim", "src/App/RootView.swift"])
+    }
+
+    func testRightPanelTabOrderKeepsFilesGitNvimTabsThenPlusSlot() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.openFileInNvim(relativePath: "README.md")
+        model.openFileInNvim(relativePath: "src/App/RootView.swift")
+
+        XCTAssertEqual(
+            model.selectedRightPanelState.tabs.map(\.id),
+            [
+                RightPanelTab.filesID,
+                RightPanelTab.gitID,
+                RightPanelTab.defaultNvimID,
+                RightPanelTab.nvimTabID(relativePath: "README.md"),
+                RightPanelTab.nvimTabID(relativePath: "src/App/RootView.swift")
+            ]
+        )
     }
 
     func testMissingRightPanelToolFallsBackToRawCommandName() throws {
@@ -528,7 +630,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(secondSession.request.command, ["/tools/nvim", "src/App/RootView.swift"])
     }
 
-    func testOpeningSameFileReplacesNvimTerminalSessionRequest() throws {
+    func testOpeningSameFileSelectsExistingNvimTabWithoutReplacingSession() throws {
         let fixture = AppModelFixture()
         let manager = PlaceholderTerminalSessionManager()
         let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
@@ -540,8 +642,8 @@ final class AppModelTests: XCTestCase {
         model.openFileInNvim(relativePath: "README.md")
         let secondSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
 
-        XCTAssertNotEqual(firstSession.id, secondSession.id)
-        XCTAssertNotEqual(firstSession.request, secondSession.request)
+        XCTAssertEqual(firstSession.id, secondSession.id)
+        XCTAssertEqual(firstSession.request, secondSession.request)
         XCTAssertEqual(firstSession.request.command, ["/tools/nvim", "README.md"])
         XCTAssertEqual(secondSession.request.command, ["/tools/nvim", "README.md"])
     }

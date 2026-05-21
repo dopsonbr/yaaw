@@ -22,7 +22,7 @@ Requirements use:
 - The app SHOULD use SwiftUI for high-level app structure, sidebar lists, modal sheets, simple controls, and static layout.
 - The app SHOULD use AppKit where SwiftUI is not sufficient for terminal embedding, split-view behavior, focus routing, or lower-level macOS window control.
 - The app MUST use SQLite for app-owned structured state such as projects, threads, indexes, archives, and layout state.
-- The app MUST use JSON files for user-editable or portable configuration.
+- The app MUST use a YAML file for user-editable or portable configuration.
 - The app MUST keep project metadata in app-owned storage rather than writing metadata into project directories.
 - The app MUST keep live terminal process state in memory while running and MUST NOT require restoring live PTY processes after restart.
 - The app MUST persist the agent CLI session metadata needed to resume each thread's bound CLI agent session after the app or thread is reopened.
@@ -51,16 +51,24 @@ The SQLite database MUST store:
 
 The database SHOULD store enough metadata to restore the app layout and navigation context after restart.
 
-### JSON Configuration
+### YAML Configuration
 
-JSON configuration MUST be used for settings that should remain easy to inspect or edit outside the app.
+YAML configuration MUST be used for settings that should remain easy to inspect or edit outside the app.
 
-JSON configuration SHOULD include:
+YAML configuration MUST live in app-owned storage by default at `~/Library/Application Support/YAAW/settings.yaml`.
+
+YAML configuration MUST include comments that show defaults and identify settings that are represented but not changeable yet.
+
+YAML configuration SHOULD include:
 
 - Theme selection, initially fixed to Dracula.
 - File indexing ignore rules.
-- Tool command overrides, if later supported.
+- Keyboard shortcuts.
+- Default agent CLI.
+- Editor, Git, diff, and agent command overrides.
 - User-level app preferences.
+
+The app MUST expose a settings action in the window title bar that opens the YAML settings file and reloads settings after manual edits.
 
 ## Projects
 
@@ -238,4 +246,4 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - Opening Git mode launches `lazygit` or `git diff` inside the right panel.
 - `lazygit` is resolved from `PATH`, with `git diff` fallback when unavailable.
 - Project, thread, agent CLI session, index, archive, and layout metadata are stored in SQLite.
-- User-editable configuration is stored in JSON.
+- User-editable configuration is stored in YAML.

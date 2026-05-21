@@ -16,9 +16,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var selectedProjectID: UUID
     @Published public private(set) var selectedThreadID: UUID?
     @Published public private(set) var rightPanelModesByThreadID: [UUID: RightPanelMode]
+    @Published public private(set) var rightPanelStatesByThreadID: [UUID: RightPanelState]
     @Published public private(set) var bottomTerminalExpandedThreadIDs: Set<UUID>
     @Published public private(set) var layoutState: LayoutState
     @Published public private(set) var fileBrowserState: FileBrowserState
+    @Published public private(set) var configuration: YAAWConfiguration
 
     public let projectTerminal: TerminalSurfaceDescriptor
     public private(set) var navigationHistory: NavigationHistory
@@ -27,7 +29,6 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private let agentCLIBindings: AgentCLISessionBindingService
     private let fileIndexer: FileIndexing
     private let externalToolResolver: any AgentCLIExecutableResolving
-    private let configuration: YAAWConfiguration
     private let diagnosticRecorder: DiagnosticEventRecording
     private let environment: [String: String]
     private let homeDirectory: URL
@@ -35,6 +36,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var latestFileBrowserRequestIDByThreadID: [UUID: UUID] = [:]
     private var nvimRelativePathsByThreadID: [UUID: String] = [:]
     private var nvimRelaunchTokensByThreadID: [UUID: UUID] = [:]
+    private var nvimRelaunchTokensByTabKey: [String: UUID] = [:]
     private var activeProjectLaunchCommandsByThreadID: [UUID: [String]] = [:]
     private var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
     private var pendingTerminalTitlesByThreadID: [UUID: String] = [:]
@@ -55,7 +57,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.agentCLIBindings = agentCLIBindings
         self.fileIndexer = fileIndexer
         self.externalToolResolver = externalToolResolver
-        self.configuration = configuration
+        self.configuration = configuration.validated()
         self.diagnosticRecorder = diagnosticRecorder
         self.environment = environment
         self.homeDirectory = homeDirectory
@@ -77,6 +79,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             rightPanelModesByThreadID[selectedThreadID] = snapshot.selectedRightPanelMode
         }
         self.rightPanelModesByThreadID = rightPanelModesByThreadID
+        var rightPanelStatesByThreadID = snapshot.rightPanelStatesByThreadID
+        for thread in snapshot.threads where rightPanelStatesByThreadID[thread.id] == nil {
+            let mode = rightPanelModesByThreadID[thread.id] ?? (thread.id == selectedThreadID ? snapshot.selectedRightPanelMode : .files)
+            rightPanelStatesByThreadID[thread.id] = RightPanelState.defaultState(selectedMode: mode)
+        }
+        self.rightPanelStatesByThreadID = rightPanelStatesByThreadID
         self.layoutState = snapshot.layoutState
         self.fileBrowserState = FileBrowserState(
             rootPath: selectedThreadID.flatMap { threadID in
@@ -117,6 +125,28 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         return "\(project.displayName) - \(thread.displayName)"
     }
 
+    public var defaultAgentCLI: AgentCLIKind {
+        configuration.defaultAgentCLI
+    }
+
+    public func keyboardShortcutDefinition(for action: KeyboardShortcutAction) -> KeyboardShortcutDefinition {
+        configuration.shortcut(for: action)
+    }
+
+    public func reloadConfiguration(_ configuration: YAAWConfiguration) {
+        self.configuration = configuration.validated()
+        activeProjectLaunchCommandsByThreadID.removeAll()
+        recordDiagnostic(
+            category: "Configuration",
+            name: "settings_yaml_reloaded",
+            metadata: [
+                "theme": self.configuration.themeName,
+                "default_agent": self.configuration.defaultAgentCLI.rawValue
+            ]
+        )
+        refreshSelectedFileBrowser()
+    }
+
     public var selectedProjectDirectoryState: ProjectDirectoryState? {
         selectedProject.map { directoryState(for: $0.rootDirectory) }
     }
@@ -127,7 +157,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public var selectedRightPanelMode: RightPanelMode {
         guard let selectedThreadID else { return .files }
-        return rightPanelModesByThreadID[selectedThreadID] ?? .files
+        return rightPanelStatesByThreadID[selectedThreadID]?.selectedMode
+            ?? rightPanelModesByThreadID[selectedThreadID]
+            ?? .files
+    }
+
+    public var selectedRightPanelState: RightPanelState {
+        guard let selectedThreadID else { return RightPanelState() }
+        return rightPanelStatesByThreadID[selectedThreadID] ?? RightPanelState.defaultState(
+            selectedMode: rightPanelModesByThreadID[selectedThreadID] ?? .files
+        )
+    }
+
+    public var selectedRightPanelTab: RightPanelTab {
+        selectedRightPanelState.selectedTab
     }
 
     public var isBottomTerminalExpanded: Bool {
@@ -157,6 +200,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public func selectRightPanelMode(_ mode: RightPanelMode) {
         guard let selectedThreadID else { return }
         rightPanelModesByThreadID[selectedThreadID] = mode
+        var state = selectedRightPanelState
+        state.selectMode(mode)
+        rightPanelStatesByThreadID[selectedThreadID] = state
+        persist()
+    }
+
+    public func selectRightPanelTab(id tabID: String) {
+        guard let selectedThreadID else { return }
+        var state = selectedRightPanelState
+        state.selectTab(id: tabID)
+        rightPanelStatesByThreadID[selectedThreadID] = state
+        rightPanelModesByThreadID[selectedThreadID] = state.selectedMode
         persist()
     }
 
@@ -261,7 +316,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 command = activeCommand
             } else {
                 captureReadOffsetsByThreadID.removeValue(forKey: threadID)
-                command = agentCLIBindings.terminalCommand(for: thread)
+                command = agentCLIBindings.terminalCommand(
+                    for: thread,
+                    executableNameOverride: configuration.agentExecutableName(for: thread.agentCLI)
+                )
             }
             activeProjectLaunchCommandsByThreadID[threadID] = command
             return TerminalLaunchRequest(
@@ -286,8 +344,37 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 role: role,
                 title: "nvim",
                 workingDirectory: thread.workingDirectory,
-                command: externalToolCommand(preferredNames: ["nvim", "vim", "vi"], arguments: arguments),
+                command: externalToolCommand(
+                    preferredNames: configuration.tools.editors.preferred,
+                    arguments: arguments
+                ),
                 relaunchToken: nvimRelaunchTokensByThreadID[threadID],
+                agentCLI: thread.agentCLI
+            )
+        case .nvimTab(let threadID, let tabID):
+            guard let thread = activeThread(id: threadID) else { return nil }
+            guard isExistingDirectory(thread.workingDirectory) else {
+                recordTerminalLaunchFailure(
+                    role: role,
+                    path: thread.workingDirectory.path,
+                    reason: "missing_working_directory"
+                )
+                return nil
+            }
+            guard let tab = rightPanelStatesByThreadID[threadID]?.tabs.first(where: { $0.id == tabID }),
+                  tab.kind == .nvim else {
+                return nil
+            }
+            let arguments = tab.relativePath.map { [$0] } ?? []
+            return TerminalLaunchRequest(
+                role: role,
+                title: tab.title,
+                workingDirectory: thread.workingDirectory,
+                command: externalToolCommand(
+                    preferredNames: configuration.tools.editors.preferred,
+                    arguments: arguments
+                ),
+                relaunchToken: nvimRelaunchTokensByTabKey[nvimTabKey(threadID: threadID, tabID: tabID)],
                 agentCLI: thread.agentCLI
             )
         case .lazygit(let threadID):
@@ -343,13 +430,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @discardableResult
     public func activateSelectedRightPanelTerminal() -> TerminalSessionRecord? {
         guard let selectedThreadID else { return nil }
-        switch selectedRightPanelMode {
+        let tab = selectedRightPanelTab
+        switch tab.kind {
         case .files:
             return nil
-        case .nvim:
-            return activateTerminal(role: .nvim(threadID: selectedThreadID))
         case .git:
             return activateTerminal(role: .lazygit(threadID: selectedThreadID))
+        case .nvim:
+            return activateTerminal(role: .nvimTab(threadID: selectedThreadID, tabID: tab.id))
         }
     }
 
@@ -433,10 +521,19 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard let selectedThreadID else { return }
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         guard !normalizedPath.isEmpty else { return }
+        var state = selectedRightPanelState
+        let existingTabID = RightPanelTab.nvimTabID(relativePath: normalizedPath)
+        let alreadyOpen = state.tabs.contains { $0.id == existingTabID }
+        let tab = state.openNvimTab(relativePath: normalizedPath)
+        rightPanelStatesByThreadID[selectedThreadID] = state
+        rightPanelModesByThreadID[selectedThreadID] = .nvim
+        if !alreadyOpen {
+            nvimRelaunchTokensByTabKey[nvimTabKey(threadID: selectedThreadID, tabID: tab.id)] = UUID()
+            terminateTerminal(role: .nvimTab(threadID: selectedThreadID, tabID: tab.id))
+        }
         nvimRelativePathsByThreadID[selectedThreadID] = normalizedPath
         nvimRelaunchTokensByThreadID[selectedThreadID] = UUID()
-        terminateTerminal(role: .nvim(threadID: selectedThreadID))
-        selectRightPanelMode(.nvim)
+        persist()
     }
 
     @discardableResult
@@ -445,16 +542,19 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         rootDirectory: URL,
         now: Date = Date()
     ) throws -> UUID {
-        let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            throw AppModelError.emptyProjectName
-        }
         guard isExistingDirectory(rootDirectory) else {
             throw AppModelError.missingProjectDirectory(rootDirectory.path)
         }
+        let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let directoryName = rootDirectory.standardizedFileURL.lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = trimmedName.isEmpty ? directoryName : trimmedName
+        guard !resolvedName.isEmpty else {
+            throw AppModelError.emptyProjectName
+        }
 
         let project = Project(
-            displayName: trimmedName,
+            displayName: resolvedName,
             rootDirectory: rootDirectory,
             createdAt: now,
             lastOpenedAt: now
@@ -480,9 +580,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         workingDirectory: URL? = nil,
         now: Date = Date()
     ) throws -> UUID {
-        guard let agentCLI else {
-            throw AppModelError.missingAgentCLI
-        }
+        let agentCLI = agentCLI ?? configuration.defaultAgentCLI
         guard let project = selectedProject else {
             throw AppModelError.selectedProjectMissing
         }
@@ -494,7 +592,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let trimmedDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedDisplayName = trimmedDisplayName?.isEmpty == false
             ? trimmedDisplayName ?? ""
-            : "New \(agentCLI.rawValue) thread"
+            : "Starting \(agentCLI.displayName)..."
         let thread = AgentThread(
             displayName: resolvedDisplayName,
             projectID: project.id,
@@ -506,6 +604,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         threads.append(thread)
         selectedThreadID = thread.id
         rightPanelModesByThreadID[thread.id] = .files
+        rightPanelStatesByThreadID[thread.id] = RightPanelState.defaultState()
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()
         recordDiagnostic(
@@ -517,6 +616,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             ]
         )
         persist()
+        _ = activateTerminal(role: .project(threadID: thread.id))
         return thread.id
     }
 
@@ -733,11 +833,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     private func gitToolCommand() -> [String] {
-        if let lazygit = externalToolResolver.executablePath(named: "lazygit", environment: environment) {
-            return [lazygit]
+        let gitTool = configuration.tools.git.preferred
+        if let resolvedGitTool = externalToolResolver.executablePath(named: gitTool, environment: environment) {
+            return [resolvedGitTool]
         }
-        let git = externalToolResolver.executablePath(named: "git", environment: environment) ?? "git"
-        return [git, "diff"]
+        let fallback = configuration.tools.diff.fallback
+        guard let executable = fallback.first else { return ["git", "diff"] }
+        let resolvedExecutable = externalToolResolver.executablePath(named: executable, environment: environment) ?? executable
+        return [resolvedExecutable] + Array(fallback.dropFirst())
     }
 
     private func persist() {
@@ -748,6 +851,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 selectedProjectID: selectedProjectID,
                 selectedThreadID: selectedThreadID,
                 rightPanelModesByThreadID: rightPanelModesByThreadID,
+                rightPanelStatesByThreadID: rightPanelStatesByThreadID,
                 selectedRightPanelMode: selectedRightPanelMode,
                 bottomTerminalExpandedThreadIDs: bottomTerminalExpandedThreadIDs,
                 isGlobalTerminalExpanded: isBottomTerminalExpanded,
@@ -770,6 +874,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         )
     }
 
+    private func nvimTabKey(threadID: UUID, tabID: String) -> String {
+        "\(threadID.uuidString)|\(tabID)"
+    }
+
     private func recordDiagnostic(category: String, name: String, metadata: [String: String] = [:]) {
         diagnosticRecorder.record(DiagnosticEvent(category: category, name: name, metadata: metadata))
     }
@@ -788,7 +896,7 @@ private extension TerminalRole {
             return "project"
         case .bottom:
             return "bottom"
-        case .nvim:
+        case .nvim, .nvimTab:
             return "nvim"
         case .lazygit:
             return "lazygit"
