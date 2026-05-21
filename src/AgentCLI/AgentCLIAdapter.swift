@@ -273,6 +273,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    public static let captureLogStaleWindow: UInt64 = 8 * 1024 * 1024
+
     public func capturedOutput(
         for thread: AgentThread,
         after offset: UInt64,
@@ -287,14 +289,21 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             .uint64Value ?? 0
         guard fileSize > offset else { return nil }
 
-        try? fileHandle.seek(toOffset: offset)
+        let effectiveOffset: UInt64
+        if fileSize - offset > Self.captureLogStaleWindow {
+            effectiveOffset = fileSize - UInt64(maxBytes)
+        } else {
+            effectiveOffset = offset
+        }
+
+        try? fileHandle.seek(toOffset: effectiveOffset)
         guard let data = try? fileHandle.read(upToCount: maxBytes),
               !data.isEmpty else {
             return nil
         }
         return AgentCLICapturedOutput(
             output: String(decoding: data, as: UTF8.self),
-            nextOffset: offset + UInt64(data.count)
+            nextOffset: effectiveOffset + UInt64(data.count)
         )
     }
 
