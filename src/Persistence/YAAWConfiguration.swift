@@ -21,7 +21,11 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         "node_modules",
         "dist",
         ".build",
-        "DerivedData"
+        "DerivedData",
+        "Music",
+        "Movies",
+        "Pictures",
+        "Photos Library.photoslibrary"
     ]
 }
 
@@ -48,11 +52,13 @@ public final class JSONConfigurationStore {
             }
             let data = try Data(contentsOf: path)
             let configuration = try JSONDecoder().decode(YAAWConfiguration.self, from: data)
+                .mergingMissingDefaultIgnoreRules()
             guard configuration.theme == "Dracula", !configuration.ignoreRules.isEmpty else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(codingPath: [], debugDescription: "Invalid configuration values")
                 )
             }
+            try? save(configuration)
             return configuration
         } catch {
             logger.error("Recovering malformed configuration: \(String(describing: error), privacy: .public)")
@@ -76,6 +82,21 @@ public final class JSONConfigurationStore {
         } else {
             try FileManager.default.moveItem(at: temporaryPath, to: path)
         }
+    }
+}
+
+private extension YAAWConfiguration {
+    func mergingMissingDefaultIgnoreRules() -> YAAWConfiguration {
+        var mergedRules = ignoreRules
+        let existingRules = Set(ignoreRules.map(FilePathNormalizer.normalizedRule))
+        for rule in Self.defaultIgnoreRules where !existingRules.contains(FilePathNormalizer.normalizedRule(rule)) {
+            mergedRules.append(rule)
+        }
+        return YAAWConfiguration(
+            version: version,
+            theme: theme,
+            ignoreRules: mergedRules
+        )
     }
 }
 

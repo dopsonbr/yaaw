@@ -39,6 +39,7 @@ private final class E2ERunner {
 
         let focusedBehavior = try runFocusedBehaviorAssertions()
         try writeVisualStateDatabases(selectedThreadID: focusedBehavior.codexThreadID)
+        try assertStateDatabasesAvoidProtectedUserDirectories()
         try writeManifest(focusedBehavior: focusedBehavior)
     }
 
@@ -46,11 +47,9 @@ private final class E2ERunner {
         if fileManager.fileExists(atPath: artifactsDirectory.path) {
             try fileManager.removeItem(at: artifactsDirectory)
         }
-        if fileManager.fileExists(atPath: paths.projectDirectory.path) {
-            try fileManager.removeItem(at: paths.projectDirectory)
-        }
         try fileManager.createDirectory(at: paths.binDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.missingToolBinDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: paths.workspaceDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.projectDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.captureDirectory, withIntermediateDirectories: true)
@@ -229,7 +228,8 @@ private final class E2ERunner {
     private func runFocusedBehaviorAssertions() throws -> FocusedBehaviorResult {
         let databasePath = paths.stateDirectory.appendingPathComponent("focused-behavior.sqlite")
         let model = try makeModel(databasePath: databasePath)
-        try assert(model.selectedProject?.displayName == "Global", "initial launch selected the seeded global project")
+        try assert(model.selectedProject?.displayName == "E2E Sandbox", "initial launch selected the seeded sandbox project")
+        try assert(model.selectedProject?.rootDirectory == paths.workspaceDirectory, "initial launch used an E2E sandbox root")
 
         try model.createProject(displayName: "E2E Project", rootDirectory: paths.projectDirectory)
         try assert(model.selectedProject?.rootDirectory == paths.projectDirectory, "project creation selected the fixture project")
@@ -408,7 +408,7 @@ private final class E2ERunner {
 
     private func assertMissingLazygitFallsBackToGitDiff() throws {
         let databasePath = paths.stateDirectory.appendingPathComponent("missing-lazygit.sqlite")
-        let store = try SQLiteYAAWStore(databasePath: databasePath)
+        let store = try makeSandboxSeededStore(databasePath: databasePath)
         let configuration = JSONConfigurationStore(path: paths.configPath).load()
         var missingToolEnvironment = environment
         missingToolEnvironment["PATH"] = paths.missingToolBinDirectory.path + ":/usr/bin:/bin:/usr/sbin:/sbin"
@@ -444,7 +444,7 @@ private final class E2ERunner {
         var missingToolEnvironment = environment
         missingToolEnvironment["PATH"] = paths.missingToolBinDirectory.path
         let model = AppModel(
-            store: try SQLiteYAAWStore(databasePath: databasePath),
+            store: try makeSandboxSeededStore(databasePath: databasePath),
             agentCLIBindings: AgentCLISessionBindingService(
                 environment: missingToolEnvironment,
                 captureDirectory: paths.captureDirectory
@@ -527,6 +527,42 @@ private final class E2ERunner {
         )
     }
 
+    private func assertStateDatabasesAvoidProtectedUserDirectories() throws {
+        let databaseURLs = try fileManager.contentsOfDirectory(
+            at: paths.stateDirectory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "sqlite" }
+        let protectedDirectories = protectedUserDirectories()
+
+        for databaseURL in databaseURLs {
+            let snapshot = try SQLiteYAAWStore(databasePath: databaseURL).load()
+            for project in snapshot.projects {
+                try assert(
+                    !protectedDirectories.containsPath(project.rootDirectory.path),
+                    "\(databaseURL.lastPathComponent) project root avoided protected user folders"
+                )
+            }
+            for thread in snapshot.threads {
+                try assert(
+                    !protectedDirectories.containsPath(thread.workingDirectory.path),
+                    "\(databaseURL.lastPathComponent) thread working directory avoided protected user folders"
+                )
+            }
+        }
+    }
+
+    private func protectedUserDirectories() -> [String] {
+        let home = fileManager.homeDirectoryForCurrentUser
+        return [home.standardizedFileURL.path] + [
+            "Desktop",
+            "Documents",
+            "Downloads",
+            "Music",
+            "Movies",
+            "Pictures"
+        ].map { home.appendingPathComponent($0, isDirectory: true).standardizedFileURL.path }
+    }
+
     private func writeManifest(focusedBehavior: FocusedBehaviorResult) throws {
         let manifest = """
         YAAW E2E artifacts
@@ -535,6 +571,7 @@ private final class E2ERunner {
         codex_thread_id=\(focusedBehavior.codexThreadID.uuidString)
         claude_thread_id=\(focusedBehavior.claudeThreadID.uuidString)
         fixture_project=\(paths.projectDirectory.path)
+        sandbox_workspace=\(paths.workspaceDirectory.path)
         fixture_bin=\(paths.binDirectory.path)
         config_path=\(paths.configPath.path)
         screenshots=\(paths.screenshotDirectory.path)
@@ -562,7 +599,7 @@ private final class E2ERunner {
     }
 
     private func makeModel(databasePath: URL) throws -> AppModel {
-        let store = try SQLiteYAAWStore(databasePath: databasePath)
+        let store = try makeSandboxSeededStore(databasePath: databasePath)
         let configuration = JSONConfigurationStore(path: paths.configPath).load()
         return AppModel(
             store: store,
@@ -570,6 +607,33 @@ private final class E2ERunner {
             fileIndexer: ImmediateFileIndexer(),
             configuration: configuration,
             environment: environment
+        )
+    }
+
+    private func makeSandboxSeededStore(databasePath: URL) throws -> SQLiteYAAWStore {
+        let databaseExists = fileManager.fileExists(atPath: databasePath.path)
+        let store = try SQLiteYAAWStore(databasePath: databasePath)
+        if !databaseExists {
+            store.save(sandboxSeedSnapshot())
+        }
+        return store
+    }
+
+    private func sandboxSeedSnapshot() -> YAAWSnapshot {
+        let projectID = UUID()
+        return YAAWSnapshot(
+            projects: [
+                Project(
+                    id: projectID,
+                    displayName: "E2E Sandbox",
+                    rootDirectory: paths.workspaceDirectory
+                )
+            ],
+            threads: [],
+            selectedProjectID: projectID,
+            selectedThreadID: nil,
+            selectedRightPanelMode: .files,
+            isGlobalTerminalExpanded: false
         )
     }
 
@@ -624,10 +688,8 @@ private struct E2EPaths {
     var missingToolBinDirectory: URL { root.appendingPathComponent("bin-missing-lazygit", isDirectory: true) }
     var captureDirectory: URL { root.appendingPathComponent("captures", isDirectory: true) }
     var configPath: URL { root.appendingPathComponent("config/config.json") }
-    var projectDirectory: URL {
-        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("yaaw-e2e-fixture-project", isDirectory: true)
-    }
+    var workspaceDirectory: URL { root.appendingPathComponent("sandbox-workspace", isDirectory: true) }
+    var projectDirectory: URL { root.appendingPathComponent("fixture-project", isDirectory: true) }
     var missingDirectory: URL { root.appendingPathComponent("missing-directory-project", isDirectory: true) }
     var screenshotDirectory: URL { root.appendingPathComponent("screenshots", isDirectory: true) }
     var stateDirectory: URL { root.appendingPathComponent("states", isDirectory: true) }
@@ -676,6 +738,15 @@ private final class ImmediateFileIndexer: FileIndexing {
             completion(.success(result))
         } catch {
             completion(.failure(error))
+        }
+    }
+}
+
+private extension [String] {
+    func containsPath(_ candidate: String) -> Bool {
+        let candidate = URL(fileURLWithPath: candidate).standardizedFileURL.path
+        return contains { protected in
+            candidate == protected || candidate.hasPrefix(protected + "/")
         }
     }
 }

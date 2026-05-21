@@ -8,6 +8,10 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(matcher.shouldIgnore(relativePath: ".git", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "src/node_modules", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "DerivedData/App", isDirectory: true))
+        XCTAssertTrue(matcher.shouldIgnore(relativePath: "Music", isDirectory: true))
+        XCTAssertTrue(matcher.shouldIgnore(relativePath: "Movies", isDirectory: true))
+        XCTAssertTrue(matcher.shouldIgnore(relativePath: "Pictures", isDirectory: true))
+        XCTAssertTrue(matcher.shouldIgnore(relativePath: "Pictures/Photos Library.photoslibrary", isDirectory: true))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "dist", isDirectory: false))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "src/.build", isDirectory: false))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: ".env", isDirectory: false))
@@ -49,6 +53,7 @@ final class FileBrowserTests: XCTestCase {
         try writeFile(root.appendingPathComponent(".git/config"), contents: "ignored")
         try writeFile(root.appendingPathComponent("dist/app.js"), contents: "ignored")
         try writeFile(root.appendingPathComponent("DerivedData/build.log"), contents: "ignored")
+        try writeFile(root.appendingPathComponent("Music/Music Library.musiclibrary/db"), contents: "ignored")
         let threadID = UUID()
 
         let result = try BackgroundFileIndexer.buildIndex(
@@ -61,12 +66,13 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(result.metadata.threadID, threadID)
         XCTAssertEqual(result.metadata.rootPath, root.standardizedFileURL.path)
         XCTAssertEqual(result.metadata.fileCount, result.entries.count)
-        XCTAssertEqual(result.metadata.ignoredDirectoryCount, 4)
+        XCTAssertEqual(result.metadata.ignoredDirectoryCount, 5)
         XCTAssertTrue(result.entries.contains(FileBrowserEntry(relativePath: ".env", isDirectory: false)))
         XCTAssertTrue(result.entries.contains(FileBrowserEntry(relativePath: "src", isDirectory: true)))
         XCTAssertTrue(result.entries.contains(FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false)))
         XCTAssertFalse(result.entries.contains { $0.relativePath.contains("node_modules") })
         XCTAssertFalse(result.entries.contains { $0.relativePath.contains(".git") })
+        XCTAssertFalse(result.entries.contains { $0.relativePath.contains("Music") })
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".yaaw").path))
     }
 

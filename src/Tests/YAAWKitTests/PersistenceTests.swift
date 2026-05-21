@@ -543,7 +543,36 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(seeded.theme, "Dracula")
         XCTAssertTrue(seeded.ignoreRules.contains(".git"))
         XCTAssertTrue(seeded.ignoreRules.contains("node_modules"))
+        XCTAssertTrue(seeded.ignoreRules.contains("Music"))
         XCTAssertTrue(reloaded.ignoreRules.contains("vendor"))
+        XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
+    }
+
+    func testJSONConfigurationAddsNewPrivacyDefaultsToExistingConfig() throws {
+        let path = try temporaryDirectory().appendingPathComponent("config.json")
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(
+            """
+            {
+              "ignoreRules" : [
+                ".git",
+                "node_modules"
+              ],
+              "theme" : "Dracula",
+              "version" : 1
+            }
+            """.utf8
+        ).write(to: path)
+        let store = JSONConfigurationStore(path: path)
+
+        let reloaded = store.load()
+
+        XCTAssertTrue(reloaded.ignoreRules.contains(".git"))
+        XCTAssertTrue(reloaded.ignoreRules.contains("node_modules"))
+        XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
+        XCTAssertTrue(reloaded.ignoreRules.contains("Movies"))
+        XCTAssertTrue(reloaded.ignoreRules.contains("Pictures"))
+        XCTAssertTrue(reloaded.ignoreRules.contains("Photos Library.photoslibrary"))
     }
 
     func testJSONConfigurationRecoversMalformedFile() throws {

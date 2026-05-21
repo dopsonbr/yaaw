@@ -2,8 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ARTIFACT_DIR="${YAAW_E2E_ARTIFACTS:-$ROOT_DIR/.build/e2e-artifacts/latest}"
+DEFAULT_ARTIFACT_DIR="${TMPDIR:-/tmp}/yaaw-e2e-artifacts/latest"
+ARTIFACT_DIR="${YAAW_E2E_ARTIFACTS:-$DEFAULT_ARTIFACT_DIR}"
 APP_NAME="YAAW"
+E2E_HOME="$ARTIFACT_DIR/home"
+E2E_ZDOTDIR="$ARTIFACT_DIR/zsh"
+ORIGINAL_HOME="$(launchctl getenv HOME || true)"
 ORIGINAL_ZDOTDIR="$(launchctl getenv ZDOTDIR || true)"
 
 cd "$ROOT_DIR"
@@ -26,9 +30,18 @@ cleanup() {
   launchctl unsetenv YAAW_CAPTURE_DIRECTORY >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_PATH >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
+  restore_home
   restore_zdotdir
 }
 trap cleanup EXIT
+
+restore_home() {
+  if [[ -n "$ORIGINAL_HOME" ]]; then
+    launchctl setenv HOME "$ORIGINAL_HOME"
+  else
+    launchctl unsetenv HOME >/dev/null 2>&1 || true
+  fi
+}
 
 restore_zdotdir() {
   if [[ -n "$ORIGINAL_ZDOTDIR" ]]; then
@@ -41,16 +54,24 @@ restore_zdotdir() {
 set_launch_environment() {
   local database_path="$1"
   local app_path="${2:-$ARTIFACT_DIR/bin:$PATH}"
-  local zdotdir="${3:-}"
+  local zdotdir="${3:-$E2E_ZDOTDIR}"
   launchctl setenv YAAW_DATABASE_PATH "$database_path"
   launchctl setenv YAAW_CONFIG_PATH "$ARTIFACT_DIR/config/config.json"
   launchctl setenv YAAW_CAPTURE_DIRECTORY "$ARTIFACT_DIR/captures"
   launchctl setenv YAAW_PATH "$app_path"
+  launchctl setenv HOME "$E2E_HOME"
   if [[ -n "$zdotdir" ]]; then
     launchctl setenv ZDOTDIR "$zdotdir"
   else
     restore_zdotdir
   fi
+}
+
+write_sandbox_shell_environment() {
+  mkdir -p "$E2E_HOME" "$E2E_ZDOTDIR"
+  printf 'export PATH=%q\n' "$ARTIFACT_DIR/bin:/usr/bin:/bin:/usr/sbin:/sbin" >"$E2E_ZDOTDIR/.zshenv"
+  : >"$E2E_ZDOTDIR/.zprofile"
+  : >"$E2E_ZDOTDIR/.zshrc"
 }
 
 wait_for_window() {
@@ -69,23 +90,35 @@ end tell
 APPLESCRIPT
 }
 
-dismiss_privacy_prompts() {
-  osascript <<APPLESCRIPT >/dev/null 2>&1 || true
+assert_no_privacy_prompts() {
+  local context="$1"
+  local prompt_text
+  prompt_text="$(osascript <<APPLESCRIPT 2>/dev/null || true
 tell application "System Events"
-  if exists process "$APP_NAME" then
-    tell process "$APP_NAME"
-      repeat with candidateWindow in windows
-        try
-          set windowText to value of static texts of candidateWindow as string
-          if windowText contains "would like to access" then
-            click button 1 of candidateWindow
-          end if
-        end try
-      end repeat
-    end tell
-  end if
+  set collectedText to ""
+  repeat with processName in {"$APP_NAME", "UserNotificationCenter"}
+    if exists process (processName as text) then
+      tell process (processName as text)
+        repeat with candidateWindow in windows
+          try
+            set collectedText to collectedText & (value of static texts of candidateWindow as string) & linefeed
+          end try
+        end repeat
+      end tell
+    end if
+  end repeat
+  return collectedText
 end tell
 APPLESCRIPT
+)"
+  if printf '%s\n' "$prompt_text" | grep -E "would like to access|Apple Music|media library|Documents Folder|Desktop Folder|Downloads Folder" >/dev/null; then
+    {
+      echo "- macOS privacy prompt appeared during $context."
+      echo "  E2E tests must use sandbox fixture directories and must not require granting app permissions."
+      printf '  Prompt text: %s\n' "$prompt_text"
+    } >>"$SCREENSHOT_BLOCKER"
+    return 1
+  fi
 }
 
 capture_window() {
@@ -200,12 +233,12 @@ launch_state() {
     return 1
   fi
 
-  dismiss_privacy_prompts
   if [[ "$state" == "missing-tool" ]]; then
     sleep 3
   else
     sleep 1
   fi
+  assert_no_privacy_prompts "$state"
   capture_window "$screenshot_path"
   assert_no_terminal_launch_failure "$screenshot_path"
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
@@ -222,7 +255,7 @@ run_keyboard_input_probe() {
   rm -f "$ARTIFACT_DIR/captures"/*.log
   /usr/bin/open -n "$APP_BUNDLE"
   wait_for_window
-  dismiss_privacy_prompts
+  assert_no_privacy_prompts "keyboard input probe"
   for _ in {1..80}; do
     if grep -R "YAAW_KEYBOARD_PROBE_READY" "$ARTIFACT_DIR/captures" >/dev/null 2>&1; then
       break
@@ -299,6 +332,8 @@ APPLESCRIPT
   launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
   return 1
 }
+
+write_sandbox_shell_environment
 
 if [[ "$RUNNER_STATUS" -ne 0 ]]; then
   launch_state "launch" || true
