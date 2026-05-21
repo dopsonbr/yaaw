@@ -190,6 +190,7 @@ final class AgentCLIAdapterTests: XCTestCase {
         let root = try temporaryDirectory()
         let service = AgentCLISessionBindingService(
             resolver: StaticExecutableResolver(paths: ["claude": "/tmp/bin/claude"]),
+            environment: ["SHELL": "/bin/zsh"],
             captureDirectory: root
         )
         let thread = AgentThread(
@@ -202,10 +203,14 @@ final class AgentCLIAdapterTests: XCTestCase {
 
         let command = service.terminalCommand(for: thread)
 
-        XCTAssertEqual(command[0], "/usr/bin/script")
-        XCTAssertEqual(command[1], "-q")
-        XCTAssertEqual(command[2], root.appendingPathComponent("\(thread.id.uuidString).log").path)
-        XCTAssertEqual(command[3], "/tmp/bin/claude")
+        XCTAssertEqual(command[0], "/bin/zsh")
+        XCTAssertEqual(command[1], "-lic")
+        XCTAssertTrue(command[2].contains("/usr/bin/script -q"))
+        XCTAssertTrue(command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).log").path))
+        XCTAssertTrue(command[2].contains("/tmp/bin/claude"))
+        XCTAssertTrue(command[2].contains("yaaw_exit_status=$?"))
+        XCTAssertFalse(command[2].contains("; status=$?"))
+        XCTAssertTrue(command[2].contains("exec /bin/zsh -l"))
     }
 
     func testCapturedOutputReadsOnlyAppendedBytes() throws {

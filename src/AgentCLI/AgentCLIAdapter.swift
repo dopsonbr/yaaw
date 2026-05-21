@@ -213,7 +213,12 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             withIntermediateDirectories: true
         )
         try? FileManager.default.removeItem(at: captureLogURL)
-        return ["/usr/bin/script", "-q", captureLogURL.path] + command
+        let shellPath = interactiveShellPath()
+        let captureCommand = (["/usr/bin/script", "-q", captureLogURL.path] + command)
+            .map(Self.shellQuoted)
+            .joined(separator: " ")
+        let shellCommand = "\(captureCommand); yaaw_exit_status=$?; if [ \"$yaaw_exit_status\" -ne 0 ]; then printf '\\nYAAW: agent command exited with status %s\\n' \"$yaaw_exit_status\"; fi; exec \(Self.shellQuoted(shellPath)) -l"
+        return [shellPath, "-lic", shellCommand]
     }
 
     public func invocation(for thread: AgentThread) -> AgentCLIInvocation {
@@ -248,6 +253,24 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
 
     public func captureLogURL(for thread: AgentThread) -> URL? {
         captureDirectory?.appendingPathComponent("\(thread.id.uuidString).log")
+    }
+
+    private func interactiveShellPath() -> String {
+        if let shell = environment["SHELL"],
+           FileManager.default.isExecutableFile(atPath: shell) {
+            return shell
+        }
+        if FileManager.default.isExecutableFile(atPath: "/bin/zsh") {
+            return "/bin/zsh"
+        }
+        return "/bin/bash"
+    }
+
+    private static func shellQuoted(_ argument: String) -> String {
+        if argument.rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: "\"'\\$`;&|<>[]{}()!#*?~"))) == nil {
+            return argument
+        }
+        return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     public func capturedOutput(

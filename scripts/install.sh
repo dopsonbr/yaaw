@@ -6,13 +6,24 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="/Applications"
 BIN_DIR="/usr/local/bin"
 SKIP_PATH=0
+USE_SUDO=1
 
 usage() {
-  echo "usage: $0 [--app-dir <directory>] [--bin-dir <directory>] [--skip-path]" >&2
+  echo "usage: $0 [--test-install] [--no-sudo] [--app-dir <directory>] [--bin-dir <directory>] [--skip-path]" >&2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --test-install)
+      APP_DIR=".build/install-test/Applications"
+      BIN_DIR=".build/install-test/bin"
+      USE_SUDO=0
+      shift
+      ;;
+    --no-sudo)
+      USE_SUDO=0
+      shift
+      ;;
     --app-dir)
       [[ $# -ge 2 ]] || { usage; exit 2; }
       APP_DIR="$2"
@@ -68,8 +79,12 @@ run_for_target() {
 
   if can_write_target "$target"; then
     "$@"
-  else
+  elif [[ "$USE_SUDO" -eq 1 ]]; then
     sudo "$@"
+  else
+    echo "error: target is not writable without sudo: $target" >&2
+    echo "use --app-dir/--bin-dir with writable directories or omit --no-sudo" >&2
+    exit 1
   fi
 }
 

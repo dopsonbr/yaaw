@@ -46,6 +46,9 @@ private final class E2ERunner {
         if fileManager.fileExists(atPath: artifactsDirectory.path) {
             try fileManager.removeItem(at: artifactsDirectory)
         }
+        if fileManager.fileExists(atPath: paths.projectDirectory.path) {
+            try fileManager.removeItem(at: paths.projectDirectory)
+        }
         try fileManager.createDirectory(at: paths.binDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.missingToolBinDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.projectDirectory, withIntermediateDirectories: true)
@@ -105,6 +108,9 @@ private final class E2ERunner {
               printf 'YAAW_SESSION_ID=codex-e2e-001\\n'
               printf 'YAAW_SESSION_NAME=Codex E2E Session\\n'
             fi
+            if [[ -t 1 ]]; then
+              while true; do sleep 1; done
+            fi
             """
         )
         try writeExecutable(
@@ -118,6 +124,9 @@ private final class E2ERunner {
             else
               printf 'YAAW_SESSION_ID=claude-e2e-001\\n'
               printf 'YAAW_SESSION_NAME=Claude E2E Session\\n'
+            fi
+            if [[ -t 1 ]]; then
+              while true; do sleep 1; done
             fi
             """
         )
@@ -133,6 +142,9 @@ private final class E2ERunner {
               printf 'YAAW_SESSION_ID=opencode-e2e-001\\n'
               printf 'YAAW_SESSION_NAME=OpenCode E2E Session\\n'
             fi
+            if [[ -t 1 ]]; then
+              while true; do sleep 1; done
+            fi
             """
         )
         try writeExecutable(
@@ -147,6 +159,9 @@ private final class E2ERunner {
             else
               printf 'YAAW_SESSION_ID=copilot-e2e-001\\n'
               printf 'YAAW_SESSION_NAME=Copilot E2E Session\\n'
+            fi
+            if [[ -t 1 ]]; then
+              while true; do sleep 1; done
             fi
             """
         )
@@ -331,9 +346,10 @@ private final class E2ERunner {
         try assert(reloadedModel.selectedThread?.id == codexThreadID, "relaunch preserved selected codex thread")
         try assert(reloadedModel.selectedThread?.sessionIdentity == "codex-e2e-001", "relaunch preserved codex session identity")
         let resumedRequest = try unwrap(reloadedModel.activateSelectedProjectTerminal(), "resumed project terminal exists")
+        let resumedCommand = resumedRequest.request.command.joined(separator: " ")
         try assert(
-            resumedRequest.request.command.contains("resume")
-                && resumedRequest.request.command.contains("codex-e2e-001"),
+            resumedCommand.contains("resume")
+                && resumedCommand.contains("codex-e2e-001"),
             "reopened codex thread resumed the stored session identity"
         )
 
@@ -347,11 +363,7 @@ private final class E2ERunner {
     private func writeVisualStateDatabases(selectedThreadID: UUID) throws {
         for state in VisualState.allCases {
             let databasePath = paths.stateDirectory.appendingPathComponent("\(state.rawValue).sqlite")
-            let model = try makeModel(databasePath: databasePath)
-            if state == .launch {
-                continue
-            }
-            try model.createProject(displayName: "E2E Project", rootDirectory: paths.projectDirectory)
+            let model = try makeFixtureOnlyModel(databasePath: databasePath)
             if state == .projectCreation {
                 continue
             }
@@ -561,6 +573,28 @@ private final class E2ERunner {
         )
     }
 
+    private func makeFixtureOnlyModel(databasePath: URL) throws -> AppModel {
+        let projectID = UUID()
+        let store = try SQLiteYAAWStore(databasePath: databasePath)
+        store.save(
+            YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: projectID,
+                        displayName: "E2E Project",
+                        rootDirectory: paths.projectDirectory
+                    )
+                ],
+                threads: [],
+                selectedProjectID: projectID,
+                selectedThreadID: nil,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        return try makeModel(databasePath: databasePath)
+    }
+
     private func waitUntil(_ description: String, condition: () -> Bool) throws {
         for _ in 0..<50 {
             if condition() { return }
@@ -590,7 +624,10 @@ private struct E2EPaths {
     var missingToolBinDirectory: URL { root.appendingPathComponent("bin-missing-lazygit", isDirectory: true) }
     var captureDirectory: URL { root.appendingPathComponent("captures", isDirectory: true) }
     var configPath: URL { root.appendingPathComponent("config/config.json") }
-    var projectDirectory: URL { root.appendingPathComponent("fixture-project", isDirectory: true) }
+    var projectDirectory: URL {
+        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("yaaw-e2e-fixture-project", isDirectory: true)
+    }
     var missingDirectory: URL { root.appendingPathComponent("missing-directory-project", isDirectory: true) }
     var screenshotDirectory: URL { root.appendingPathComponent("screenshots", isDirectory: true) }
     var stateDirectory: URL { root.appendingPathComponent("states", isDirectory: true) }

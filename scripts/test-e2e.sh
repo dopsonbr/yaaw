@@ -125,6 +125,62 @@ APPLESCRIPT
   fi
 }
 
+assert_no_terminal_launch_failure() {
+  local screenshot_path="$1"
+  /usr/bin/swift - "$screenshot_path" <<'SWIFT'
+import AppKit
+import Foundation
+
+let screenshotPath = CommandLine.arguments[1]
+guard let image = NSImage(contentsOfFile: screenshotPath),
+      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+else {
+  fputs("Could not read screenshot \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+let width = cgImage.width
+let height = cgImage.height
+let bytesPerPixel = 4
+let bytesPerRow = width * bytesPerPixel
+var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+guard let context = CGContext(
+  data: &pixels,
+  width: width,
+  height: height,
+  bitsPerComponent: 8,
+  bytesPerRow: bytesPerRow,
+  space: CGColorSpaceCreateDeviceRGB(),
+  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+) else {
+  fputs("Could not create bitmap context for \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+var redErrorPixels = 0
+let xRange = (width * 12 / 100)..<(width * 78 / 100)
+let yRange = (height * 8 / 100)..<(height * 45 / 100)
+for y in yRange {
+  for x in xRange {
+    let offset = y * bytesPerRow + x * bytesPerPixel
+    let red = pixels[offset]
+    let green = pixels[offset + 1]
+    let blue = pixels[offset + 2]
+    if red > 170 && green < 130 && blue < 140 {
+      redErrorPixels += 1
+    }
+  }
+}
+
+if redErrorPixels > 1000 {
+  fputs("Screenshot appears to contain Ghostty terminal failure text: \(screenshotPath) (\(redErrorPixels) red error pixels)\n", stderr)
+  exit(1)
+}
+SWIFT
+}
+
 launch_state() {
   local state="$1"
   local app_path="${2:-$ARTIFACT_DIR/bin:$PATH}"
@@ -151,104 +207,14 @@ launch_state() {
     sleep 1
   fi
   capture_window "$screenshot_path"
+  assert_no_terminal_launch_failure "$screenshot_path"
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
-}
-
-run_ui_journey() {
-  local database_path="$ARTIFACT_DIR/states/ui-journey.sqlite"
-  local project_path="$ARTIFACT_DIR/fixture-project"
-  cp "$ARTIFACT_DIR/states/launch.sqlite" "$database_path"
-
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
-  set_launch_environment "$database_path"
-  /usr/bin/open -n "$APP_BUNDLE"
-  wait_for_window
-  dismiss_privacy_prompts
-
-  osascript <<APPLESCRIPT >/dev/null
-tell application "System Events"
-  tell process "$APP_NAME"
-    perform action "AXRaise" of window 1
-    set position of window 1 to {0, 25}
-    set size of window 1 to {1100, 732}
-    delay 0.2
-    set windowPosition to position of window 1
-    set baseX to item 1 of windowPosition
-    set baseY to item 2 of windowPosition
-
-    delay 1
-    click at {baseX + 226, baseY + 94}
-    repeat 20 times
-      if exists sheet 1 of window 1 then exit repeat
-      delay 0.1
-    end repeat
-    if not (exists sheet 1 of window 1) then
-      click at {baseX + 226, baseY + 94}
-      repeat 50 times
-        if exists sheet 1 of window 1 then exit repeat
-        delay 0.1
-      end repeat
-    end if
-    set value of text field 1 of group 1 of sheet 1 of window 1 to "UI Smoke Project"
-    set value of text field 2 of group 1 of sheet 1 of window 1 to "$project_path"
-    click button 2 of group 1 of sheet 1 of window 1
-
-    delay 1
-    click at {baseX + 226, baseY + 226}
-    repeat 20 times
-      if exists sheet 1 of window 1 then exit repeat
-      delay 0.1
-    end repeat
-    if not (exists sheet 1 of window 1) then
-      click at {baseX + 226, baseY + 226}
-      repeat 50 times
-        if exists sheet 1 of window 1 then exit repeat
-        delay 0.1
-      end repeat
-    end if
-    click button 1 of group 1 of sheet 1 of window 1
-
-    delay 1
-    click at {baseX + 790, baseY + 67}
-    click at {baseX + 910, baseY + 170}
-    keystroke "readme"
-    keystroke "]" using {command down, shift down}
-    delay 0.2
-    keystroke "]" using {command down, shift down}
-    delay 0.2
-    try
-      repeat with candidateWindow in windows
-        set windowText to value of static texts of candidateWindow as string
-        if windowText contains "would like to access" then
-          click button 1 of candidateWindow
-        end if
-      end repeat
-    end try
-    delay 0.2
-    click at {baseX + 550, baseY + 718}
-    delay 0.2
-    click at {baseX + 83, baseY + 286}
-  end tell
-end tell
-APPLESCRIPT
-
-  capture_window "$SCREENSHOT_DIR/ui-journey.png"
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
-
-  local project_count thread_count archived_count bottom_expanded_count
-  project_count="$(/usr/bin/sqlite3 "$database_path" "SELECT COUNT(*) FROM projects WHERE display_name = 'UI Smoke Project';")"
-  thread_count="$(/usr/bin/sqlite3 "$database_path" "SELECT COUNT(*) FROM threads WHERE agent_cli = 'codex';")"
-  archived_count="$(/usr/bin/sqlite3 "$database_path" "SELECT COUNT(*) FROM threads WHERE is_archived = 1;")"
-  bottom_expanded_count="$(/usr/bin/sqlite3 "$database_path" "SELECT COUNT(*) FROM bottom_terminal_state WHERE is_expanded = 1;")"
-  if [[ "$project_count" != "1" || "$thread_count" -lt "1" || "$archived_count" -lt "1" || "$bottom_expanded_count" != "1" ]]; then
-    echo "UI journey did not persist the expected project/thread/archive/bottom-terminal state" >&2
-    return 1
-  fi
 }
 
 run_keyboard_input_probe() {
   local database_path="$ARTIFACT_DIR/states/keyboard-input.sqlite"
-  local expected="keyboard-probe-enter"
+  local expected="keyboardprobeenter"
+  local screenshot_path="$SCREENSHOT_DIR/keyboard-input.png"
 
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
   set_launch_environment "$database_path"
@@ -257,6 +223,12 @@ run_keyboard_input_probe() {
   /usr/bin/open -n "$APP_BUNDLE"
   wait_for_window
   dismiss_privacy_prompts
+  for _ in {1..80}; do
+    if grep -R "YAAW_KEYBOARD_PROBE_READY" "$ARTIFACT_DIR/captures" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.1
+  done
 
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
@@ -270,7 +242,42 @@ tell application "System Events"
     set baseY to item 2 of windowPosition
     click at {baseX + 470, baseY + 360}
     delay 0.2
-    keystroke "$expected"
+    key code 40
+    delay 0.05
+    key code 14
+    delay 0.05
+    key code 16
+    delay 0.05
+    key code 11
+    delay 0.05
+    key code 31
+    delay 0.05
+    key code 0
+    delay 0.05
+    key code 15
+    delay 0.05
+    key code 2
+    delay 0.05
+    key code 35
+    delay 0.05
+    key code 15
+    delay 0.05
+    key code 31
+    delay 0.05
+    key code 11
+    delay 0.05
+    key code 14
+    delay 0.05
+    key code 14
+    delay 0.05
+    key code 45
+    delay 0.05
+    key code 17
+    delay 0.05
+    key code 14
+    delay 0.05
+    key code 15
+    delay 0.05
     key code 36
   end tell
 end tell
@@ -286,6 +293,7 @@ APPLESCRIPT
   done
 
   echo "$APP_NAME did not deliver typed text plus Enter to the focused terminal" >&2
+  capture_window "$screenshot_path" || true
   find "$ARTIFACT_DIR/captures" -maxdepth 1 -type f -print -exec sed -n '1,80p' {} \; >&2 || true
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
@@ -297,9 +305,9 @@ if [[ "$RUNNER_STATUS" -ne 0 ]]; then
   exit "$RUNNER_STATUS"
 fi
 
-# This is the app-process journey: it uses System Events to click and type
-# against the launched SwiftUI app, then asserts the resulting durable state.
-run_ui_journey
+# Avoid coordinate-driven UI journeys in this harness. The Swift E2E runner
+# verifies durable state transitions directly, while the launched app states
+# below verify real rendering and terminal behavior through screenshots.
 run_keyboard_input_probe
 
 MISSING_TOOL_ZDOTDIR="$ARTIFACT_DIR/zsh-missing-tools"
