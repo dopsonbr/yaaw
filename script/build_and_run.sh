@@ -34,6 +34,8 @@ case "$VARIANT" in
 esac
 MIN_SYSTEM_VERSION="26.0"
 BUILD_CONFIGURATION="${YAAW_BUILD_CONFIGURATION:-debug}"
+APP_VERSION="${YAAW_APP_VERSION:-0.0.1}"
+BUILD_NUMBER="${YAAW_BUILD_NUMBER:-$APP_VERSION}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -98,6 +100,10 @@ cat >"$INFO_PLIST" <<PLIST
   <string>YAAW</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$APP_VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>$BUILD_NUMBER</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>

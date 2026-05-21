@@ -10,6 +10,7 @@ struct YAAWApp: App {
     private let databasePath: URL
     private let configurationPath: URL
     private let configurationStore: YAMLConfigurationStore
+    private let updateInstaller = AppUpdateInstaller.shared
     @MainActor private let externalOpenWorkspace = ExternalOpenWorkspace()
 
     init() {
@@ -72,7 +73,7 @@ struct YAAWApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("YAAW") {
+        WindowGroup("Agent IDE") {
             Group {
                 if let startupError {
                     PersistenceStartupFailureView(
@@ -89,7 +90,8 @@ struct YAAWApp: App {
                         onValidateSettingsText: validateSettingsText,
                         onSaveSettingsText: saveSettingsText,
                         onOpenSettingsFile: openSettingsFile,
-                        onReloadSettings: reloadSettings
+                        onReloadSettings: reloadSettings,
+                        onInstallLatestRelease: installLatestRelease
                     )
                 }
             }
@@ -365,6 +367,21 @@ struct YAAWApp: App {
     private func reloadSettings() {
         model.reloadConfiguration(configurationStore.load())
     }
+
+    private func installLatestRelease() {
+        do {
+            try updateInstaller.installLatestRelease()
+            NSApplication.shared.terminate(nil)
+        } catch {
+            LoggerDiagnosticEventRecorder.shared.record(
+                DiagnosticEvent(
+                    category: "Lifecycle",
+                    name: "update_install_failed",
+                    metadata: ["error": String(describing: error)]
+                )
+            )
+        }
+    }
 }
 
 private extension AppModel {
@@ -469,10 +486,6 @@ private struct PersistenceStartupFailureView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("YAAW")
-                .font(.title.weight(.semibold))
-                .foregroundStyle(dracula(.purple))
-
             Text("Persistence needs attention")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(dracula(.red))

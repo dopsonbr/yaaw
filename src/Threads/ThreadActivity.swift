@@ -168,6 +168,28 @@ public enum ThreadActivityText {
     }
 }
 
+public enum ThreadRelativeTimeFormatter {
+    public static func shortElapsed(since date: Date, now: Date = Date()) -> String {
+        let elapsedSeconds = max(0, Int(now.timeIntervalSince(date)))
+        let elapsedMinutes = max(1, elapsedSeconds / 60)
+        if elapsedMinutes < 60 {
+            return "\(elapsedMinutes)m"
+        }
+
+        let elapsedHours = elapsedMinutes / 60
+        if elapsedHours < 24 {
+            return "\(elapsedHours)h"
+        }
+
+        let elapsedDays = elapsedHours / 24
+        if elapsedDays < 7 {
+            return "\(elapsedDays)d"
+        }
+
+        return "\(max(1, elapsedDays / 7))w"
+    }
+}
+
 public struct ThreadActivityNotification: Equatable, Sendable {
     public var threadID: UUID
     public var title: String

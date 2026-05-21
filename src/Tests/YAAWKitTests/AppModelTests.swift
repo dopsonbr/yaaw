@@ -2,6 +2,31 @@ import XCTest
 @testable import YAAWKit
 
 final class AppModelTests: XCTestCase {
+    func testThreadRelativeTimeFormatterUsesCompactElapsedUnits() {
+        let now = Date(timeIntervalSince1970: 10_000)
+
+        XCTAssertEqual(
+            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-45), now: now),
+            "1m"
+        )
+        XCTAssertEqual(
+            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-(59 * 60)), now: now),
+            "59m"
+        )
+        XCTAssertEqual(
+            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-(60 * 60)), now: now),
+            "1h"
+        )
+        XCTAssertEqual(
+            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-(26 * 60 * 60)), now: now),
+            "1d"
+        )
+        XCTAssertEqual(
+            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-(8 * 24 * 60 * 60)), now: now),
+            "1w"
+        )
+    }
+
     func testTerminalNotificationUpdatesThreadActivityAndDispatchesSystemNotification() {
         let fixture = AppModelFixture()
         let dispatcher = RecordingThreadActivityNotificationDispatcher()
@@ -659,6 +684,51 @@ final class AppModelTests: XCTestCase {
         )
 
         XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+    }
+
+    func testThreadActivitySortsProjectThreadsByRecentInteraction() {
+        let projectID = UUID()
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let root = FileManager.default.temporaryDirectory
+        let olderDate = Date(timeIntervalSince1970: 10)
+        let newerDate = Date(timeIntervalSince1970: 20)
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(
+                        id: firstThreadID,
+                        displayName: "Older",
+                        projectID: projectID,
+                        workingDirectory: root,
+                        lastOpenedAt: olderDate
+                    ),
+                    AgentThread(
+                        id: secondThreadID,
+                        displayName: "Newer",
+                        projectID: projectID,
+                        workingDirectory: root,
+                        lastOpenedAt: newerDate
+                    )
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: secondThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(store: store)
+
+        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+
+        model.recordAgentCommandFinished(threadID: firstThreadID, exitCode: 0)
+
+        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
+        XCTAssertGreaterThan(
+            store.load().threads.first { $0.id == firstThreadID }?.lastOpenedAt ?? olderDate,
+            newerDate
+        )
     }
 
     func testProjectPinningAndManualReorderUsePinnedFirstGroups() {

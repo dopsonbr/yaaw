@@ -8,6 +8,16 @@ YAAW has no telemetry. App state, settings, indexes, activity previews, and diag
 
 The first implementation stays small: it gives users a project list, one active thread at a time, one managed agent CLI session terminal per thread, and a collapsible right tool panel for files, `nvim`/`vim`/`vi`, and `lazygit`/`git diff`. Current code paths cover `codex`, `claude`, `opencode`, and `copilot`.
 
+## Install
+
+Install the latest GitHub release on an Apple Silicon Mac:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dopsonbr/yaaw/main/scripts/install-release.sh | sh
+```
+
+The release installer downloads the latest `YAAW-*-macos-arm64.zip` asset, installs `YAAW.app` under `/Applications`, and installs a `yaaw` launcher under `/usr/local/bin`. To build and install from a local checkout instead, use `scripts/install.sh`.
+
 ## Goals
 
 - Keep the app native, fast, and minimal.

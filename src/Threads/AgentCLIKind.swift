@@ -29,10 +29,8 @@ public enum AgentCLIKind: String, CaseIterable, Identifiable, Equatable, Sendabl
 
     public var brandIconResourceExtensions: [String] {
         switch self {
-        case .claude, .opencode:
+        case .codex, .claude, .opencode, .copilot:
             ["png", "svg"]
-        case .codex, .copilot:
-            ["svg", "png"]
         }
     }
 

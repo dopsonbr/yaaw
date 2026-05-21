@@ -46,6 +46,7 @@ public enum IconRole: Equatable, Sendable {
     case close
     case openDocument
     case reload
+    case installUpdate
     case newProject
     case disclosureExpanded
     case disclosureCollapsed
@@ -82,6 +83,8 @@ public enum IconRole: Equatable, Sendable {
             .systemSymbol("doc.text")
         case .reload:
             .systemSymbol("arrow.clockwise")
+        case .installUpdate:
+            .systemSymbol("arrow.down.circle")
         case .newProject:
             .systemSymbol("folder.badge.plus")
         case .disclosureExpanded:

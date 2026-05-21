@@ -311,8 +311,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public var windowTitle: String {
-        guard let project = selectedProject else { return "YAAW" }
-        guard let thread = selectedThread else { return "\(project.displayName) - YAAW" }
+        guard let project = selectedProject else { return "Agent IDE" }
+        guard let thread = selectedThread else { return project.displayName }
         return "\(project.displayName) - \(thread.displayName)"
     }
 
@@ -444,6 +444,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func archivedThreads(for projectID: UUID) -> [AgentThread] {
         cachedArchivedThreadsByProject[projectID] ?? []
+    }
+
+    public func lastInteractionDate(for thread: AgentThread) -> Date {
+        guard let activity = threadActivityByThreadID[thread.id] else {
+            return thread.lastOpenedAt
+        }
+        return max(thread.lastOpenedAt, activity.updatedAt)
     }
 
     public var archivedThreads: [AgentThread] {
@@ -1719,7 +1726,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         isUnread: Bool,
         shouldNotify: Bool
     ) {
-        guard threadIndexByID[event.threadID] != nil else { return }
+        guard let threadIndex = threadIndexByID[event.threadID] else { return }
         let currentActivity = threadActivity(for: event.threadID)
         let status = event.status
             ?? ThreadActivityText.inferredStatus(title: event.title, body: event.body)
@@ -1738,6 +1745,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         )
         threadActivityByThreadID[event.threadID] = activity
         persistThreadActivity(activity)
+        if threads[threadIndex].lastOpenedAt < event.createdAt {
+            mutateThread(at: threadIndex) { thread in
+                thread.lastOpenedAt = event.createdAt
+            }
+            if let updatedThreadIndex = threadIndexByID[event.threadID] {
+                persistThread(threads[updatedThreadIndex])
+            }
+        }
         updateDockBadge()
         recordDiagnostic(
             category: "Threads",

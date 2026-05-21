@@ -17,6 +17,8 @@ struct RootView: View {
     let onSaveSettingsText: (String) throws -> YAAWConfiguration
     let onOpenSettingsFile: () -> Void
     let onReloadSettings: () -> Void
+    let onInstallLatestRelease: () -> Void
+    @State private var isShowingUpdateConfirmation = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -36,6 +38,7 @@ struct RootView: View {
                         externalOpenIcon: externalOpenWorkspace.icon(for:),
                         onOpenDefaultExternal: openSelectedDirectoryWithDefaultExternalTool,
                         onOpenExternalTool: openSelectedDirectoryExternally,
+                        onInstallLatestRelease: { isShowingUpdateConfirmation = true },
                         onOpenSettings: { isSettingsOpen = true }
                     )
                 }
@@ -68,6 +71,18 @@ struct RootView: View {
         .environment(\.fontSettings, model.configuration.fonts)
         .environment(\.appTheme, model.configuration.resolvedTheme)
         .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
+        .confirmationDialog(
+            "Install the latest release?",
+            isPresented: $isShowingUpdateConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Install Latest Release", role: .destructive) {
+                onInstallLatestRelease()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The app will open Terminal to run the release installer, then quit so the installed app can be replaced.")
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             GhosttyTerminalRuntime.closeAll()
         }
@@ -223,6 +238,7 @@ private struct AppChromeHeader: View {
     let externalOpenIcon: (ExternalOpenToolID) -> NSImage?
     let onOpenDefaultExternal: () -> Void
     let onOpenExternalTool: (ExternalOpenToolID) -> Void
+    let onInstallLatestRelease: () -> Void
     let onOpenSettings: () -> Void
 
     var body: some View {
@@ -273,6 +289,16 @@ private struct AppChromeHeader: View {
                 onOpenDefault: onOpenDefaultExternal,
                 onOpenTool: onOpenExternalTool
             )
+
+            Button(action: onInstallLatestRelease) {
+                Image(systemName: IconRole.installUpdate.icon.systemSymbolName)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dracula(.foreground))
+            .help("Install latest release")
+            .accessibilityLabel("Install latest release")
+            .accessibilityIdentifier("install-latest-release-button")
 
             Button(action: onOpenSettings) {
                 Image(systemName: IconRole.settings.icon.systemSymbolName)
@@ -389,14 +415,20 @@ private struct AgentCLIIcon: View {
 
     private var bundledImage: NSImage? {
         for fileExtension in agentCLI.brandIconResourceExtensions {
-            guard let url = Bundle.module.url(
+            if let url = Bundle.module.url(
+                forResource: agentCLI.brandIconResourceName,
+                withExtension: fileExtension
+            ), let image = NSImage(contentsOf: url) {
+                return image
+            }
+
+            if let url = Bundle.module.url(
                 forResource: agentCLI.brandIconResourceName,
                 withExtension: fileExtension,
                 subdirectory: "AgentIcons"
-            ), let image = NSImage(contentsOf: url) else {
-                continue
+            ), let image = NSImage(contentsOf: url) {
+                return image
             }
-            return image
         }
         return nil
     }
@@ -1009,10 +1041,6 @@ private struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("YAAW")
-                .font(fonts.interfaceFont(sizeOffset: 8, weight: .semibold))
-                .foregroundStyle(dracula(.purple))
-
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader(
                     title: "Projects",
@@ -1182,8 +1210,13 @@ private struct ActiveThreadRow: View {
 
                     Spacer()
 
-                    ThreadActivityIndicator(activity: activity)
-                        .frame(width: 16, height: 16)
+                    if activity.status == .inactive {
+                        ThreadIdleAgeLabel(date: model.lastInteractionDate(for: thread))
+                            .frame(minWidth: 32, alignment: .trailing)
+                    } else {
+                        ThreadActivityIndicator(activity: activity)
+                            .frame(width: 16, height: 16)
+                    }
 
                     AgentCLIIcon(agentCLI: thread.agentCLI)
                         .frame(width: 18, height: 18)
@@ -1209,6 +1242,24 @@ private struct ActiveThreadRow: View {
         .padding(.vertical, 5)
         .padding(.horizontal, 4)
         .background(model.selectedThreadID == thread.id ? dracula(.currentLine) : dracula(.background))
+    }
+}
+
+private struct ThreadIdleAgeLabel: View {
+    let date: Date
+    @Environment(\.fontSettings) private var fonts
+
+    var body: some View {
+        TimelineView(.periodic(from: Date(), by: 60)) { context in
+            let elapsed = ThreadRelativeTimeFormatter.shortElapsed(since: date, now: context.date)
+            Text(elapsed)
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(dracula(.comment))
+                .lineLimit(1)
+                .help("Inactive for \(elapsed)")
+                .accessibilityLabel("Inactive for \(elapsed)")
+        }
     }
 }
 

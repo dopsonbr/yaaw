@@ -87,6 +87,7 @@ final class IconSystemTests: XCTestCase {
 
     func testNativeIconRolesResolveToSystemSymbols() {
         XCTAssertEqual(IconRole.settings.icon.systemSymbolName, "gearshape")
+        XCTAssertEqual(IconRole.installUpdate.icon.systemSymbolName, "arrow.down.circle")
         XCTAssertEqual(IconRole.moreActions.icon.systemSymbolName, "ellipsis")
         XCTAssertEqual(IconRole.rightPanelMode(.files).icon.systemSymbolName, "doc.on.doc")
         XCTAssertEqual(IconRole.rightPanelMode(.git).icon.systemSymbolName, "arrow.triangle.branch")
@@ -103,8 +104,8 @@ final class IconSystemTests: XCTestCase {
 
         XCTAssertEqual(AgentCLIKind.claude.brandIconResourceExtensions.first, "png")
         XCTAssertEqual(AgentCLIKind.opencode.brandIconResourceExtensions.first, "png")
-        XCTAssertEqual(AgentCLIKind.codex.brandIconResourceExtensions.first, "svg")
-        XCTAssertEqual(AgentCLIKind.copilot.brandIconResourceExtensions.first, "svg")
+        XCTAssertEqual(AgentCLIKind.codex.brandIconResourceExtensions.first, "png")
+        XCTAssertEqual(AgentCLIKind.copilot.brandIconResourceExtensions.first, "png")
         XCTAssertFalse(AgentCLIKind.allCases.map(\.fallbackSystemSymbolName).contains(""))
     }
 }
