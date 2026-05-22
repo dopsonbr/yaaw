@@ -79,6 +79,11 @@ if [[ "$PLIST_BUILD" != "$VERSION" ]]; then
   exit 1
 fi
 
+if [[ ! -d "$APP_BUNDLE/Contents/Resources/YAAW_YAAW.bundle" ]]; then
+  echo "error: app bundle is missing SwiftPM resources: $APP_BUNDLE/Contents/Resources/YAAW_YAAW.bundle" >&2
+  exit 1
+fi
+
 ZIP_PATH="$OUTPUT_DIR/YAAW-$VERSION-macos-arm64.zip"
 rm -f "$ZIP_PATH"
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ZIP_PATH"

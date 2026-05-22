@@ -74,12 +74,14 @@ terminate_bundled_app
 cd "$ROOT_DIR"
 if [[ "$BUILD_CONFIGURATION" != "debug" ]]; then
   swift build -c "$BUILD_CONFIGURATION"
-  BUILD_BINARY="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)/$BUILD_PRODUCT"
-  BUILD_HELPER="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)/$HELPER_PRODUCT"
+  BUILD_DIR="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)"
+  BUILD_BINARY="$BUILD_DIR/$BUILD_PRODUCT"
+  BUILD_HELPER="$BUILD_DIR/$HELPER_PRODUCT"
 else
   swift build
-  BUILD_BINARY="$(swift build --show-bin-path)/$BUILD_PRODUCT"
-  BUILD_HELPER="$(swift build --show-bin-path)/$HELPER_PRODUCT"
+  BUILD_DIR="$(swift build --show-bin-path)"
+  BUILD_BINARY="$BUILD_DIR/$BUILD_PRODUCT"
+  BUILD_HELPER="$BUILD_DIR/$HELPER_PRODUCT"
 fi
 
 rm -rf "$APP_BUNDLE"
@@ -88,6 +90,11 @@ cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$BUILD_HELPER" "$HELPER_BINARY"
 chmod +x "$APP_BINARY"
 chmod +x "$HELPER_BINARY"
+
+while IFS= read -r RESOURCE_BUNDLE; do
+  [[ -n "$RESOURCE_BUNDLE" ]] || continue
+  cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCES/"
+done < <(find "$BUILD_DIR" -maxdepth 1 -type d -name '*.bundle' -print)
 
 if [[ -f "$APP_ICON" ]]; then
   cp "$APP_ICON" "$APP_RESOURCES/YAAW.icns"

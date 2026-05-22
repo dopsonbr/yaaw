@@ -236,13 +236,12 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     private func publishState() {
-        let payload = [
-            "title": webView?.title ?? "",
-            "urlString": webView?.url?.absoluteString ?? currentURLString ?? "",
-            "isLoading": String(webView?.isLoading ?? false),
-            "canGoBack": String(webView?.canGoBack ?? false),
-            "canGoForward": String(webView?.canGoForward ?? false),
-        ]
+        var payload: [String: String] = [:]
+        payload["title"] = webView?.title ?? ""
+        payload["urlString"] = webView?.url?.absoluteString ?? currentURLString ?? ""
+        payload["isLoading"] = String(webView?.isLoading ?? false)
+        payload["canGoBack"] = String(webView?.canGoBack ?? false)
+        payload["canGoForward"] = String(webView?.canGoForward ?? false)
         send(type: "stateChanged", payload: payload)
     }
 

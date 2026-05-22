@@ -430,22 +430,54 @@ private struct AgentCLIIcon: View {
 
     private var bundledImage: NSImage? {
         for fileExtension in agentCLI.brandIconResourceExtensions {
-            if let url = Bundle.module.url(
-                forResource: agentCLI.brandIconResourceName,
-                withExtension: fileExtension
-            ), let image = NSImage(contentsOf: url) {
-                return image
-            }
+            for bundle in Self.resourceBundles {
+                if let image = image(
+                    in: bundle,
+                    fileExtension: fileExtension,
+                    subdirectory: nil
+                ) {
+                    return image
+                }
 
-            if let url = Bundle.module.url(
-                forResource: agentCLI.brandIconResourceName,
-                withExtension: fileExtension,
-                subdirectory: "AgentIcons"
-            ), let image = NSImage(contentsOf: url) {
-                return image
+                if let image = image(
+                    in: bundle,
+                    fileExtension: fileExtension,
+                    subdirectory: "AgentIcons"
+                ) {
+                    return image
+                }
             }
         }
         return nil
+    }
+
+    private static var resourceBundles: [Bundle] {
+        var bundles = [Bundle.main]
+        if let resourcesURL = Bundle.main.resourceURL {
+            let swiftPMBundleURL = resourcesURL.appendingPathComponent(
+                "YAAW_YAAW.bundle",
+                isDirectory: true
+            )
+            if let bundle = Bundle(url: swiftPMBundleURL) {
+                bundles.append(bundle)
+            }
+        }
+        return bundles
+    }
+
+    private func image(
+        in bundle: Bundle,
+        fileExtension: String,
+        subdirectory: String?
+    ) -> NSImage? {
+        guard let url = bundle.url(
+            forResource: agentCLI.brandIconResourceName,
+            withExtension: fileExtension,
+            subdirectory: subdirectory
+        ) else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
     }
 }
 
