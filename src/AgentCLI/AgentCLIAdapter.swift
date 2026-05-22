@@ -252,32 +252,48 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
     public func terminalCommand(for thread: AgentThread, executableNameOverride: String? = nil)
         -> [String]
     {
+        if captureLogURL(for: thread) == nil {
+            return invocation(for: thread, executableNameOverride: executableNameOverride)
+                .command
+        }
+        return terminalLaunchDescriptor(
+            for: thread,
+            executableNameOverride: executableNameOverride
+        ).command
+    }
+
+    public func terminalLaunchDescriptor(
+        for thread: AgentThread,
+        executableNameOverride: String? = nil
+    ) -> AgentTerminalLaunchDescriptor {
         let command = invocation(for: thread, executableNameOverride: executableNameOverride)
             .command
-        guard let captureLogURL = captureLogURL(for: thread),
-            FileManager.default.isExecutableFile(atPath: "/usr/bin/script")
-        else {
-            return command
-        }
         let helperBinURL = installNotifyHelperIfNeeded()
         let activityLogURL = activityLogURL(for: thread)
-        try? FileManager.default.createDirectory(
-            at: captureLogURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try? FileManager.default.removeItem(at: captureLogURL)
+        let captureLogURL = captureLogURL(for: thread)
+        if let captureLogURL {
+            try? FileManager.default.createDirectory(
+                at: captureLogURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? FileManager.default.removeItem(at: captureLogURL)
+        }
         let shellPath = interactiveShellPath()
-        let captureCommand = (["/usr/bin/script", "-q", captureLogURL.path] + command)
+        let agentCommand = command
             .map(Self.shellQuoted)
             .joined(separator: " ")
-        let environmentPrefix = shellEnvironmentPrefix(
+        let launchEnvironment = shellEnvironment(
             thread: thread,
             helperBinURL: helperBinURL,
             activityLogURL: activityLogURL
         )
         let shellCommand =
-            "\(environmentPrefix)\(captureCommand); yaaw_exit_status=$?; if [ \"$yaaw_exit_status\" -ne 0 ]; then printf '\\nYAAW: agent command exited with status %s\\n' \"$yaaw_exit_status\"; fi; exec \(Self.shellQuoted(shellPath)) -l"
-        return [shellPath, "-lic", shellCommand]
+            "trap 'exit 143' TERM; trap 'exit 129' HUP; \(agentCommand); yaaw_exit_status=$?; if [ \"$yaaw_exit_status\" -ne 0 ]; then printf '\\nYAAW: agent command exited with status %s\\n' \"$yaaw_exit_status\"; fi; exec \(Self.shellQuoted(shellPath)) -l"
+        return AgentTerminalLaunchDescriptor(
+            command: [shellPath, "-lic", shellCommand],
+            environment: launchEnvironment,
+            captureLogURL: captureLogURL
+        )
     }
 
     public func invocation(for thread: AgentThread, executableNameOverride: String? = nil)
@@ -328,27 +344,33 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         activityDirectory?.appendingPathComponent("\(thread.id.uuidString).ndjson")
     }
 
-    private func shellEnvironmentPrefix(
+    private func shellEnvironment(
         thread: AgentThread,
         helperBinURL: URL?,
         activityLogURL: URL?
-    ) -> String {
-        var assignments = [
-            "export YAAW_THREAD_ID=\(Self.shellQuoted(thread.id.uuidString))",
-            "export YAAW_PROJECT_ID=\(Self.shellQuoted(thread.projectID.uuidString))",
-        ]
+    ) -> [String: String] {
+        var launchEnvironment = environment
+        launchEnvironment["YAAW_THREAD_ID"] = thread.id.uuidString
+        launchEnvironment["YAAW_PROJECT_ID"] = thread.projectID.uuidString
         if let activityLogURL {
             try? FileManager.default.createDirectory(
                 at: activityLogURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            assignments.append("export YAAW_EVENT_LOG=\(Self.shellQuoted(activityLogURL.path))")
+            launchEnvironment["YAAW_EVENT_LOG"] = activityLogURL.path
         }
         if let helperBinURL {
-            assignments.append(
-                "export PATH=\(Self.shellQuoted(helperBinURL.path)):\u{0022}$PATH\u{0022}")
+            let path = launchEnvironment["PATH"] ?? ""
+            launchEnvironment["PATH"] = path.isEmpty ? helperBinURL.path : "\(helperBinURL.path):\(path)"
         }
-        return assignments.joined(separator: "; ") + "; "
+        if launchEnvironment["TERM"]?.nilIfBlank == nil {
+            launchEnvironment["TERM"] = "xterm-256color"
+        }
+        if launchEnvironment["COLORTERM"]?.nilIfBlank == nil {
+            launchEnvironment["COLORTERM"] = "truecolor"
+        }
+        launchEnvironment["TERM_PROGRAM"] = "YAAW"
+        return launchEnvironment
     }
 
     private func installNotifyHelperIfNeeded() -> URL? {
@@ -488,14 +510,16 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         let fileSize =
             (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?
             .uint64Value ?? 0
-        guard fileSize > offset else { return nil }
+        guard fileSize > 0 else { return nil }
 
+        let requestedOffset = offset > fileSize ? 0 : offset
+        guard fileSize > requestedOffset else { return nil }
         let effectiveOffset: UInt64
-        if fileSize - offset > Self.captureLogStaleWindow {
+        if fileSize - requestedOffset > Self.captureLogStaleWindow {
             let maxReadBytes = UInt64(maxBytes)
             effectiveOffset = fileSize > maxReadBytes ? fileSize - maxReadBytes : 0
         } else {
-            effectiveOffset = offset
+            effectiveOffset = requestedOffset
         }
 
         try? fileHandle.seek(toOffset: effectiveOffset)

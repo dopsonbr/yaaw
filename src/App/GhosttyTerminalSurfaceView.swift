@@ -308,6 +308,9 @@ private final class GhosttyTerminalStateRegistry {
             return entry
         }
 
+        if let existing = entriesByRole[request.role] {
+            existing.close()
+        }
         let state = TerminalViewState(
             theme: terminalTheme(for: ThemeCatalog.defaultTheme),
             terminalConfiguration: terminalConfiguration(
@@ -342,8 +345,9 @@ private final class GhosttyTerminalStateRegistry {
         onClose: @escaping (TerminalRole) -> Void,
         onCommandFinished: @escaping (TerminalRole, Int?) -> Void
     ) {
+        let backend = terminalSessionBackend(for: request, entry: entry)
         let options = TerminalSurfaceOptions(
-            backend: .exec,
+            backend: backend,
             fontSize: Float(fonts.terminalSize),
             workingDirectory: request.workingDirectory.path,
             context: .split
@@ -387,6 +391,7 @@ private final class GhosttyTerminalStateRegistry {
 
     func closeAll() {
         for entry in entriesByRole.values {
+            entry.close()
             entry.view.setSurfaceVisible(false)
             entry.view.removeFromSuperview()
         }
@@ -409,8 +414,36 @@ private final class GhosttyTerminalStateRegistry {
         if !terminalFamily.isEmpty {
             configuration = configuration.fontFamily(terminalFamily)
         }
+        guard case .exec = request.backend else { return configuration }
         guard !request.command.isEmpty else { return configuration }
         return configuration.custom("command", shellCommandLine(for: request.command))
+    }
+
+    private func terminalSessionBackend(
+        for request: TerminalLaunchRequest,
+        entry: Entry
+    ) -> TerminalSessionBackend {
+        switch request.backend {
+        case .exec:
+            entry.managedAgentTerminal?.terminate()
+            entry.managedAgentTerminal = nil
+            entry.managedAgentLaunchKey = nil
+            return .exec
+        case .agentPTY(let launchDescriptor):
+            let launchKey = ManagedAgentLaunchKey(
+                launchDescriptor: launchDescriptor,
+                workingDirectory: request.workingDirectory
+            )
+            if entry.managedAgentLaunchKey != launchKey {
+                entry.managedAgentTerminal?.terminate()
+                entry.managedAgentTerminal = ManagedAgentTerminal(
+                    launchDescriptor: launchDescriptor,
+                    workingDirectory: request.workingDirectory
+                )
+                entry.managedAgentLaunchKey = launchKey
+            }
+            return .inMemory(entry.managedAgentTerminal!.session)
+        }
     }
 
     private func baseTerminalConfiguration(for theme: ThemeDefinition) -> TerminalConfiguration {
@@ -449,6 +482,8 @@ private final class GhosttyTerminalStateRegistry {
         let state: TerminalViewState
         let view: TerminalView
         let delegate: YAAWTerminalDelegate
+        var managedAgentTerminal: ManagedAgentTerminal?
+        var managedAgentLaunchKey: ManagedAgentLaunchKey?
         var appliedConfiguration: AppliedConfiguration?
 
         init(request: TerminalLaunchRequest, state: TerminalViewState, view: TerminalView) {
@@ -456,6 +491,12 @@ private final class GhosttyTerminalStateRegistry {
             self.state = state
             self.view = view
             self.delegate = YAAWTerminalDelegate(state: state)
+        }
+
+        func close() {
+            managedAgentTerminal?.terminate()
+            managedAgentTerminal = nil
+            managedAgentLaunchKey = nil
         }
     }
 
@@ -537,6 +578,102 @@ private final class YAAWTerminalDelegate:
 
     func terminalDidDetachSurface() {
         state.terminalDidDetachSurface()
+    }
+}
+
+private struct ManagedAgentLaunchKey: Equatable {
+    var launchDescriptor: AgentTerminalLaunchDescriptor
+    var workingDirectory: URL
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class ManagedAgentTerminal {
+    let session: InMemoryTerminalSession
+
+    private let process: AgentTerminalProcess
+    private var hasStarted = false
+
+    init(
+        launchDescriptor: AgentTerminalLaunchDescriptor,
+        workingDirectory: URL
+    ) {
+        let captureWriter = launchDescriptor.captureLogURL.map {
+            AgentTerminalCaptureWriter(
+                url: $0,
+                maximumBytes: launchDescriptor.captureLogMaximumBytes
+            )
+        }
+        let callbacks = ManagedAgentTerminalCallbacks()
+        let terminalSession = InMemoryTerminalSession(
+            write: { data in
+                callbacks.write(data)
+            },
+            resize: { viewport in
+                callbacks.resize(
+                    AgentTerminalViewport(
+                        columns: UInt32(viewport.columns),
+                        rows: UInt32(viewport.rows),
+                        widthPixels: viewport.widthPixels,
+                        heightPixels: viewport.heightPixels
+                    )
+                )
+            }
+        )
+        let terminalProcess = AgentTerminalProcess(
+            command: launchDescriptor.command,
+            workingDirectory: workingDirectory,
+            environment: launchDescriptor.environment,
+            output: { data in
+                captureWriter?.append(data)
+                terminalSession.receive(data)
+            },
+            onExit: { exitCode in
+                terminalSession.finish(
+                    exitCode: UInt32(bitPattern: exitCode ?? 0),
+                    runtimeMilliseconds: 0
+                )
+            }
+        )
+        self.session = terminalSession
+        self.process = terminalProcess
+        callbacks.process = terminalProcess
+        callbacks.resizeHandler = { [weak self] viewport in
+            DispatchQueue.main.async { [weak self] in
+                self?.resizeOrStart(to: viewport)
+            }
+        }
+    }
+
+    func terminate() {
+        process.terminate()
+    }
+
+    private func resizeOrStart(to viewport: AgentTerminalViewport) {
+        if hasStarted {
+            process.resize(to: viewport)
+            return
+        }
+        do {
+            try process.start(initialViewport: viewport)
+            hasStarted = true
+        } catch {
+            session.receive("\r\nYAAW: failed to launch agent terminal: \(error)\r\n")
+            session.finish(exitCode: 127, runtimeMilliseconds: 0)
+        }
+    }
+}
+
+private final class ManagedAgentTerminalCallbacks: @unchecked Sendable {
+    var process: AgentTerminalProcess?
+    var resizeHandler: (@Sendable (AgentTerminalViewport) -> Void)?
+
+    func write(_ data: Data) {
+        process?.write(data)
+    }
+
+    func resize(_ viewport: AgentTerminalViewport) {
+        resizeHandler?(viewport)
     }
 }
 

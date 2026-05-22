@@ -1019,9 +1019,63 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertNotEqual(firstActivation.id, thirdActivation.id)
         XCTAssertEqual(thirdActivation.request.role, .project(threadID: fixture.secondThreadID))
-        XCTAssertEqual(firstActivation.request.command, ["/tmp/bin/codex"])
-        XCTAssertEqual(thirdActivation.request.command, ["/tmp/bin/claude"])
+        guard case .agentPTY(let firstLaunch) = firstActivation.request.backend else {
+            return XCTFail("codex project terminal should use agentPTY")
+        }
+        guard case .agentPTY(let thirdLaunch) = thirdActivation.request.backend else {
+            return XCTFail("claude project terminal should use agentPTY")
+        }
+        XCTAssertTrue(firstLaunch.command[2].contains("/tmp/bin/codex"))
+        XCTAssertTrue(thirdLaunch.command[2].contains("/tmp/bin/claude"))
+        XCTAssertFalse(firstLaunch.command[2].contains("/usr/bin/script"))
+        XCTAssertFalse(thirdLaunch.command[2].contains("/usr/bin/script"))
         XCTAssertEqual(manager.lifecycleEvents.count, 5)
+    }
+
+    func testProjectTerminalRequestsUseAgentPTYForEverySupportedAgentCLI() throws {
+        let fixture = AppModelFixture()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(
+                paths: Dictionary(
+                    uniqueKeysWithValues: AgentCLIKind.allCases.map {
+                        ($0.rawValue, "/tmp/bin/\($0.rawValue)")
+                    })
+            ),
+            captureDirectory: nil
+        )
+        let model = AppModel(store: fixture.store, agentCLIBindings: service)
+
+        for kind in AgentCLIKind.allCases {
+            let threadID = try model.createThread(agentCLI: kind)
+            let request = try XCTUnwrap(
+                model.terminalLaunchRequest(for: .project(threadID: threadID)))
+
+            guard case .agentPTY(let launch) = request.backend else {
+                return XCTFail("\(kind.rawValue) project terminal should use agentPTY")
+            }
+            XCTAssertTrue(launch.command[2].contains("/tmp/bin/\(kind.rawValue)"))
+            XCTAssertFalse(launch.command[2].contains("/usr/bin/script"))
+        }
+    }
+
+    func testNonAgentTerminalRequestsKeepExecBackend() throws {
+        let fixture = AppModelFixture()
+        let resolver = StaticAppModelExecutableResolver(paths: [
+            "nvim": "/tools/nvim",
+            "lazygit": "/tools/lazygit",
+        ])
+        let model = AppModel(store: fixture.store, externalToolResolver: resolver)
+
+        let bottomRequest = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .bottom(threadID: fixture.firstThreadID)))
+        let nvimRequest = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        let gitRequest = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+
+        XCTAssertEqual(bottomRequest.backend, .exec)
+        XCTAssertEqual(nvimRequest.backend, .exec)
+        XCTAssertEqual(gitRequest.backend, .exec)
     }
 
     func testConfiguredAgentExecutableNameIsUsedForProjectTerminal() throws {
@@ -1043,7 +1097,10 @@ final class AppModelTests: XCTestCase {
         let request = try XCTUnwrap(
             model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
 
-        XCTAssertEqual(request.command, ["/tools/codex-nightly"])
+        guard case .agentPTY(let launch) = request.backend else {
+            return XCTFail("project terminal should use agentPTY")
+        }
+        XCTAssertTrue(launch.command[2].contains("/tools/codex-nightly"))
     }
 
     func testReloadConfigurationAppliesThemeAndRecordsDiagnostic() throws {
@@ -1156,7 +1213,8 @@ final class AppModelTests: XCTestCase {
         let active = try XCTUnwrap(
             model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
 
-        XCTAssertEqual(initial.command, ["/tmp/bin/codex"])
+        XCTAssertTrue(initial.command[2].contains("/tmp/bin/codex"))
+        XCTAssertFalse(initial.command[2].contains("/usr/bin/script"))
         XCTAssertEqual(active.command, initial.command)
         XCTAssertEqual(model.selectedThread?.sessionIdentity, "codex-session-789")
     }

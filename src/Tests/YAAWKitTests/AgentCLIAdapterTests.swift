@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 
 @testable import YAAWKit
@@ -222,7 +223,7 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(resumed.canonicalName, "Codex Resumed")
     }
 
-    func testTerminalCommandWrapsCLIWithCaptureLogWhenCaptureDirectoryIsConfigured() throws {
+    func testTerminalLaunchDescriptorUsesShellWithoutNestedScriptWhenCaptureIsConfigured() throws {
         let root = try temporaryDirectory()
         let helperBin = try temporaryDirectory()
         let helperURL = helperBin.appendingPathComponent("yaaw-notify")
@@ -242,24 +243,64 @@ final class AgentCLIAdapterTests: XCTestCase {
             agentCLI: .claude
         )
 
-        let command = service.terminalCommand(for: thread)
+        let launch = service.terminalLaunchDescriptor(for: thread)
 
-        XCTAssertEqual(command[0], "/bin/zsh")
-        XCTAssertEqual(command[1], "-lic")
-        XCTAssertTrue(command[2].contains("/usr/bin/script -q"))
-        XCTAssertTrue(
-            command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).log").path))
-        XCTAssertTrue(command[2].contains("YAAW_THREAD_ID=\(thread.id.uuidString)"))
-        XCTAssertTrue(command[2].contains("YAAW_PROJECT_ID=\(thread.projectID.uuidString)"))
-        XCTAssertTrue(
-            command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).ndjson").path))
-        XCTAssertTrue(command[2].contains(helperBin.path))
-        XCTAssertTrue(command[2].contains("/tmp/bin/claude"))
-        XCTAssertTrue(command[2].contains("yaaw_exit_status=$?"))
-        XCTAssertFalse(command[2].contains("; status=$?"))
-        XCTAssertTrue(command[2].contains("exec /bin/zsh -l"))
+        XCTAssertEqual(launch.command[0], "/bin/zsh")
+        XCTAssertEqual(launch.command[1], "-lic")
+        XCTAssertFalse(launch.command[2].contains("/usr/bin/script"))
+        XCTAssertEqual(
+            launch.captureLogURL,
+            root.appendingPathComponent("\(thread.id.uuidString).log"))
+        XCTAssertEqual(launch.environment["YAAW_THREAD_ID"], thread.id.uuidString)
+        XCTAssertEqual(launch.environment["YAAW_PROJECT_ID"], thread.projectID.uuidString)
+        XCTAssertEqual(
+            launch.environment["YAAW_EVENT_LOG"],
+            root.appendingPathComponent("\(thread.id.uuidString).ndjson").path)
+        let launchPath = try XCTUnwrap(launch.environment["PATH"])
+        XCTAssertEqual(launchPath.split(separator: ":").first.map(String.init), helperBin.path)
+        XCTAssertEqual(launch.environment["TERM"], "xterm-256color")
+        XCTAssertEqual(launch.environment["COLORTERM"], "truecolor")
+        XCTAssertEqual(launch.environment["TERM_PROGRAM"], "YAAW")
+        XCTAssertTrue(launch.command[2].contains("/tmp/bin/claude"))
+        XCTAssertTrue(launch.command[2].contains("yaaw_exit_status=$?"))
+        XCTAssertFalse(launch.command[2].contains("; status=$?"))
+        XCTAssertTrue(launch.command[2].contains("trap 'exit 143' TERM"))
+        XCTAssertTrue(launch.command[2].contains("exec /bin/zsh -l"))
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: helperURL.path))
         XCTAssertTrue(try String(contentsOf: helperURL, encoding: .utf8).contains("]777;notify"))
+    }
+
+    func testTerminalLaunchDescriptorAvoidsNestedScriptForEveryAgentCLI() throws {
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticExecutableResolver(paths: [
+                "codex": "/tmp/bin/codex",
+                "claude": "/tmp/bin/claude",
+                "opencode": "/tmp/bin/opencode",
+                "copilot": "/tmp/bin/copilot",
+            ]),
+            environment: ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"],
+            captureDirectory: root,
+            activityDirectory: root,
+            helperBinDirectory: try temporaryDirectory()
+        )
+
+        for kind in AgentCLIKind.allCases {
+            let thread = AgentThread(
+                displayName: kind.displayName,
+                projectID: UUID(),
+                workingDirectory: root,
+                agentCLI: kind,
+                sessionIdentity: "\(kind.rawValue)-session"
+            )
+
+            let launch = service.terminalLaunchDescriptor(for: thread)
+
+            XCTAssertFalse(launch.command.joined(separator: " ").contains("/usr/bin/script"))
+            XCTAssertTrue(launch.command[2].contains("/tmp/bin/\(kind.rawValue)"))
+            XCTAssertEqual(launch.environment["YAAW_THREAD_ID"], thread.id.uuidString)
+            XCTAssertEqual(launch.captureLogURL?.lastPathComponent, "\(thread.id.uuidString).log")
+        }
     }
 
     func testCapturedOutputReadsOnlyAppendedBytes() throws {
@@ -311,6 +352,89 @@ final class AgentCLIAdapterTests: XCTestCase {
 
         XCTAssertEqual(captured.startOffset, 0)
         XCTAssertTrue(captured.output.hasPrefix("first\n"))
+    }
+
+    func testCapturedOutputRecoversAfterCaptureLogRotation() throws {
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: root)
+        let thread = AgentThread(
+            id: UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")!,
+            displayName: "Codex",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex
+        )
+        let captureLogURL = try XCTUnwrap(service.captureLogURL(for: thread))
+        try "rotated\n".write(to: captureLogURL, atomically: true, encoding: .utf8)
+
+        let captured = try XCTUnwrap(service.capturedOutput(for: thread, after: 1024))
+
+        XCTAssertEqual(captured.output, "rotated\n")
+        XCTAssertEqual(captured.startOffset, 0)
+    }
+
+    func testBoundedCaptureWriterKeepsFileWithinMaximumBytes() throws {
+        let logURL = try temporaryDirectory().appendingPathComponent("capture.log")
+        let writer = AgentTerminalCaptureWriter(url: logURL, maximumBytes: 12)
+
+        writer.append(Data("first\n".utf8))
+        writer.append(Data("second\n".utf8))
+        writer.append(Data("third\n".utf8))
+
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        let size =
+            (try FileManager.default.attributesOfItem(atPath: logURL.path)[.size] as? NSNumber)?
+            .uint64Value ?? 0
+        XCTAssertLessThanOrEqual(size, 12)
+        XCTAssertEqual(text, "third\n")
+    }
+
+    func testAgentTerminalProcessResizesSinglePTY() throws {
+        let root = try temporaryDirectory()
+        let output = LockedOutput()
+        let process = AgentTerminalProcess(
+            command: ["/bin/sh", "-c", "stty size; read ignored; stty size"],
+            workingDirectory: root,
+            environment: ["TERM": "xterm-256color"],
+            output: { output.append($0) }
+        )
+
+        try process.start(initialViewport: AgentTerminalViewport(columns: 80, rows: 24))
+        XCTAssertTrue(output.waitUntilContains("24 80"))
+
+        process.resize(to: AgentTerminalViewport(columns: 101, rows: 33))
+        process.write(Data("\n".utf8))
+
+        XCTAssertTrue(output.waitUntilContains("33 101"))
+        process.terminate()
+    }
+
+    func testAgentTerminalProcessTerminateStopsPTYProcess() throws {
+        let root = try temporaryDirectory()
+        let pidURL = root.appendingPathComponent("child.pid")
+        let process = AgentTerminalProcess(
+            command: [
+                "/bin/sh", "-c",
+                "printf '%s' $$ > \"$YAAW_PID_FILE\"; trap 'exit 0' TERM; while true; do sleep 1; done",
+            ],
+            workingDirectory: root,
+            environment: [
+                "TERM": "xterm-256color",
+                "YAAW_PID_FILE": pidURL.path,
+            ],
+            output: { _ in }
+        )
+
+        try process.start(initialViewport: AgentTerminalViewport(columns: 80, rows: 24))
+        XCTAssertTrue(waitUntil { FileManager.default.fileExists(atPath: pidURL.path) })
+        let childPIDString = try String(contentsOf: pidURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let childPID = try XCTUnwrap(Int32(childPIDString))
+
+        process.terminate()
+
+        XCTAssertTrue(waitUntil { !process.isRunning })
+        XCTAssertTrue(waitUntil { !isProcessRunning(pid: childPID) })
     }
 
     func testNotifyHelperWritesActivityEventAndTerminalNotification() throws {
@@ -418,6 +542,52 @@ final class AgentCLIAdapterTests: XCTestCase {
     private func writeExecutable(at path: URL, contents: String) throws {
         try contents.write(to: path, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 5,
+        condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        return condition()
+    }
+
+    private func isProcessRunning(pid: Int32) -> Bool {
+        Darwin.kill(pid, 0) == 0
+    }
+}
+
+private final class LockedOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ newData: Data) {
+        lock.lock()
+        data.append(newData)
+        lock.unlock()
+    }
+
+    func waitUntilContains(_ expected: String, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if text.contains(expected) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        return text.contains(expected)
+    }
+
+    private var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(decoding: data, as: UTF8.self)
     }
 }
 

@@ -1,9 +1,11 @@
 import AppKit
+import Darwin
 import SwiftUI
 import YAAWKit
 
 @main
 struct YAAWApp: App {
+    @NSApplicationDelegateAdaptor(YAAWApplicationDelegate.self) private var appDelegate
     @StateObject private var model: AppModel
     @State private var isSettingsOpen = false
     private let startupError: Error?
@@ -478,6 +480,42 @@ extension AppModel {
     }
 }
 
+private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
+    private var terminationSignalSources: [DispatchSourceSignal] = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        installTerminationSignalHandlers()
+    }
+
+    @MainActor
+    func applicationWillTerminate(_ notification: Notification) {
+        cleanupTerminalProcesses()
+    }
+
+    private func installTerminationSignalHandlers() {
+        for signalNumber in [SIGTERM, SIGINT] {
+            _ = Darwin.signal(signalNumber, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .main)
+            source.setEventHandler {
+                Task { @MainActor in
+                    GhosttyTerminalRuntime.closeAll()
+                    NSApplication.shared.terminate(nil)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        Darwin.exit(0)
+                    }
+                }
+            }
+            source.resume()
+            terminationSignalSources.append(source)
+        }
+    }
+
+    @MainActor
+    private func cleanupTerminalProcesses() {
+        GhosttyTerminalRuntime.closeAll()
+    }
+}
+
 private struct ShortcutCommandButton: View {
     @ObservedObject var model: AppModel
     let action: KeyboardShortcutAction
@@ -485,18 +523,16 @@ private struct ShortcutCommandButton: View {
     let perform: () -> Void
 
     var body: some View {
-        commandButton
+        Button(title, action: perform)
+            .keyboardShortcut(shortcut)
     }
 
-    @ViewBuilder
-    private var commandButton: some View {
-        let button = Button(title, action: perform)
-        if model.isKeyboardShortcutEnabled(for: action) {
-            button.keyboardShortcut(
-                model.keyEquivalent(for: action), modifiers: model.eventModifiers(for: action))
-        } else {
-            button
-        }
+    private var shortcut: KeyboardShortcut? {
+        guard model.isKeyboardShortcutEnabled(for: action) else { return nil }
+        return KeyboardShortcut(
+            model.keyEquivalent(for: action),
+            modifiers: model.eventModifiers(for: action)
+        )
     }
 }
 

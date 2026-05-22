@@ -26,6 +26,7 @@ public struct TerminalLaunchRequest: Equatable, Sendable {
     public var title: String
     public var workingDirectory: URL
     public var command: [String]
+    public var backend: TerminalLaunchBackend
     public var relaunchToken: UUID?
     public var agentCLI: AgentCLIKind?
 
@@ -34,6 +35,7 @@ public struct TerminalLaunchRequest: Equatable, Sendable {
         title: String,
         workingDirectory: URL,
         command: [String],
+        backend: TerminalLaunchBackend = .exec,
         relaunchToken: UUID? = nil,
         agentCLI: AgentCLIKind? = nil
     ) {
@@ -41,8 +43,33 @@ public struct TerminalLaunchRequest: Equatable, Sendable {
         self.title = title
         self.workingDirectory = workingDirectory
         self.command = command
+        self.backend = backend
         self.relaunchToken = relaunchToken
         self.agentCLI = agentCLI
+    }
+}
+
+public enum TerminalLaunchBackend: Equatable, Sendable {
+    case exec
+    case agentPTY(AgentTerminalLaunchDescriptor)
+}
+
+public struct AgentTerminalLaunchDescriptor: Equatable, Sendable {
+    public var command: [String]
+    public var environment: [String: String]
+    public var captureLogURL: URL?
+    public var captureLogMaximumBytes: UInt64
+
+    public init(
+        command: [String],
+        environment: [String: String],
+        captureLogURL: URL? = nil,
+        captureLogMaximumBytes: UInt64 = AgentTerminalCaptureLog.maximumBytes
+    ) {
+        self.command = command
+        self.environment = environment
+        self.captureLogURL = captureLogURL
+        self.captureLogMaximumBytes = captureLogMaximumBytes
     }
 }
 
