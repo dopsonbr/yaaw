@@ -224,9 +224,14 @@ launch_state() {
   /usr/bin/open -n "$APP_BUNDLE"
 
   if ! wait_for_window; then
-    echo "$APP_NAME did not stay running for visual state $state" >&2
-    sed -n '1,120p' "$log_path" >&2 || true
-    return 1
+    terminate_e2e_app
+    sleep 1
+    /usr/bin/open -n "$APP_BUNDLE"
+    if ! wait_for_window; then
+      echo "$APP_NAME did not stay running for visual state $state" >&2
+      sed -n '1,120p' "$log_path" >&2 || true
+      return 1
+    fi
   fi
 
   if [[ "$state" == "missing-tool" ]]; then
