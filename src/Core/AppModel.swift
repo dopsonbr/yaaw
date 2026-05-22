@@ -832,22 +832,23 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         output: String,
         terminalTitle: String? = nil
     ) {
-        guard let index = threadIndexByID[threadID],
-            var metadata = agentCLIBindings.metadata(
-                for: threads[index].agentCLI,
-                output: output,
-                terminalTitle: terminalTitle
-            )
-        else {
+        guard let index = threadIndexByID[threadID] else {
             return
         }
-        if metadata.reportedName == nil,
-            metadata.title == nil,
-            let pendingTitle = pendingTerminalTitlesByThreadID[threadID]
-        {
-            metadata.title = pendingTitle
+        applyInferredTerminalOutputActivity(threadID: threadID, output: output)
+        if var metadata = agentCLIBindings.metadata(
+            for: threads[index].agentCLI,
+            output: output,
+            terminalTitle: terminalTitle
+        ) {
+            if metadata.reportedName == nil,
+                metadata.title == nil,
+                let pendingTitle = pendingTerminalTitlesByThreadID[threadID]
+            {
+                metadata.title = pendingTitle
+            }
+            applyAgentCLIMetadata(metadata, toThreadAt: index)
         }
-        applyAgentCLIMetadata(metadata, toThreadAt: index)
     }
 
     public func recordAgentCLITerminalTitle(threadID: UUID, title: String) {
@@ -887,6 +888,23 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             ),
             isUnread: true,
             shouldNotify: true
+        )
+    }
+
+    private func applyInferredTerminalOutputActivity(threadID: UUID, output: String) {
+        guard let status = ThreadActivityText.inferredStatus(fromTerminalOutput: output) else {
+            return
+        }
+        applyThreadActivity(
+            ThreadActivityEvent(
+                threadID: threadID,
+                status: status,
+                title: nil,
+                body: nil,
+                source: .terminalLifecycle
+            ),
+            isUnread: false,
+            shouldNotify: false
         )
     }
 

@@ -130,22 +130,35 @@ public enum ThreadActivityText {
     public static let maximumPreviewLength = 240
 
     public static func sanitized(_ text: String?) -> String? {
+        guard let collapsed = collapsedForSearch(text) else { return nil }
+        if collapsed.count <= maximumPreviewLength {
+            return collapsed
+        }
+        let end = collapsed.index(collapsed.startIndex, offsetBy: maximumPreviewLength)
+        return String(collapsed[..<end])
+    }
+
+    private static func collapsedForSearch(_ text: String?) -> String? {
         guard let text else { return nil }
         let collapsed =
             text
             .replacingOccurrences(
+                of: "\u{001B}\\][^\u{0007}\u{001B}]*(?:\u{0007}|\u{001B}\\\\)",
+                with: "",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
                 of: "\u{001B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: "\u{001B}[@-Z\\-_]", with: "", options: .regularExpression
             )
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !collapsed.isEmpty else { return nil }
-        if collapsed.count <= maximumPreviewLength {
-            return collapsed
-        }
-        let end = collapsed.index(collapsed.startIndex, offsetBy: maximumPreviewLength)
-        return String(collapsed[..<end])
+        return collapsed
     }
 
     public static func preview(title: String?, body: String?) -> String? {
@@ -154,15 +167,39 @@ public enum ThreadActivityText {
 
     public static func inferredStatus(title: String?, body: String?) -> ThreadActivityStatus? {
         let lowercased = [title, body]
-            .compactMap { sanitized($0)?.lowercased() }
+            .compactMap { collapsedForSearch($0)?.lowercased() }
             .joined(separator: " ")
+        return inferredStatus(fromSanitizedLowercased: lowercased)
+    }
+
+    public static func inferredStatus(fromTerminalOutput output: String) -> ThreadActivityStatus? {
+        guard let lowercased = collapsedForSearch(output)?.lowercased() else { return nil }
+        return inferredStatus(fromSanitizedLowercased: lowercased)
+    }
+
+    private static func inferredStatus(
+        fromSanitizedLowercased lowercased: String
+    ) -> ThreadActivityStatus? {
         if lowercased.contains("needs input")
             || lowercased.contains("waiting for input")
+            || lowercased.contains("waiting for your input")
             || lowercased.contains("requires input")
             || lowercased.contains("approval needed")
             || lowercased.contains("awaiting approval")
         {
             return .needsInput
+        }
+        if lowercased.contains("use /skills to list available skills")
+            || lowercased.contains("worked for ")
+        {
+            return .complete
+        }
+        if lowercased.contains("thinking")
+            || lowercased.contains("almost done thinking")
+            || lowercased.contains("plan mode on")
+            || lowercased.contains("esc to interrupt")
+        {
+            return .working
         }
         if lowercased.contains("complete")
             || lowercased.contains("completed")

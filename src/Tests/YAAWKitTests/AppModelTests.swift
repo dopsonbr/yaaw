@@ -32,6 +32,53 @@ final class AppModelTests: XCTestCase {
         )
     }
 
+    func testThreadActivityTextInfersWorkingBeforeDoneCompletion() {
+        XCTAssertEqual(
+            ThreadActivityText.inferredStatus(title: nil, body: "Almost done thinking"),
+            .working
+        )
+        XCTAssertEqual(
+            ThreadActivityText.inferredStatus(title: nil, body: "Plan mode on"),
+            .working
+        )
+        XCTAssertEqual(
+            ThreadActivityText.inferredStatus(title: nil, body: "Esc to interrupt"),
+            .working
+        )
+    }
+
+    func testThreadActivityTextInfersNeedsInputAndCompletion() {
+        XCTAssertEqual(
+            ThreadActivityText.inferredStatus(
+                title: nil, body: "Claude is waiting for your input"),
+            .needsInput
+        )
+        XCTAssertEqual(
+            ThreadActivityText.inferredStatus(title: "Task complete", body: nil),
+            .complete
+        )
+        XCTAssertEqual(
+            ThreadActivityText.inferredStatus(title: nil, body: "Finished"),
+            .complete
+        )
+    }
+
+    func testThreadActivityTextInfersCodexPromptReadyAfterWorking() {
+        let output = """
+            \u{001B}]0;yaaw\u{0007}Working (5m 16s - esc to interrupt)
+            > Use /skills to list available skills gpt-5.5 high fast - ~/github/dopsonbr/yaaw - Context 13% used
+            """
+
+        XCTAssertEqual(ThreadActivityText.inferredStatus(fromTerminalOutput: output), .complete)
+    }
+
+    func testThreadActivityTextInfersCodexWorkedForSummaryAsComplete() {
+        XCTAssertEqual(
+            ThreadActivityText.inferredStatus(fromTerminalOutput: "Worked for 2m 52s"),
+            .complete
+        )
+    }
+
     func testTerminalNotificationUpdatesThreadActivityAndDispatchesSystemNotification() {
         let fixture = AppModelFixture()
         let dispatcher = RecordingThreadActivityNotificationDispatcher()
@@ -95,6 +142,69 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(activity.status, .inactive)
         XCTAssertEqual(activity.preview, "Wrote a draft response")
         XCTAssertTrue(activity.isUnread)
+    }
+
+    func testCapturedWorkingOutputClearsStaleNeedsInputPreview() {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentTerminalNotification(
+            threadID: fixture.secondThreadID,
+            title: "Claude is waiting",
+            body: "Claude is waiting for your input"
+        )
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.secondThreadID,
+            output: "Claude is Thinking...\nEsc to interrupt\n"
+        )
+
+        let activity = model.threadActivity(for: fixture.secondThreadID)
+        XCTAssertEqual(activity.status, .working)
+        XCTAssertNil(activity.preview)
+        XCTAssertNil(activity.title)
+        XCTAssertNil(activity.body)
+        XCTAssertFalse(activity.isUnread)
+    }
+
+    func testCapturedCodexPromptReadyOutputClearsStaleWorkingState() {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output: "Working (5m 16s - esc to interrupt)"
+        )
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output:
+                "Working (5m 16s - esc to interrupt) > Use /skills to list available skills gpt-5.5 high fast - ~/github/dopsonbr/yaaw - Context 13% used"
+        )
+
+        let activity = model.threadActivity(for: fixture.firstThreadID)
+        XCTAssertEqual(activity.status, .complete)
+        XCTAssertNil(activity.preview)
+        XCTAssertNil(activity.title)
+        XCTAssertNil(activity.body)
+        XCTAssertFalse(activity.isUnread)
+    }
+
+    func testCapturedWorkingOutputStillAppliesAgentCLIMetadata() {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output: """
+                Thinking...
+                session id: codex-session-789
+                session name: Captured Session
+                """
+        )
+
+        XCTAssertEqual(model.threadActivity(for: fixture.firstThreadID).status, .working)
+        XCTAssertEqual(model.selectedThread?.sessionIdentity, "codex-session-789")
+        XCTAssertEqual(model.selectedThread?.displayName, "Captured Session")
     }
 
     func testPersistedWorkingActivityDowngradesToInactiveOnLaunch() {
