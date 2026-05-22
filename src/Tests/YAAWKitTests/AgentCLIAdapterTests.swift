@@ -279,6 +279,34 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(second.startOffset, first.nextOffset)
     }
 
+    func testStaleCapturedOutputClampsRecoveryOffsetWhenMaxBytesExceedsFileSize() throws {
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: root)
+        let thread = AgentThread(
+            id: UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd")!,
+            displayName: "Codex",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex
+        )
+        let captureLogURL = try XCTUnwrap(service.captureLogURL(for: thread))
+        try "first\n".write(to: captureLogURL, atomically: true, encoding: .utf8)
+        let fileHandle = try FileHandle(forWritingTo: captureLogURL)
+        defer { try? fileHandle.close() }
+        try fileHandle.truncate(atOffset: AgentCLISessionBindingService.captureLogStaleWindow + 1)
+
+        let captured = try XCTUnwrap(
+            service.capturedOutput(
+                for: thread,
+                after: 0,
+                maxBytes: Int(AgentCLISessionBindingService.captureLogStaleWindow + 2)
+            )
+        )
+
+        XCTAssertEqual(captured.startOffset, 0)
+        XCTAssertTrue(captured.output.hasPrefix("first\n"))
+    }
+
     func testNotifyHelperWritesActivityEventAndTerminalNotification() throws {
         let root = try temporaryDirectory()
         let helperBin = try temporaryDirectory()

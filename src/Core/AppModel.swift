@@ -381,6 +381,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func fileBrowserURL(relativePath: String) -> URL? {
+        selectedThreadFileURL(relativePath: relativePath)?.url
+    }
+
+    private func selectedThreadFileURL(relativePath: String) -> (normalizedPath: String, url: URL)? {
         guard let thread = selectedThread,
               isExistingDirectory(thread.workingDirectory) else {
             return nil
@@ -392,7 +396,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let rootPath = root.path
         let path = url.path
         guard path == rootPath || path.hasPrefix(rootPath + "/") else { return nil }
-        return url
+        return (normalizedPath, url)
     }
 
     public var selectedExternalOpenFileTarget: ExternalOpenTarget? {
@@ -1025,8 +1029,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func openFileInNvim(relativePath: String) {
         guard let selectedThreadID else { return }
-        let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
-        guard !normalizedPath.isEmpty else { return }
+        guard let resolvedFile = selectedThreadFileURL(relativePath: relativePath) else { return }
+        let normalizedPath = resolvedFile.normalizedPath
         selectedFileRelativePath = normalizedPath
         var state = selectedRightPanelState
         let existingTabID = RightPanelTab.nvimTabID(relativePath: normalizedPath)

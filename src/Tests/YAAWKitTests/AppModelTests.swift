@@ -1119,6 +1119,41 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(request.command, ["/tools/nvim", "src/App/RootView.swift"])
     }
 
+    func testOpeningNewNestedFileInNvimAllowsProjectRelativePath() throws {
+        let fixture = AppModelFixture()
+        let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
+        let model = AppModel(store: fixture.store, externalToolResolver: resolver, environment: [:])
+
+        model.openFileInNvim(relativePath: "docs/plans/new-note.md")
+
+        let tabID = RightPanelTab.nvimTabID(relativePath: "docs/plans/new-note.md")
+        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .nvimTab(threadID: fixture.firstThreadID, tabID: tabID)))
+        XCTAssertEqual(model.selectedFileRelativePath, "docs/plans/new-note.md")
+        XCTAssertEqual(model.selectedRightPanelMode, .nvim)
+        XCTAssertEqual(model.selectedRightPanelTab.id, tabID)
+        XCTAssertEqual(request.workingDirectory, fixture.root)
+        XCTAssertEqual(request.command, ["/tools/nvim", "docs/plans/new-note.md"])
+    }
+
+    func testOpeningEscapingFileInNvimDoesNotChangeRightPanelState() throws {
+        let fixture = AppModelFixture()
+        let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
+        let model = AppModel(store: fixture.store, externalToolResolver: resolver, environment: [:])
+        let originalSelectedFile = model.selectedFileRelativePath
+        let originalMode = model.selectedRightPanelMode
+        let originalState = model.selectedRightPanelState
+
+        model.openFileInNvim(relativePath: "../outside.swift")
+
+        XCTAssertEqual(model.selectedFileRelativePath, originalSelectedFile)
+        XCTAssertEqual(model.selectedRightPanelMode, originalMode)
+        XCTAssertEqual(model.selectedRightPanelState, originalState)
+        XCTAssertNil(model.terminalLaunchRequest(for: .nvimTab(
+            threadID: fixture.firstThreadID,
+            tabID: RightPanelTab.nvimTabID(relativePath: "outside.swift")
+        )))
+    }
+
     func testRightPanelTabOrderKeepsFilesGitNvimTabsThenPlusSlot() throws {
         let fixture = AppModelFixture()
         let model = AppModel(store: fixture.store)

@@ -1587,8 +1587,13 @@ private struct ThreadChoiceSheet: View {
                 .foregroundStyle(dracula(.comment))
 
             TextField("Optional thread name", text: $displayName)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .font(.system(size: 15))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(dracula(.currentLine))
+                .foregroundStyle(dracula(.foreground))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityLabel("Optional thread name")
 
             HStack(spacing: 12) {

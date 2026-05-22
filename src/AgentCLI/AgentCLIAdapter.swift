@@ -459,6 +459,7 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         after offset: UInt64,
         maxBytes: Int
     ) -> AgentCLICapturedOutput? {
+        guard maxBytes > 0 else { return nil }
         guard let fileHandle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? fileHandle.close() }
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?
@@ -467,7 +468,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
 
         let effectiveOffset: UInt64
         if fileSize - offset > Self.captureLogStaleWindow {
-            effectiveOffset = fileSize - UInt64(maxBytes)
+            let maxReadBytes = UInt64(maxBytes)
+            effectiveOffset = fileSize > maxReadBytes ? fileSize - maxReadBytes : 0
         } else {
             effectiveOffset = offset
         }
