@@ -1,15 +1,17 @@
 import Foundation
 import XCTest
+
 @testable import YAAWKit
 
 final class TreeBuilderBenchmarks: BenchmarkCase {
     private lazy var entries5k: [FileBrowserEntry] = Self.synthesizeEntries(count: 5_000)
     private lazy var entries50k: [FileBrowserEntry] = Self.synthesizeEntries(count: 50_000)
     private lazy var entries150k: [FileBrowserEntry] = Self.synthesizeEntries(count: 150_000)
-    private lazy var directoryHeavyEntries150k: [FileBrowserEntry] = Self.synthesizeDirectoryHeavyEntries(
-        directoryCount: 120_000,
-        fileCount: 30_000
-    )
+    private lazy var directoryHeavyEntries150k: [FileBrowserEntry] =
+        Self.synthesizeDirectoryHeavyEntries(
+            directoryCount: 120_000,
+            fileCount: 30_000
+        )
 
     func test_bench_treeBuilder_5k() throws {
         let entries = entries5k
@@ -31,16 +33,19 @@ final class TreeBuilderBenchmarks: BenchmarkCase {
         let entries = entries50k
         _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: [], limit: 10_000)
         measure {
-            _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: [], limit: 10_000)
+            _ = FileBrowserTreeBuilder.visibleRows(
+                from: entries, expandedFolders: [], limit: 10_000)
         }
     }
 
     func test_bench_visibleRows_50k_oneExpandedBranch() throws {
         let entries = entries50k
         let expandedFolders: Set<String> = ["src", "src/core"]
-        _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: expandedFolders, limit: 10_000)
+        _ = FileBrowserTreeBuilder.visibleRows(
+            from: entries, expandedFolders: expandedFolders, limit: 10_000)
         measure {
-            _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: expandedFolders, limit: 10_000)
+            _ = FileBrowserTreeBuilder.visibleRows(
+                from: entries, expandedFolders: expandedFolders, limit: 10_000)
         }
     }
 
@@ -48,25 +53,30 @@ final class TreeBuilderBenchmarks: BenchmarkCase {
         let entries = entries150k
         _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: [], limit: 10_000)
         measure {
-            _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: [], limit: 10_000)
+            _ = FileBrowserTreeBuilder.visibleRows(
+                from: entries, expandedFolders: [], limit: 10_000)
         }
     }
 
     func test_bench_visibleRows_150k_oneExpandedBranch() throws {
         let entries = entries150k
         let expandedFolders: Set<String> = ["src", "src/core"]
-        _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: expandedFolders, limit: 10_000)
+        _ = FileBrowserTreeBuilder.visibleRows(
+            from: entries, expandedFolders: expandedFolders, limit: 10_000)
         measure {
-            _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: expandedFolders, limit: 10_000)
+            _ = FileBrowserTreeBuilder.visibleRows(
+                from: entries, expandedFolders: expandedFolders, limit: 10_000)
         }
     }
 
     func test_bench_visibleRows_150k_cappedTenThousandRows() throws {
         let entries = entries150k
         let expandedFolders = Self.allExpandedFolders()
-        _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: expandedFolders, limit: 10_000)
+        _ = FileBrowserTreeBuilder.visibleRows(
+            from: entries, expandedFolders: expandedFolders, limit: 10_000)
         measure {
-            _ = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: expandedFolders, limit: 10_000)
+            _ = FileBrowserTreeBuilder.visibleRows(
+                from: entries, expandedFolders: expandedFolders, limit: 10_000)
         }
     }
 
@@ -131,16 +141,18 @@ final class TreeBuilderBenchmarks: BenchmarkCase {
         var entries: [FileBrowserEntry] = []
         entries.reserveCapacity(directoryCount + fileCount)
         for index in 0..<directoryCount {
-            entries.append(FileBrowserEntry(
-                relativePath: String(format: "dir_%05d", index),
-                isDirectory: true
-            ))
+            entries.append(
+                FileBrowserEntry(
+                    relativePath: String(format: "dir_%05d", index),
+                    isDirectory: true
+                ))
         }
         for index in 0..<fileCount {
-            entries.append(FileBrowserEntry(
-                relativePath: String(format: "dir_%05d/file_%05d.swift", index, index),
-                isDirectory: false
-            ))
+            entries.append(
+                FileBrowserEntry(
+                    relativePath: String(format: "dir_%05d/file_%05d.swift", index, index),
+                    isDirectory: false
+                ))
         }
         return entries
     }

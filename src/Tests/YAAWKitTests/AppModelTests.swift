@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import YAAWKit
 
 final class AppModelTests: XCTestCase {
@@ -10,19 +11,23 @@ final class AppModelTests: XCTestCase {
             "1m"
         )
         XCTAssertEqual(
-            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-(59 * 60)), now: now),
+            ThreadRelativeTimeFormatter.shortElapsed(
+                since: now.addingTimeInterval(-(59 * 60)), now: now),
             "59m"
         )
         XCTAssertEqual(
-            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-(60 * 60)), now: now),
+            ThreadRelativeTimeFormatter.shortElapsed(
+                since: now.addingTimeInterval(-(60 * 60)), now: now),
             "1h"
         )
         XCTAssertEqual(
-            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-(26 * 60 * 60)), now: now),
+            ThreadRelativeTimeFormatter.shortElapsed(
+                since: now.addingTimeInterval(-(26 * 60 * 60)), now: now),
             "1d"
         )
         XCTAssertEqual(
-            ThreadRelativeTimeFormatter.shortElapsed(since: now.addingTimeInterval(-(8 * 24 * 60 * 60)), now: now),
+            ThreadRelativeTimeFormatter.shortElapsed(
+                since: now.addingTimeInterval(-(8 * 24 * 60 * 60)), now: now),
             "1w"
         )
     }
@@ -96,7 +101,10 @@ final class AppModelTests: XCTestCase {
         let fixture = AppModelFixture()
         let store = InMemoryYAAWStore(
             snapshot: YAAWSnapshot(
-                projects: [Project(id: fixture.projectID, displayName: "Project", rootDirectory: fixture.root)],
+                projects: [
+                    Project(
+                        id: fixture.projectID, displayName: "Project", rootDirectory: fixture.root)
+                ],
                 threads: [
                     AgentThread(
                         id: fixture.firstThreadID,
@@ -128,13 +136,15 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.threadActivity(for: fixture.firstThreadID).status, .inactive)
         XCTAssertFalse(model.threadActivity(for: fixture.firstThreadID).isUnread)
-        XCTAssertEqual(store.load().threadActivityByThreadID[fixture.firstThreadID]?.status, .inactive)
+        XCTAssertEqual(
+            store.load().threadActivityByThreadID[fixture.firstThreadID]?.status, .inactive)
     }
 
     func testPollingHelperActivityEventsUpdatesThreadActivity() throws {
         let fixture = AppModelFixture()
         let activityDirectory = try temporaryDirectory()
-        let service = AgentCLISessionBindingService(activityDirectory: activityDirectory, helperBinDirectory: activityDirectory)
+        let service = AgentCLISessionBindingService(
+            activityDirectory: activityDirectory, helperBinDirectory: activityDirectory)
         let model = AppModel(store: fixture.store, agentCLIBindings: service)
         let thread = try XCTUnwrap(model.selectedThread)
         let logURL = try XCTUnwrap(service.activityLogURL(for: thread))
@@ -160,7 +170,8 @@ final class AppModelTests: XCTestCase {
             helperBinDirectory: activityDirectory
         )
         let model = AppModel(store: fixture.store, agentCLIBindings: service)
-        let backgroundThread = try XCTUnwrap(model.threads.first { $0.id == fixture.secondThreadID })
+        let backgroundThread = try XCTUnwrap(
+            model.threads.first { $0.id == fixture.secondThreadID })
         let logURL = try XCTUnwrap(service.activityLogURL(for: backgroundThread))
         try """
         {"thread_id":"\(backgroundThread.id.uuidString)","status":"complete","title":"Done","body":"Background finished","source":"helper","created_at":42}
@@ -182,7 +193,8 @@ final class AppModelTests: XCTestCase {
     func testPollingHelperActivityEventsBuffersSplitJSONLines() throws {
         let fixture = AppModelFixture()
         let activityDirectory = try temporaryDirectory()
-        let service = AgentCLISessionBindingService(activityDirectory: activityDirectory, helperBinDirectory: activityDirectory)
+        let service = AgentCLISessionBindingService(
+            activityDirectory: activityDirectory, helperBinDirectory: activityDirectory)
         let model = AppModel(store: fixture.store, agentCLIBindings: service)
         let thread = try XCTUnwrap(model.selectedThread)
         let logURL = try XCTUnwrap(service.activityLogURL(for: thread))
@@ -235,7 +247,8 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.layoutState.sidebarWidth, LayoutState.minimumSidebarWidth)
         XCTAssertEqual(model.layoutState.rightPanelWidth, LayoutState.minimumRightPanelWidth)
-        XCTAssertEqual(model.layoutState.globalTerminalHeight, LayoutState.maximumGlobalTerminalHeight)
+        XCTAssertEqual(
+            model.layoutState.globalTerminalHeight, LayoutState.maximumGlobalTerminalHeight)
     }
 
     func testPanelResizeActionsUseExpandedPanelLimits() {
@@ -290,7 +303,8 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.layoutState.sidebarWidth, LayoutState.defaultSidebarWidth)
         XCTAssertEqual(model.layoutState.rightPanelWidth, LayoutState.defaultRightPanelWidth)
-        XCTAssertEqual(model.layoutState.globalTerminalHeight, LayoutState.defaultGlobalTerminalHeight)
+        XCTAssertEqual(
+            model.layoutState.globalTerminalHeight, LayoutState.defaultGlobalTerminalHeight)
         XCTAssertEqual(store.layoutStateWriteCount, writesAfterResize + 3)
     }
 
@@ -349,7 +363,11 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(
             store: InMemoryYAAWStore(
                 snapshot: YAAWSnapshot(
-                    projects: [Project(id: fixture.projectID, displayName: "Project", rootDirectory: fixture.root)],
+                    projects: [
+                        Project(
+                            id: fixture.projectID, displayName: "Project",
+                            rootDirectory: fixture.root)
+                    ],
                     threads: [
                         AgentThread(
                             id: fixture.firstThreadID,
@@ -383,18 +401,22 @@ final class AppModelTests: XCTestCase {
                 snapshot: YAAWSnapshot(
                     projects: [
                         Project(id: firstProjectID, displayName: "First", rootDirectory: root),
-                        Project(id: secondProjectID, displayName: "Second", rootDirectory: root)
+                        Project(id: secondProjectID, displayName: "Second", rootDirectory: root),
                     ],
                     threads: [
-                        AgentThread(id: firstThreadID, displayName: "First", projectID: firstProjectID, workingDirectory: root),
-                        AgentThread(id: secondThreadID, displayName: "Second", projectID: secondProjectID, workingDirectory: root),
+                        AgentThread(
+                            id: firstThreadID, displayName: "First", projectID: firstProjectID,
+                            workingDirectory: root),
+                        AgentThread(
+                            id: secondThreadID, displayName: "Second", projectID: secondProjectID,
+                            workingDirectory: root),
                         AgentThread(
                             id: archivedThreadID,
                             displayName: "Archived",
                             projectID: secondProjectID,
                             workingDirectory: root,
                             isArchived: true
-                        )
+                        ),
                     ],
                     selectedProjectID: secondProjectID,
                     selectedThreadID: secondThreadID,
@@ -445,9 +467,12 @@ final class AppModelTests: XCTestCase {
 
     func testCreateProjectRejectsMissingDirectory() {
         let model = AppModel()
-        let missing = URL(fileURLWithPath: "/tmp/yaaw-missing-\(UUID().uuidString)", isDirectory: true)
+        let missing = URL(
+            fileURLWithPath: "/tmp/yaaw-missing-\(UUID().uuidString)", isDirectory: true)
 
-        XCTAssertThrowsError(try model.createProject(displayName: "Missing", rootDirectory: missing)) { error in
+        XCTAssertThrowsError(
+            try model.createProject(displayName: "Missing", rootDirectory: missing)
+        ) { error in
             XCTAssertEqual(error as? AppModelError, .missingProjectDirectory(missing.path))
         }
     }
@@ -487,7 +512,8 @@ final class AppModelTests: XCTestCase {
         model.refreshSelectedFileBrowser()
 
         XCTAssertEqual(model.fileBrowserState.rootPath, root.path)
-        XCTAssertEqual(model.fileBrowserState.errorMessage, "Missing working directory: \(root.path)")
+        XCTAssertEqual(
+            model.fileBrowserState.errorMessage, "Missing working directory: \(root.path)")
         XCTAssertTrue(
             recorder.events.contains {
                 $0.category == "Terminal"
@@ -522,7 +548,8 @@ final class AppModelTests: XCTestCase {
         let fixture = AppModelFixture()
         let model = AppModel(store: fixture.store)
 
-        let threadID = try model.createThread(agentCLI: .claude, now: Date(timeIntervalSince1970: 123))
+        let threadID = try model.createThread(
+            agentCLI: .claude, now: Date(timeIntervalSince1970: 123))
         let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
         let activity = model.threadActivity(for: threadID)
 
@@ -562,8 +589,12 @@ final class AppModelTests: XCTestCase {
             store: InMemoryYAAWStore(
                 snapshot: YAAWSnapshot(
                     projects: [
-                        Project(id: firstProjectID, displayName: "First", rootDirectory: firstRoot, sortOrder: 0),
-                        Project(id: secondProjectID, displayName: "Second", rootDirectory: secondRoot, sortOrder: 1)
+                        Project(
+                            id: firstProjectID, displayName: "First", rootDirectory: firstRoot,
+                            sortOrder: 0),
+                        Project(
+                            id: secondProjectID, displayName: "Second", rootDirectory: secondRoot,
+                            sortOrder: 1),
                     ],
                     threads: [],
                     selectedProjectID: firstProjectID,
@@ -622,7 +653,7 @@ final class AppModelTests: XCTestCase {
                             projectID: projectID,
                             workingDirectory: root,
                             lastOpenedAt: Date(timeIntervalSince1970: 20)
-                        )
+                        ),
                     ],
                     selectedProjectID: projectID,
                     selectedThreadID: secondThreadID,
@@ -632,13 +663,16 @@ final class AppModelTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+        XCTAssertEqual(
+            model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
 
         model.selectThread(id: firstThreadID)
-        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
+        XCTAssertEqual(
+            model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
 
         model.toggleThreadPinned(id: secondThreadID)
-        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+        XCTAssertEqual(
+            model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
     }
 
     func testArchiveAndUnarchiveMoveThreadsBetweenOrderedCaches() {
@@ -647,12 +681,15 @@ final class AppModelTests: XCTestCase {
 
         model.archiveThread(id: fixture.firstThreadID)
 
-        XCTAssertEqual(model.activeThreads(for: fixture.projectID).map(\.id), [fixture.secondThreadID])
-        XCTAssertEqual(model.archivedThreads(for: fixture.projectID).map(\.id), [fixture.firstThreadID])
+        XCTAssertEqual(
+            model.activeThreads(for: fixture.projectID).map(\.id), [fixture.secondThreadID])
+        XCTAssertEqual(
+            model.archivedThreads(for: fixture.projectID).map(\.id), [fixture.firstThreadID])
 
         model.unarchiveThread(id: fixture.firstThreadID)
 
-        XCTAssertEqual(model.activeThreads(for: fixture.projectID).map(\.id).first, fixture.firstThreadID)
+        XCTAssertEqual(
+            model.activeThreads(for: fixture.projectID).map(\.id).first, fixture.firstThreadID)
         XCTAssertTrue(model.archivedThreads(for: fixture.projectID).isEmpty)
     }
 
@@ -684,7 +721,7 @@ final class AppModelTests: XCTestCase {
                             agentCLI: .codex,
                             createdAt: timestamp,
                             lastOpenedAt: timestamp
-                        )
+                        ),
                     ],
                     selectedProjectID: projectID,
                     selectedThreadID: firstThreadID,
@@ -694,17 +731,19 @@ final class AppModelTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
+        XCTAssertEqual(
+            model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
 
         model.recordAgentCLIOutput(
             threadID: secondThreadID,
             output: """
-            session id: codex-session-222
-            session name: Alpha
-            """
+                session id: codex-session-222
+                session name: Alpha
+                """
         )
 
-        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+        XCTAssertEqual(
+            model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
     }
 
     func testThreadActivitySortsProjectThreadsByRecentInteraction() {
@@ -731,7 +770,7 @@ final class AppModelTests: XCTestCase {
                         projectID: projectID,
                         workingDirectory: root,
                         lastOpenedAt: newerDate
-                    )
+                    ),
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: secondThreadID,
@@ -741,11 +780,13 @@ final class AppModelTests: XCTestCase {
         )
         let model = AppModel(store: store)
 
-        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+        XCTAssertEqual(
+            model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
 
         model.recordAgentCommandFinished(threadID: firstThreadID, exitCode: 0)
 
-        XCTAssertEqual(model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
+        XCTAssertEqual(
+            model.activeThreads(for: projectID).map(\.id), [firstThreadID, secondThreadID])
         XCTAssertGreaterThan(
             store.load().threads.first { $0.id == firstThreadID }?.lastOpenedAt ?? olderDate,
             newerDate
@@ -761,9 +802,12 @@ final class AppModelTests: XCTestCase {
             store: InMemoryYAAWStore(
                 snapshot: YAAWSnapshot(
                     projects: [
-                        Project(id: firstID, displayName: "First", rootDirectory: root, sortOrder: 0),
-                        Project(id: secondID, displayName: "Second", rootDirectory: root, sortOrder: 1),
-                        Project(id: thirdID, displayName: "Third", rootDirectory: root, sortOrder: 2)
+                        Project(
+                            id: firstID, displayName: "First", rootDirectory: root, sortOrder: 0),
+                        Project(
+                            id: secondID, displayName: "Second", rootDirectory: root, sortOrder: 1),
+                        Project(
+                            id: thirdID, displayName: "Third", rootDirectory: root, sortOrder: 2),
                     ],
                     threads: [],
                     selectedProjectID: firstID,
@@ -793,9 +837,13 @@ final class AppModelTests: XCTestCase {
             store: InMemoryYAAWStore(
                 snapshot: YAAWSnapshot(
                     projects: [
-                        Project(id: firstID, displayName: "First", rootDirectory: root, sortOrder: 0),
-                        Project(id: secondID, displayName: "Second", rootDirectory: root, sortOrder: 1),
-                        Project(id: thirdID, displayName: "Third", rootDirectory: root, isPinned: true, sortOrder: 0)
+                        Project(
+                            id: firstID, displayName: "First", rootDirectory: root, sortOrder: 0),
+                        Project(
+                            id: secondID, displayName: "Second", rootDirectory: root, sortOrder: 1),
+                        Project(
+                            id: thirdID, displayName: "Third", rootDirectory: root, isPinned: true,
+                            sortOrder: 0),
                     ],
                     threads: [],
                     selectedProjectID: firstID,
@@ -818,7 +866,8 @@ final class AppModelTests: XCTestCase {
         let fixture = AppModelFixture()
         let model = AppModel(store: fixture.store)
 
-        XCTAssertThrowsError(try model.changeAgentCLI(for: fixture.firstThreadID, to: .claude)) { error in
+        XCTAssertThrowsError(try model.changeAgentCLI(for: fixture.firstThreadID, to: .claude)) {
+            error in
             XCTAssertEqual(error as? AppModelError, .agentCLIChangeNotAllowed)
         }
     }
@@ -829,7 +878,8 @@ final class AppModelTests: XCTestCase {
 
         model.archiveThread(id: fixture.secondThreadID)
 
-        let archivedThread = try XCTUnwrap(model.archivedThreadsForSelectedProject.first { $0.id == fixture.secondThreadID })
+        let archivedThread = try XCTUnwrap(
+            model.archivedThreadsForSelectedProject.first { $0.id == fixture.secondThreadID })
         XCTAssertEqual(archivedThread.agentCLI, .claude)
     }
 
@@ -840,12 +890,13 @@ final class AppModelTests: XCTestCase {
             resolver: StaticAppModelExecutableResolver(
                 paths: [
                     "codex": "/tmp/bin/codex",
-                    "claude": "/tmp/bin/claude"
+                    "claude": "/tmp/bin/claude",
                 ]
             ),
             captureDirectory: nil
         )
-        let model = AppModel(store: fixture.store, terminalManager: manager, agentCLIBindings: service)
+        let model = AppModel(
+            store: fixture.store, terminalManager: manager, agentCLIBindings: service)
 
         let firstActivation = try XCTUnwrap(model.activateSelectedProjectTerminal())
         let secondActivation = try XCTUnwrap(model.activateSelectedProjectTerminal())
@@ -866,7 +917,9 @@ final class AppModelTests: XCTestCase {
     func testConfiguredAgentExecutableNameIsUsedForProjectTerminal() throws {
         let fixture = AppModelFixture()
         let service = AgentCLISessionBindingService(
-            resolver: StaticAppModelExecutableResolver(paths: ["codex-nightly": "/tools/codex-nightly"]),
+            resolver: StaticAppModelExecutableResolver(paths: [
+                "codex-nightly": "/tools/codex-nightly"
+            ]),
             captureDirectory: nil
         )
         let model = AppModel(
@@ -877,7 +930,8 @@ final class AppModelTests: XCTestCase {
             )
         )
 
-        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(request.command, ["/tools/codex-nightly"])
     }
@@ -887,7 +941,8 @@ final class AppModelTests: XCTestCase {
         let recorder = RecordingDiagnosticEventRecorder()
         let model = AppModel(store: fixture.store, diagnosticRecorder: recorder)
 
-        model.reloadConfiguration(YAAWConfiguration(theme: ThemeSettings(active: "solarized-light")))
+        model.reloadConfiguration(
+            YAAWConfiguration(theme: ThemeSettings(active: "solarized-light")))
 
         XCTAssertEqual(model.configuration.themeName, "solarized-light")
         XCTAssertEqual(model.configuration.resolvedTheme.displayName, "Solarized Light")
@@ -905,7 +960,7 @@ final class AppModelTests: XCTestCase {
         let resolver = StaticAppModelExecutableResolver(
             paths: [
                 "zed": "/tools/zed",
-                "tig": "/tools/tig"
+                "tig": "/tools/tig",
             ]
         )
         let model = AppModel(
@@ -920,8 +975,10 @@ final class AppModelTests: XCTestCase {
         )
 
         model.openFileInNvim(relativePath: "Package.swift")
-        let editorRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
-        let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+        let editorRequest = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        let gitRequest = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(editorRequest.command, ["/tools/zed", "Package.swift"])
         XCTAssertEqual(gitRequest.command, ["/tools/tig"])
@@ -941,7 +998,8 @@ final class AppModelTests: XCTestCase {
             )
         )
 
-        let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+        let gitRequest = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(gitRequest.command, ["/tools/delta", "--diff"])
     }
@@ -955,12 +1013,15 @@ final class AppModelTests: XCTestCase {
         try writeExecutable(at: lazygit, contents: "#!/bin/sh\n")
         let model = AppModel(
             store: fixture.store,
-            externalToolResolver: PATHAgentCLIExecutableResolver(fallbackSearchPaths: [homebrewBin.path]),
+            externalToolResolver: PATHAgentCLIExecutableResolver(fallbackSearchPaths: [
+                homebrewBin.path
+            ]),
             environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
         )
 
         model.selectRightPanelMode(.git)
-        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(request.command, [lazygit.path])
     }
@@ -973,15 +1034,17 @@ final class AppModelTests: XCTestCase {
         )
         let model = AppModel(store: fixture.store, agentCLIBindings: service)
 
-        let initial = try XCTUnwrap(model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+        let initial = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
         model.recordAgentCLIOutput(
             threadID: fixture.firstThreadID,
             output: """
-            session id: codex-session-789
-            session name: Captured Session
-            """
+                session id: codex-session-789
+                session name: Captured Session
+                """
         )
-        let active = try XCTUnwrap(model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+        let active = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(initial.command, ["/tmp/bin/codex"])
         XCTAssertEqual(active.command, initial.command)
@@ -995,9 +1058,9 @@ final class AppModelTests: XCTestCase {
         model.recordAgentCLIOutput(
             threadID: fixture.firstThreadID,
             output: """
-            session id: codex-session-789
-            session name: Captured Session
-            """
+                session id: codex-session-789
+                session name: Captured Session
+                """
         )
         model.recordAgentCLITerminalTitle(threadID: fixture.firstThreadID, title: "~/project")
 
@@ -1010,7 +1073,8 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(store: fixture.store)
 
         model.recordAgentCLITerminalTitle(threadID: fixture.firstThreadID, title: "CLI Title")
-        model.recordAgentCLIOutput(threadID: fixture.firstThreadID, output: "session id: codex-session-789")
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID, output: "session id: codex-session-789")
 
         XCTAssertEqual(model.selectedThread?.sessionIdentity, "codex-session-789")
         XCTAssertEqual(model.selectedThread?.canonicalSessionName, "CLI Title")
@@ -1024,11 +1088,13 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(store: fixture.store, agentCLIBindings: service)
         let thread = try XCTUnwrap(model.selectedThread)
         let captureLogURL = try XCTUnwrap(service.captureLogURL(for: thread))
-        try "session id: first-session\n".write(to: captureLogURL, atomically: true, encoding: .utf8)
+        try "session id: first-session\n".write(
+            to: captureLogURL, atomically: true, encoding: .utf8)
         model.pollSelectedAgentCLICaptureLog()
 
         model.terminateTerminal(role: .project(threadID: fixture.firstThreadID))
-        try "session id: second-session\n".write(to: captureLogURL, atomically: true, encoding: .utf8)
+        try "session id: second-session\n".write(
+            to: captureLogURL, atomically: true, encoding: .utf8)
         model.pollSelectedAgentCLICaptureLog()
 
         XCTAssertEqual(model.selectedThread?.sessionIdentity, "second-session")
@@ -1044,7 +1110,9 @@ final class AppModelTests: XCTestCase {
         _ = model.activateSelectedProjectTerminal()
 
         let renderedDiagnostics = recorder.events
-            .flatMap { event in [event.category, event.name] + event.metadata.flatMap { [$0.key, $0.value] } }
+            .flatMap { event in
+                [event.category, event.name] + event.metadata.flatMap { [$0.key, $0.value] }
+            }
             .joined(separator: "\n")
         XCTAssertFalse(renderedDiagnostics.contains("SESSION_TOKEN=do-not-log"))
         XCTAssertFalse(renderedDiagnostics.contains(secretOutput))
@@ -1086,14 +1154,16 @@ final class AppModelTests: XCTestCase {
         let resolver = StaticAppModelExecutableResolver(
             paths: [
                 "nvim": "/opt/homebrew/bin/nvim",
-                "lazygit": "/opt/homebrew/bin/lazygit"
+                "lazygit": "/opt/homebrew/bin/lazygit",
             ]
         )
         let model = AppModel(store: fixture.store, externalToolResolver: resolver, environment: [:])
 
         model.selectRightPanelMode(.nvim)
         let nvimSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
-        XCTAssertEqual(nvimSession.request.role, .nvimTab(threadID: fixture.firstThreadID, tabID: RightPanelTab.defaultNvimID))
+        XCTAssertEqual(
+            nvimSession.request.role,
+            .nvimTab(threadID: fixture.firstThreadID, tabID: RightPanelTab.defaultNvimID))
         XCTAssertEqual(nvimSession.request.workingDirectory, fixture.root)
         XCTAssertEqual(nvimSession.request.command, ["/opt/homebrew/bin/nvim"])
 
@@ -1112,7 +1182,9 @@ final class AppModelTests: XCTestCase {
         model.openFileInNvim(relativePath: "src/App/RootView.swift")
 
         let tabID = RightPanelTab.nvimTabID(relativePath: "src/App/RootView.swift")
-        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .nvimTab(threadID: fixture.firstThreadID, tabID: tabID)))
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(
+                for: .nvimTab(threadID: fixture.firstThreadID, tabID: tabID)))
         XCTAssertEqual(model.selectedRightPanelMode, .nvim)
         XCTAssertEqual(model.selectedRightPanelTab.id, tabID)
         XCTAssertEqual(request.workingDirectory, fixture.root)
@@ -1127,7 +1199,9 @@ final class AppModelTests: XCTestCase {
         model.openFileInNvim(relativePath: "docs/plans/new-note.md")
 
         let tabID = RightPanelTab.nvimTabID(relativePath: "docs/plans/new-note.md")
-        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .nvimTab(threadID: fixture.firstThreadID, tabID: tabID)))
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(
+                for: .nvimTab(threadID: fixture.firstThreadID, tabID: tabID)))
         XCTAssertEqual(model.selectedFileRelativePath, "docs/plans/new-note.md")
         XCTAssertEqual(model.selectedRightPanelMode, .nvim)
         XCTAssertEqual(model.selectedRightPanelTab.id, tabID)
@@ -1148,10 +1222,12 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.selectedFileRelativePath, originalSelectedFile)
         XCTAssertEqual(model.selectedRightPanelMode, originalMode)
         XCTAssertEqual(model.selectedRightPanelState, originalState)
-        XCTAssertNil(model.terminalLaunchRequest(for: .nvimTab(
-            threadID: fixture.firstThreadID,
-            tabID: RightPanelTab.nvimTabID(relativePath: "outside.swift")
-        )))
+        XCTAssertNil(
+            model.terminalLaunchRequest(
+                for: .nvimTab(
+                    threadID: fixture.firstThreadID,
+                    tabID: RightPanelTab.nvimTabID(relativePath: "outside.swift")
+                )))
     }
 
     func testRightPanelTabOrderKeepsFilesGitNvimTabsThenPlusSlot() throws {
@@ -1169,7 +1245,7 @@ final class AppModelTests: XCTestCase {
                 RightPanelTab.gitID,
                 RightPanelTab.defaultNvimID,
                 RightPanelTab.nvimTabID(relativePath: "README.md"),
-                RightPanelTab.nvimTabID(relativePath: "src/App/RootView.swift")
+                RightPanelTab.nvimTabID(relativePath: "src/App/RootView.swift"),
             ]
         )
     }
@@ -1184,7 +1260,9 @@ final class AppModelTests: XCTestCase {
             snapshot: YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
                 threads: [
-                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                    AgentThread(
+                        id: threadID, displayName: "Thread", projectID: projectID,
+                        workingDirectory: root)
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: threadID,
@@ -1198,9 +1276,12 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.openFileInBrowser(relativePath: "index.html"))
 
         XCTAssertEqual(model.selectedRightPanelMode, .browser)
-        XCTAssertEqual(model.selectedRightPanelTab.id, RightPanelTab.browserTabID(urlString: nil, relativePath: "index.html"))
+        XCTAssertEqual(
+            model.selectedRightPanelTab.id,
+            RightPanelTab.browserTabID(urlString: nil, relativePath: "index.html"))
         XCTAssertEqual(model.selectedRightPanelTab.relativePath, "index.html")
-        XCTAssertEqual(model.selectedRightPanelTab.urlString, preview.standardizedFileURL.absoluteString)
+        XCTAssertEqual(
+            model.selectedRightPanelTab.urlString, preview.standardizedFileURL.absoluteString)
         XCTAssertNil(model.selectedBrowserUnavailableMessage)
     }
 
@@ -1221,7 +1302,9 @@ final class AppModelTests: XCTestCase {
             snapshot: YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
                 threads: [
-                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                    AgentThread(
+                        id: threadID, displayName: "Thread", projectID: projectID,
+                        workingDirectory: root)
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: threadID,
@@ -1235,9 +1318,12 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.openFileInBrowser(relativePath: "README.md"))
 
         XCTAssertEqual(model.selectedRightPanelMode, .browser)
-        XCTAssertEqual(model.selectedRightPanelTab.id, RightPanelTab.browserTabID(urlString: nil, relativePath: "README.md"))
+        XCTAssertEqual(
+            model.selectedRightPanelTab.id,
+            RightPanelTab.browserTabID(urlString: nil, relativePath: "README.md"))
         XCTAssertEqual(model.selectedRightPanelTab.relativePath, "README.md")
-        XCTAssertEqual(model.selectedRightPanelTab.urlString, preview.standardizedFileURL.absoluteString)
+        XCTAssertEqual(
+            model.selectedRightPanelTab.urlString, preview.standardizedFileURL.absoluteString)
         XCTAssertNil(model.selectedBrowserUnavailableMessage)
     }
 
@@ -1263,9 +1349,11 @@ final class AppModelTests: XCTestCase {
         )
 
         model.openFileInNvim(relativePath: "README.md")
-        let nvimRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        let nvimRequest = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
         model.selectRightPanelMode(.git)
-        let gitRequest = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+        let gitRequest = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(nvimRequest.command, ["nvim", "README.md"])
         XCTAssertEqual(gitRequest.command, ["git", "--no-pager", "diff"])
@@ -1279,7 +1367,8 @@ final class AppModelTests: XCTestCase {
             environment: [:]
         )
         vimModel.openFileInNvim(relativePath: "README.md")
-        let vimRequest = try XCTUnwrap(vimModel.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        let vimRequest = try XCTUnwrap(
+            vimModel.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
         XCTAssertEqual(vimRequest.command, ["/usr/bin/vim", "README.md"])
 
         let viModel = AppModel(
@@ -1288,7 +1377,8 @@ final class AppModelTests: XCTestCase {
             environment: [:]
         )
         viModel.openFileInNvim(relativePath: "README.md")
-        let viRequest = try XCTUnwrap(viModel.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
+        let viRequest = try XCTUnwrap(
+            viModel.terminalLaunchRequest(for: .nvim(threadID: fixture.firstThreadID)))
         XCTAssertEqual(viRequest.command, ["/usr/bin/vi", "README.md"])
     }
 
@@ -1301,7 +1391,8 @@ final class AppModelTests: XCTestCase {
         )
 
         model.selectRightPanelMode(.git)
-        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .lazygit(threadID: fixture.firstThreadID)))
 
         XCTAssertEqual(request.command, ["/usr/bin/git", "--no-pager", "diff"])
     }
@@ -1310,7 +1401,9 @@ final class AppModelTests: XCTestCase {
         let fixture = AppModelFixture()
         let manager = PlaceholderTerminalSessionManager()
         let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
-        let model = AppModel(store: fixture.store, terminalManager: manager, externalToolResolver: resolver, environment: [:])
+        let model = AppModel(
+            store: fixture.store, terminalManager: manager, externalToolResolver: resolver,
+            environment: [:])
 
         model.openFileInNvim(relativePath: "README.md")
         let firstSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
@@ -1327,7 +1420,9 @@ final class AppModelTests: XCTestCase {
         let fixture = AppModelFixture()
         let manager = PlaceholderTerminalSessionManager()
         let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
-        let model = AppModel(store: fixture.store, terminalManager: manager, externalToolResolver: resolver, environment: [:])
+        let model = AppModel(
+            store: fixture.store, terminalManager: manager, externalToolResolver: resolver,
+            environment: [:])
 
         model.openFileInNvim(relativePath: "README.md")
         let firstSession = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
@@ -1360,7 +1455,8 @@ final class AppModelTests: XCTestCase {
         let firstSession = manager.activate(firstRequest)
         _ = manager.activate(secondRequest)
 
-        let terminatedEvent = manager.lifecycleEvents.compactMap { event -> TerminalSessionRecord? in
+        let terminatedEvent = manager.lifecycleEvents.compactMap {
+            event -> TerminalSessionRecord? in
             if case .terminated(let record) = event {
                 return record
             }
@@ -1377,7 +1473,8 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(store: store)
 
         let session = try XCTUnwrap(model.activateSelectedProjectTerminal())
-        XCTAssertEqual(model.terminalSession(for: .project(threadID: fixture.firstThreadID))?.id, session.id)
+        XCTAssertEqual(
+            model.terminalSession(for: .project(threadID: fixture.firstThreadID))?.id, session.id)
 
         let reloadedModel = AppModel(store: store)
 
@@ -1461,7 +1558,9 @@ final class AppModelTests: XCTestCase {
             fixture.root.appendingPathComponent("src/App/RootView.swift").standardizedFileURL
         )
         XCTAssertNil(model.fileBrowserURL(relativePath: "../outside.swift"))
-        XCTAssertNil(model.fileBrowserExternalOpenTarget(relativePath: "../outside.swift", isDirectory: false))
+        XCTAssertNil(
+            model.fileBrowserExternalOpenTarget(
+                relativePath: "../outside.swift", isDirectory: false))
     }
 
     func testSelectedContextProjectAndThreadCommandsUpdateCurrentSelection() throws {
@@ -1473,8 +1572,10 @@ final class AppModelTests: XCTestCase {
         model.archiveSelectedThread()
 
         XCTAssertTrue(try XCTUnwrap(model.projects.first { $0.id == fixture.projectID }).isPinned)
-        XCTAssertTrue(try XCTUnwrap(model.threads.first { $0.id == fixture.firstThreadID }).isPinned)
-        XCTAssertTrue(try XCTUnwrap(model.threads.first { $0.id == fixture.firstThreadID }).isArchived)
+        XCTAssertTrue(
+            try XCTUnwrap(model.threads.first { $0.id == fixture.firstThreadID }).isPinned)
+        XCTAssertTrue(
+            try XCTUnwrap(model.threads.first { $0.id == fixture.firstThreadID }).isArchived)
         XCTAssertEqual(model.selectedThreadID, fixture.secondThreadID)
     }
 
@@ -1521,7 +1622,8 @@ private struct StaticAppModelExecutableResolver: AgentCLIExecutableResolving {
     }
 }
 
-private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable {
+private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable
+{
     private(set) var events: [DiagnosticEvent] = []
 
     func record(_ event: DiagnosticEvent) {
@@ -1529,7 +1631,9 @@ private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, 
     }
 }
 
-private final class RecordingThreadActivityNotificationDispatcher: ThreadActivityNotificationDispatching, @unchecked Sendable {
+private final class RecordingThreadActivityNotificationDispatcher:
+    ThreadActivityNotificationDispatching, @unchecked Sendable
+{
     private(set) var notifications: [ThreadActivityNotification] = []
 
     func dispatch(_ notification: ThreadActivityNotification) {
@@ -1537,7 +1641,9 @@ private final class RecordingThreadActivityNotificationDispatcher: ThreadActivit
     }
 }
 
-private final class RecordingThreadActivityBadgeUpdater: ThreadActivityBadgeUpdating, @unchecked Sendable {
+private final class RecordingThreadActivityBadgeUpdater: ThreadActivityBadgeUpdating,
+    @unchecked Sendable
+{
     private(set) var counts: [Int] = []
 
     func updateUnreadThreadActivityCount(_ count: Int) {
@@ -1545,8 +1651,8 @@ private final class RecordingThreadActivityBadgeUpdater: ThreadActivityBadgeUpda
     }
 }
 
-private extension FileHandle {
-    func closeAfterAppending(_ text: String) throws {
+extension FileHandle {
+    fileprivate func closeAfterAppending(_ text: String) throws {
         defer { try? close() }
         try seekToEnd()
         try write(contentsOf: Data(text.utf8))
@@ -1577,7 +1683,7 @@ private struct AppModelFixture {
                         projectID: projectID,
                         workingDirectory: root,
                         agentCLI: .claude
-                    )
+                    ),
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: firstThreadID,

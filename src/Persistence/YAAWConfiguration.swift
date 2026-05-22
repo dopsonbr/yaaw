@@ -34,19 +34,26 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
-        self.agent = try container.decodeIfPresent(AgentSettings.self, forKey: .agent) ?? AgentSettings()
-        self.theme = try container.decodeIfPresent(ThemeSettings.self, forKey: .theme) ?? ThemeSettings()
-        self.icons = try container.decodeIfPresent(IconSettings.self, forKey: .icons) ?? IconSettings()
-        self.fonts = try container.decodeIfPresent(FontSettings.self, forKey: .fonts) ?? FontSettings()
-        self.keyboardShortcuts = try container.decodeIfPresent(
-            KeyboardShortcutSettings.self,
-            forKey: .keyboardShortcuts
-        ) ?? KeyboardShortcutSettings()
-        self.tools = try container.decodeIfPresent(ToolSettings.self, forKey: .tools) ?? ToolSettings()
-        self.fileIndexing = try container.decodeIfPresent(
-            FileIndexingSettings.self,
-            forKey: .fileIndexing
-        ) ?? FileIndexingSettings()
+        self.agent =
+            try container.decodeIfPresent(AgentSettings.self, forKey: .agent) ?? AgentSettings()
+        self.theme =
+            try container.decodeIfPresent(ThemeSettings.self, forKey: .theme) ?? ThemeSettings()
+        self.icons =
+            try container.decodeIfPresent(IconSettings.self, forKey: .icons) ?? IconSettings()
+        self.fonts =
+            try container.decodeIfPresent(FontSettings.self, forKey: .fonts) ?? FontSettings()
+        self.keyboardShortcuts =
+            try container.decodeIfPresent(
+                KeyboardShortcutSettings.self,
+                forKey: .keyboardShortcuts
+            ) ?? KeyboardShortcutSettings()
+        self.tools =
+            try container.decodeIfPresent(ToolSettings.self, forKey: .tools) ?? ToolSettings()
+        self.fileIndexing =
+            try container.decodeIfPresent(
+                FileIndexingSettings.self,
+                forKey: .fileIndexing
+            ) ?? FileIndexingSettings()
     }
 
     public static let defaultIgnoreRules = FileIndexingSettings.defaultIgnoreRules
@@ -79,7 +86,8 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         keyboardShortcuts.definition(for: action)
     }
 
-    public func validated(diagnosticRecorder: DiagnosticEventRecording? = nil) -> YAAWConfiguration {
+    public func validated(diagnosticRecorder: DiagnosticEventRecording? = nil) -> YAAWConfiguration
+    {
         var configuration = self
         configuration.version = max(configuration.version, 1)
         configuration.agent = configuration.agent.validated()
@@ -147,7 +155,7 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
                         name: "unsupported_theme",
                         metadata: [
                             "requested": trimmedThemeID,
-                            "fallback": ThemeCatalog.defaultID
+                            "fallback": ThemeCatalog.defaultID,
                         ]
                     )
                 )
@@ -167,7 +175,8 @@ public struct IconSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.fileBrowserPack = try container.decodeIfPresent(String.self, forKey: .fileBrowserPack)
+        self.fileBrowserPack =
+            try container.decodeIfPresent(String.self, forKey: .fileBrowserPack)
             ?? FileIconPack.fallback.rawValue
     }
 
@@ -185,7 +194,7 @@ public struct IconSettings: Codable, Equatable, Sendable {
                         name: "unsupported_icon_pack",
                         metadata: [
                             "requested": trimmedPack,
-                            "fallback": FileIconPack.fallback.rawValue
+                            "fallback": FileIconPack.fallback.rawValue,
                         ]
                     )
                 )
@@ -222,11 +231,15 @@ public struct FontSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.interfaceFamily = try container.decodeIfPresent(String.self, forKey: .interfaceFamily) ?? "system"
-        self.interfaceSize = try container.decodeIfPresent(Double.self, forKey: .interfaceSize) ?? 13
-        self.editorFamily = try container.decodeIfPresent(String.self, forKey: .editorFamily) ?? "system-monospace"
+        self.interfaceFamily =
+            try container.decodeIfPresent(String.self, forKey: .interfaceFamily) ?? "system"
+        self.interfaceSize =
+            try container.decodeIfPresent(Double.self, forKey: .interfaceSize) ?? 13
+        self.editorFamily =
+            try container.decodeIfPresent(String.self, forKey: .editorFamily) ?? "system-monospace"
         self.editorSize = try container.decodeIfPresent(Double.self, forKey: .editorSize) ?? 13
-        self.terminalFamily = try container.decodeIfPresent(String.self, forKey: .terminalFamily) ?? ""
+        self.terminalFamily =
+            try container.decodeIfPresent(String.self, forKey: .terminalFamily) ?? ""
         self.terminalSize = try container.decodeIfPresent(Double.self, forKey: .terminalSize) ?? 12
     }
 
@@ -414,15 +427,18 @@ public enum KeyboardShortcutAction: String, CaseIterable, Hashable, Identifiable
         switch self {
         case .openSettings:
             .app
-        case .newProject, .toggleSelectedProjectPinned, .moveSelectedProjectUp, .moveSelectedProjectDown,
-             .toggleSelectedProjectExpanded, .toggleSelectedProjectArchiveExpanded:
+        case .newProject, .toggleSelectedProjectPinned, .moveSelectedProjectUp,
+            .moveSelectedProjectDown,
+            .toggleSelectedProjectExpanded, .toggleSelectedProjectArchiveExpanded:
             .project
-        case .newThread, .toggleSelectedThreadPinned, .archiveSelectedThread, .unarchiveSelectedThread:
+        case .newThread, .toggleSelectedThreadPinned, .archiveSelectedThread,
+            .unarchiveSelectedThread:
             .thread
         case .navigateBack, .navigateForward:
             .navigation
-        case .previousRightPanelMode, .nextRightPanelMode, .selectFilesRightPanelMode, .selectGitRightPanelMode,
-             .selectNvimRightPanelMode, .openNvimFilePicker:
+        case .previousRightPanelMode, .nextRightPanelMode, .selectFilesRightPanelMode,
+            .selectGitRightPanelMode,
+            .selectNvimRightPanelMode, .openNvimFilePicker:
             .rightPanel
         case .toggleSidebar, .toggleRightPanel:
             .layout
@@ -431,13 +447,16 @@ public enum KeyboardShortcutAction: String, CaseIterable, Hashable, Identifiable
         case .refreshFiles, .openSelectedFileInNvim:
             .files
         case .openSelectedDirectoryExternalDefault, .openSelectedDirectoryInVSCode,
-             .openSelectedDirectoryInVSCodeInsiders, .openSelectedDirectoryInSublimeText,
-             .openSelectedDirectoryInZed, .openSelectedDirectoryInFinder, .openSelectedDirectoryInTerminal,
-             .openSelectedDirectoryInGhostty, .openSelectedDirectoryInXcode, .openSelectedDirectoryInWebStorm,
-             .openSelectedFileExternalDefault, .openSelectedFileInVSCode, .openSelectedFileInVSCodeInsiders,
-             .openSelectedFileInSublimeText, .openSelectedFileInZed, .openSelectedFileInFinder,
-             .openSelectedFileInTerminal, .openSelectedFileInGhostty, .openSelectedFileInXcode,
-             .openSelectedFileInWebStorm:
+            .openSelectedDirectoryInVSCodeInsiders, .openSelectedDirectoryInSublimeText,
+            .openSelectedDirectoryInZed, .openSelectedDirectoryInFinder,
+            .openSelectedDirectoryInTerminal,
+            .openSelectedDirectoryInGhostty, .openSelectedDirectoryInXcode,
+            .openSelectedDirectoryInWebStorm,
+            .openSelectedFileExternalDefault, .openSelectedFileInVSCode,
+            .openSelectedFileInVSCodeInsiders,
+            .openSelectedFileInSublimeText, .openSelectedFileInZed, .openSelectedFileInFinder,
+            .openSelectedFileInTerminal, .openSelectedFileInGhostty, .openSelectedFileInXcode,
+            .openSelectedFileInWebStorm:
             .externalOpen
         case .saveSettings, .reloadSettings, .revertSettings, .openSettingsExternal:
             .settings
@@ -513,10 +532,11 @@ public struct KeyboardShortcutDefinition: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try container.decodeIfPresent(String.self, forKey: .key) ?? ""
-        self.modifiers = try container.decodeIfPresent(
-            [KeyboardShortcutModifier].self,
-            forKey: .modifiers
-        ) ?? []
+        self.modifiers =
+            try container.decodeIfPresent(
+                [KeyboardShortcutModifier].self,
+                forKey: .modifiers
+            ) ?? []
     }
 
     public var normalizedKey: String {
@@ -555,7 +575,8 @@ public struct KeyboardShortcutDefinition: Codable, Equatable, Sendable {
                 "Control"
             }
         }
-        return (modifierText + [key.trimmingCharacters(in: .whitespacesAndNewlines)]).joined(separator: "+")
+        return (modifierText + [key.trimmingCharacters(in: .whitespacesAndNewlines)]).joined(
+            separator: "+")
     }
 
     fileprivate func validated(fallback: KeyboardShortcutDefinition) -> KeyboardShortcutDefinition {
@@ -611,7 +632,9 @@ public struct KeyboardShortcutSettings: Codable, Equatable, Sendable {
         definitions[action] ?? action.defaultShortcut
     }
 
-    public mutating func setDefinition(_ definition: KeyboardShortcutDefinition, for action: KeyboardShortcutAction) {
+    public mutating func setDefinition(
+        _ definition: KeyboardShortcutDefinition, for action: KeyboardShortcutAction
+    ) {
         definitions[action] = definition
     }
 
@@ -636,16 +659,24 @@ public struct KeyboardShortcutSettings: Codable, Equatable, Sendable {
         return KeyboardShortcutSettings(definitions: validated)
     }
 
-    public static let defaultToggleBottomTerminal = KeyboardShortcutDefinition(key: "j", modifiers: [.command])
-    public static let defaultNavigateBack = KeyboardShortcutDefinition(key: "[", modifiers: [.command])
-    public static let defaultNavigateForward = KeyboardShortcutDefinition(key: "]", modifiers: [.command])
-    public static let defaultPreviousRightPanelMode = KeyboardShortcutDefinition(key: "[", modifiers: [.command, .shift])
-    public static let defaultNextRightPanelMode = KeyboardShortcutDefinition(key: "]", modifiers: [.command, .shift])
-    public static let defaultToggleSidebar = KeyboardShortcutDefinition(key: "s", modifiers: [.command, .option])
-    public static let defaultToggleRightPanel = KeyboardShortcutDefinition(key: "r", modifiers: [.command, .option])
+    public static let defaultToggleBottomTerminal = KeyboardShortcutDefinition(
+        key: "j", modifiers: [.command])
+    public static let defaultNavigateBack = KeyboardShortcutDefinition(
+        key: "[", modifiers: [.command])
+    public static let defaultNavigateForward = KeyboardShortcutDefinition(
+        key: "]", modifiers: [.command])
+    public static let defaultPreviousRightPanelMode = KeyboardShortcutDefinition(
+        key: "[", modifiers: [.command, .shift])
+    public static let defaultNextRightPanelMode = KeyboardShortcutDefinition(
+        key: "]", modifiers: [.command, .shift])
+    public static let defaultToggleSidebar = KeyboardShortcutDefinition(
+        key: "s", modifiers: [.command, .option])
+    public static let defaultToggleRightPanel = KeyboardShortcutDefinition(
+        key: "r", modifiers: [.command, .option])
 
     public static let defaultDefinitions: [KeyboardShortcutAction: KeyboardShortcutDefinition] = {
-        Dictionary(uniqueKeysWithValues: KeyboardShortcutAction.allCases.map { ($0, $0.defaultShortcut) })
+        Dictionary(
+            uniqueKeysWithValues: KeyboardShortcutAction.allCases.map { ($0, $0.defaultShortcut) })
     }()
 }
 
@@ -690,14 +721,22 @@ public struct ToolSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.editors = try container.decodeIfPresent(EditorToolSettings.self, forKey: .editors) ?? EditorToolSettings()
-        self.externalOpen = try container.decodeIfPresent(
-            ExternalOpenSettings.self,
-            forKey: .externalOpen
-        ) ?? ExternalOpenSettings()
-        self.git = try container.decodeIfPresent(GitToolSettings.self, forKey: .git) ?? GitToolSettings()
-        self.diff = try container.decodeIfPresent(DiffToolSettings.self, forKey: .diff) ?? DiffToolSettings()
-        self.agents = try container.decodeIfPresent(AgentToolSettings.self, forKey: .agents) ?? AgentToolSettings()
+        self.editors =
+            try container.decodeIfPresent(EditorToolSettings.self, forKey: .editors)
+            ?? EditorToolSettings()
+        self.externalOpen =
+            try container.decodeIfPresent(
+                ExternalOpenSettings.self,
+                forKey: .externalOpen
+            ) ?? ExternalOpenSettings()
+        self.git =
+            try container.decodeIfPresent(GitToolSettings.self, forKey: .git) ?? GitToolSettings()
+        self.diff =
+            try container.decodeIfPresent(DiffToolSettings.self, forKey: .diff)
+            ?? DiffToolSettings()
+        self.agents =
+            try container.decodeIfPresent(AgentToolSettings.self, forKey: .agents)
+            ?? AgentToolSettings()
     }
 
     fileprivate func validated() -> ToolSettings {
@@ -720,7 +759,10 @@ public struct EditorToolSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.preferred = try container.decodeIfPresent([String].self, forKey: .preferred) ?? ["nvim", "vim", "vi"]
+        self.preferred =
+            try container.decodeIfPresent([String].self, forKey: .preferred) ?? [
+                "nvim", "vim", "vi",
+            ]
     }
 
     fileprivate func validated() -> EditorToolSettings {
@@ -756,7 +798,8 @@ public struct DiffToolSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.fallback = try container.decodeIfPresent([String].self, forKey: .fallback) ?? ["git", "diff"]
+        self.fallback =
+            try container.decodeIfPresent([String].self, forKey: .fallback) ?? ["git", "diff"]
     }
 
     fileprivate func validated() -> DiffToolSettings {
@@ -823,7 +866,9 @@ public struct FileIndexingSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.ignoreRules = try container.decodeIfPresent([String].self, forKey: .ignoreRules) ?? Self.defaultIgnoreRules
+        self.ignoreRules =
+            try container.decodeIfPresent([String].self, forKey: .ignoreRules)
+            ?? Self.defaultIgnoreRules
     }
 
     public static let defaultIgnoreRules = [
@@ -846,13 +891,14 @@ public struct FileIndexingSettings: Codable, Equatable, Sendable {
         "Music",
         "Movies",
         "Pictures",
-        "Photos Library.photoslibrary"
+        "Photos Library.photoslibrary",
     ]
 
     fileprivate func mergingMissingDefaultIgnoreRules() -> FileIndexingSettings {
         var mergedRules = ignoreRules.nonBlankValues
         let existingRules = Set(mergedRules.map(FilePathNormalizer.normalizedRule))
-        for rule in Self.defaultIgnoreRules where !existingRules.contains(FilePathNormalizer.normalizedRule(rule)) {
+        for rule in Self.defaultIgnoreRules
+        where !existingRules.contains(FilePathNormalizer.normalizedRule(rule)) {
             mergedRules.append(rule)
         }
         return FileIndexingSettings(ignoreRules: mergedRules)
@@ -872,7 +918,8 @@ public final class YAMLConfigurationStore {
     }
 
     public static func defaultPath() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
+            0]
         return base.appendingPathComponent("YAAW", isDirectory: true)
             .appendingPathComponent("settings.yaml")
     }
@@ -902,7 +949,7 @@ public final class YAMLConfigurationStore {
                     name: "settings_yaml_recovered",
                     metadata: [
                         "path": path.path,
-                        "error": String(describing: error)
+                        "error": String(describing: error),
                     ]
                 )
             )
@@ -934,84 +981,84 @@ public final class YAMLConfigurationStore {
     public static func render(_ configuration: YAAWConfiguration = YAAWConfiguration()) -> String {
         let configuration = configuration.validated()
         return """
-        # YAAW settings.
-        # Defaults are shown inline. Keys marked "not changeable yet" are reserved for future expansion.
+            # YAAW settings.
+            # Defaults are shown inline. Keys marked "not changeable yet" are reserved for future expansion.
 
-        version: \(configuration.version)
+            version: \(configuration.version)
 
-        agent:
-          # default: codex
-          # active now: used when a flow needs a default CLI choice.
-          default: \(configuration.agent.default.rawValue)
+            agent:
+              # default: codex
+              # active now: used when a flow needs a default CLI choice.
+              default: \(configuration.agent.default.rawValue)
 
-        theme:
-          # default: dracula
-          # active now: controls app chrome, file browser colors, settings, panels, and terminals.
-          # supported: \(ThemeCatalog.supportedIDs.joined(separator: ", "))
-          active: \(configuration.theme.active)
-          # not changeable yet: custom palettes are reserved for future expansion.
-          custom: {}
+            theme:
+              # default: dracula
+              # active now: controls app chrome, file browser colors, settings, panels, and terminals.
+              # supported: \(ThemeCatalog.supportedIDs.joined(separator: ", "))
+              active: \(configuration.theme.active)
+              # not changeable yet: custom palettes are reserved for future expansion.
+              custom: {}
 
-        icons:
-          # default: material-file-icons
-          # active now: controls file and folder icons only. App controls use native SF Symbols.
-          # supported: material-file-icons, catppuccin-file-icons
-          fileBrowserPack: \(yamlScalar(configuration.icons.fileBrowserPack))
+            icons:
+              # default: material-file-icons
+              # active now: controls file and folder icons only. App controls use native SF Symbols.
+              # supported: material-file-icons, catppuccin-file-icons
+              fileBrowserPack: \(yamlScalar(configuration.icons.fileBrowserPack))
 
-        fonts:
-          # default: system
-          # active now: controls SwiftUI chrome, settings, sidebar, and file browser text.
-          # use system for the native macOS UI font, or a real installed font family name.
-          interfaceFamily: \(yamlScalar(configuration.fonts.interfaceFamily))
-          # default: 13
-          interfaceSize: \(configuration.fonts.interfaceSize.formattedFontSize)
-          # default: system-monospace
-          # active now: controls in-app YAML/editor-style text.
-          # use system-monospace for the native macOS monospaced font, or a real installed font family name.
-          editorFamily: \(yamlScalar(configuration.fonts.editorFamily))
-          # default: 13
-          editorSize: \(configuration.fonts.editorSize.formattedFontSize)
-          # default: empty, which leaves Ghostty's configured terminal font family unchanged.
-          # active now: set to an installed terminal font family such as "JetBrains Mono".
-          terminalFamily: \(yamlScalar(configuration.fonts.terminalFamily))
-          # default: 12
-          terminalSize: \(configuration.fonts.terminalSize.formattedFontSize)
+            fonts:
+              # default: system
+              # active now: controls SwiftUI chrome, settings, sidebar, and file browser text.
+              # use system for the native macOS UI font, or a real installed font family name.
+              interfaceFamily: \(yamlScalar(configuration.fonts.interfaceFamily))
+              # default: 13
+              interfaceSize: \(configuration.fonts.interfaceSize.formattedFontSize)
+              # default: system-monospace
+              # active now: controls in-app YAML/editor-style text.
+              # use system-monospace for the native macOS monospaced font, or a real installed font family name.
+              editorFamily: \(yamlScalar(configuration.fonts.editorFamily))
+              # default: 13
+              editorSize: \(configuration.fonts.editorSize.formattedFontSize)
+              # default: empty, which leaves Ghostty's configured terminal font family unchanged.
+              # active now: set to an installed terminal font family such as "JetBrains Mono".
+              terminalFamily: \(yamlScalar(configuration.fonts.terminalFamily))
+              # default: 12
+              terminalSize: \(configuration.fonts.terminalSize.formattedFontSize)
 
-        keyboardShortcuts:
-        \(renderShortcuts(configuration.keyboardShortcuts))
+            keyboardShortcuts:
+            \(renderShortcuts(configuration.keyboardShortcuts))
 
-        tools:
-          editors:
-            # default: [nvim, vim, vi]
-            # active now: first available executable is used.
-            preferred: \(inlineList(configuration.tools.editors.preferred))
-          externalOpen:
-            # default: zed
-            # active now: project and file external-open default when available.
-            default: \(yamlScalar(configuration.tools.externalOpen.default))
-            # active now: detected destinations are shown in this order.
-            # supported: \(inlineList(ExternalOpenToolID.allCases.map(\.rawValue)))
-            preferred: \(inlineList(configuration.tools.externalOpen.preferred))
-          git:
-            # default: lazygit
-            # active now.
-            preferred: \(yamlScalar(configuration.tools.git.preferred))
-          diff:
-            # default setting: git diff; launched as git --no-pager diff.
-            # active now when lazygit is unavailable.
-            fallback: \(inlineList(configuration.tools.diff.fallback))
-          agents:
-            # active now: command names used for PATH lookup.
-            codex: \(yamlScalar(configuration.tools.agents.codex))
-            claude: \(yamlScalar(configuration.tools.agents.claude))
-            opencode: \(yamlScalar(configuration.tools.agents.opencode))
-            copilot: \(yamlScalar(configuration.tools.agents.copilot))
+            tools:
+              editors:
+                # default: [nvim, vim, vi]
+                # active now: first available executable is used.
+                preferred: \(inlineList(configuration.tools.editors.preferred))
+              externalOpen:
+                # default: zed
+                # active now: project and file external-open default when available.
+                default: \(yamlScalar(configuration.tools.externalOpen.default))
+                # active now: detected destinations are shown in this order.
+                # supported: \(inlineList(ExternalOpenToolID.allCases.map(\.rawValue)))
+                preferred: \(inlineList(configuration.tools.externalOpen.preferred))
+              git:
+                # default: lazygit
+                # active now.
+                preferred: \(yamlScalar(configuration.tools.git.preferred))
+              diff:
+                # default setting: git diff; launched as git --no-pager diff.
+                # active now when lazygit is unavailable.
+                fallback: \(inlineList(configuration.tools.diff.fallback))
+              agents:
+                # active now: command names used for PATH lookup.
+                codex: \(yamlScalar(configuration.tools.agents.codex))
+                claude: \(yamlScalar(configuration.tools.agents.claude))
+                opencode: \(yamlScalar(configuration.tools.agents.opencode))
+                copilot: \(yamlScalar(configuration.tools.agents.copilot))
 
-        fileIndexing:
-          # active now.
-          ignoreRules:
-        \(blockList(configuration.fileIndexing.ignoreRules, indent: 4))
-        """
+            fileIndexing:
+              # active now.
+              ignoreRules:
+            \(blockList(configuration.fileIndexing.ignoreRules, indent: 4))
+            """
     }
 
     private static func renderShortcut(
@@ -1022,11 +1069,11 @@ public final class YAMLConfigurationStore {
     ) -> String {
         let activeLine = activeComment.map { "\n    # \($0)" } ?? ""
         return """
-          \(name):
-            # default: \(defaultText)\(activeLine)
-            key: \(yamlScalar(shortcut.key))
-            modifiers: \(inlineList(shortcut.modifiers.map(\.rawValue)))
-        """
+              \(name):
+                # default: \(defaultText)\(activeLine)
+                key: \(yamlScalar(shortcut.key))
+                modifiers: \(inlineList(shortcut.modifiers.map(\.rawValue)))
+            """
     }
 
     private static func renderShortcuts(_ settings: KeyboardShortcutSettings) -> String {
@@ -1053,37 +1100,41 @@ public final class YAMLConfigurationStore {
     private static func yamlScalar(_ value: String) -> String {
         let plainPattern = #"^[A-Za-z0-9_./-]+$"#
         if value.range(of: plainPattern, options: .regularExpression) != nil,
-           !["true", "false", "null"].contains(value.lowercased()) {
+            !["true", "false", "null"].contains(value.lowercased())
+        {
             return value
         }
-        return "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+        return
+            "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
     }
 }
 
-private extension Array where Element == String {
-    var nonBlankValues: [String] {
+extension Array where Element == String {
+    fileprivate var nonBlankValues: [String] {
         map(\.trimmed).filter { !$0.isEmpty }
     }
 }
 
-private extension String {
-    var trimmed: String {
+extension String {
+    fileprivate var trimmed: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    func nonBlankOr(_ fallback: String) -> String {
+    fileprivate func nonBlankOr(_ fallback: String) -> String {
         let value = trimmed
         return value.isEmpty ? fallback : value
     }
 }
 
-private extension Double {
-    func clampedFontSize(defaultValue: Double, minimum: Double, maximum: Double) -> Double {
+extension Double {
+    fileprivate func clampedFontSize(defaultValue: Double, minimum: Double, maximum: Double)
+        -> Double
+    {
         guard isFinite else { return defaultValue }
         return min(max(self, minimum), maximum)
     }
 
-    var formattedFontSize: String {
-        formatted(.number.precision(.fractionLength(0 ... 2)))
+    fileprivate var formattedFontSize: String {
+        formatted(.number.precision(.fractionLength(0...2)))
     }
 }

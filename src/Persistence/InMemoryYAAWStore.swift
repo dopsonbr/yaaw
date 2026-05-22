@@ -53,12 +53,14 @@ public struct YAAWSnapshot: Equatable, Sendable {
             states[threadID] = RightPanelState.defaultState(selectedMode: mode)
         }
         if let selectedThreadID, states[selectedThreadID] == nil {
-            states[selectedThreadID] = RightPanelState.defaultState(selectedMode: selectedRightPanelMode)
+            states[selectedThreadID] = RightPanelState.defaultState(
+                selectedMode: selectedRightPanelMode)
         }
         self.rightPanelStatesByThreadID = states
         self.selectedRightPanelMode = selectedRightPanelMode
         self.bottomTerminalExpandedThreadIDs = bottomTerminalExpandedThreadIDs
-        self.layoutState = layoutState ?? LayoutState(isGlobalTerminalExpanded: isGlobalTerminalExpanded)
+        self.layoutState =
+            layoutState ?? LayoutState(isGlobalTerminalExpanded: isGlobalTerminalExpanded)
         if isGlobalTerminalExpanded, let selectedThreadID {
             self.bottomTerminalExpandedThreadIDs.insert(selectedThreadID)
         }
@@ -207,12 +209,14 @@ public final class InMemoryYAAWStore: YAAWStore {
     }
 
     private func rebuildIndexes() {
-        projectIndexByID = Dictionary(uniqueKeysWithValues: snapshot.projects.enumerated().map { ($0.element.id, $0.offset) })
+        projectIndexByID = Dictionary(
+            uniqueKeysWithValues: snapshot.projects.enumerated().map { ($0.element.id, $0.offset) })
         rebuildThreadIndex()
     }
 
     private func rebuildThreadIndex() {
-        threadIndexByID = Dictionary(uniqueKeysWithValues: snapshot.threads.enumerated().map { ($0.element.id, $0.offset) })
+        threadIndexByID = Dictionary(
+            uniqueKeysWithValues: snapshot.threads.enumerated().map { ($0.element.id, $0.offset) })
     }
 
     public static func helloWorld() -> InMemoryYAAWStore {

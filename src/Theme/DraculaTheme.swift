@@ -92,7 +92,7 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
                 "#d6acff",
                 "#ff92df",
                 "#a4ffff",
-                "#ffffff"
+                "#ffffff",
             ]
         }
 
@@ -115,7 +115,7 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
             hex(for: .purple),
             hex(for: .pink),
             hex(for: .cyan),
-            white
+            white,
         ]
     }
 }
@@ -331,7 +331,7 @@ public enum ThemeCatalog {
             purple: "#5319e7",
             red: "#b31d28",
             yellow: "#7d4e00"
-        )
+        ),
     ]
 
     public static let defaultTheme = themes.first { $0.id == defaultID }!
@@ -380,7 +380,7 @@ public enum ThemeCatalog {
                 ThemeToken(role: .pink, hex: pink),
                 ThemeToken(role: .purple, hex: purple),
                 ThemeToken(role: .red, hex: red),
-                ThemeToken(role: .yellow, hex: yellow)
+                ThemeToken(role: .yellow, hex: yellow),
             ]
         )
     }

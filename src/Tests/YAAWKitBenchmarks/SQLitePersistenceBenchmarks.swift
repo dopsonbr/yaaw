@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import YAAWKit
 
 final class SQLitePersistenceBenchmarks: BenchmarkCase {
@@ -49,7 +50,8 @@ final class SQLitePersistenceBenchmarks: BenchmarkCase {
     }
 
     private func preparedStore(threadCount: Int) throws -> SQLiteYAAWStore {
-        let directory = try BenchmarkSupport.temporaryDirectory(named: "sqlite-prepared-\(threadCount)")
+        let directory = try BenchmarkSupport.temporaryDirectory(
+            named: "sqlite-prepared-\(threadCount)")
         workingDirectories.append(directory)
         let path = directory.appendingPathComponent("state.sqlite")
         let store = try SQLiteYAAWStore(databasePath: path)

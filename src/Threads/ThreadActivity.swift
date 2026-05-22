@@ -103,21 +103,23 @@ public struct ThreadActivityEvent: Equatable, Sendable {
     public static func helperEvents(from output: String) -> [ThreadActivityEvent] {
         output.split(whereSeparator: \.isNewline).compactMap { line in
             guard let data = String(line).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let threadIDValue = object["thread_id"] as? String,
-                  let threadID = UUID(uuidString: threadIDValue)
+                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let threadIDValue = object["thread_id"] as? String,
+                let threadID = UUID(uuidString: threadIDValue)
             else {
                 return nil
             }
-            let createdAt = (object["created_at"] as? TimeInterval).map {
-                Date(timeIntervalSince1970: $0)
-            } ?? Date()
+            let createdAt =
+                (object["created_at"] as? TimeInterval).map {
+                    Date(timeIntervalSince1970: $0)
+                } ?? Date()
             return ThreadActivityEvent(
                 threadID: threadID,
                 status: ThreadActivityStatus.parse(object["status"] as? String),
                 title: object["title"] as? String,
                 body: object["body"] as? String,
-                source: ThreadActivitySource(rawValue: object["source"] as? String ?? "") ?? .helper,
+                source: ThreadActivitySource(rawValue: object["source"] as? String ?? "")
+                    ?? .helper,
                 createdAt: createdAt
             )
         }
@@ -129,8 +131,11 @@ public enum ThreadActivityText {
 
     public static func sanitized(_ text: String?) -> String? {
         guard let text else { return nil }
-        let collapsed = text
-            .replacingOccurrences(of: "\u{001B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+        let collapsed =
+            text
+            .replacingOccurrences(
+                of: "\u{001B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression
+            )
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
@@ -155,13 +160,15 @@ public enum ThreadActivityText {
             || lowercased.contains("waiting for input")
             || lowercased.contains("requires input")
             || lowercased.contains("approval needed")
-            || lowercased.contains("awaiting approval") {
+            || lowercased.contains("awaiting approval")
+        {
             return .needsInput
         }
         if lowercased.contains("complete")
             || lowercased.contains("completed")
             || lowercased.contains("finished")
-            || lowercased.contains("done") {
+            || lowercased.contains("done")
+        {
             return .complete
         }
         return nil

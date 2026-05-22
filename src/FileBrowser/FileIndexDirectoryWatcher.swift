@@ -1,5 +1,5 @@
-import Dispatch
 import Darwin
+import Dispatch
 import Foundation
 
 public final class FileIndexDirectoryWatcher: @unchecked Sendable {

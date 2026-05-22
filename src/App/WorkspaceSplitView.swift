@@ -1,6 +1,6 @@
-import YAAWKit
 import AppKit
 import SwiftUI
+import YAAWKit
 
 struct WorkspaceSplitLayout: Equatable {
     var sidebarWidth: Double
@@ -20,7 +20,9 @@ enum WorkspaceSplitDivider {
     case bottomTerminal
 }
 
-struct WorkspaceSplitView<Sidebar: View, Main: View, Right: View, Bottom: View>: NSViewControllerRepresentable {
+struct WorkspaceSplitView<Sidebar: View, Main: View, Right: View, Bottom: View>:
+    NSViewControllerRepresentable
+{
     let layoutState: LayoutState
     let isSidebarCollapsed: Bool
     let isRightPanelCollapsed: Bool
@@ -197,8 +199,16 @@ private final class WorkspaceSplitHostView: NSView {
 
     private func setup() {
         wantsLayer = true
-        [sidebarHost, mainHost, rightHost, bottomHost, sidebarDivider, rightDivider, bottomDivider].forEach {
-            addSubview($0)
+        for view in [
+            sidebarHost,
+            mainHost,
+            rightHost,
+            bottomHost,
+            sidebarDivider,
+            rightDivider,
+            bottomDivider,
+        ] {
+            addSubview(view)
         }
         sidebarDivider.accessibilityLabel = "Resize sidebar"
         rightDivider.accessibilityLabel = "Resize right panel"
@@ -223,10 +233,10 @@ private final class WorkspaceSplitHostView: NSView {
         let fill = NSColor(hex: configuration.theme.hex(for: .currentLine))
         let line = NSColor(hex: configuration.theme.hex(for: .comment))
         let active = NSColor(hex: configuration.theme.hex(for: .cyan))
-        [sidebarDivider, rightDivider, bottomDivider].forEach {
-            $0.fillColor = fill
-            $0.lineColor = line
-            $0.activeLineColor = active
+        for divider in [sidebarDivider, rightDivider, bottomDivider] {
+            divider.fillColor = fill
+            divider.lineColor = line
+            divider.activeLineColor = active
         }
     }
 
@@ -287,20 +297,26 @@ private final class WorkspaceSplitHostView: NSView {
     private func layoutMetrics() -> WorkspaceSplitMetrics {
         let totalWidth = max(0, bounds.width)
         let totalHeight = max(0, bounds.height)
-        let leftDividerWidth = configuration.isSidebarCollapsed
+        let leftDividerWidth =
+            configuration.isSidebarCollapsed
             ? Constants.collapsedDividerThickness
             : Constants.dividerThickness
-        let rightDividerWidth = configuration.isRightPanelCollapsed
+        let rightDividerWidth =
+            configuration.isRightPanelCollapsed
             ? Constants.collapsedDividerThickness
             : Constants.dividerThickness
-        let bottomDividerHeight = configuration.isBottomTerminalExpanded
+        let bottomDividerHeight =
+            configuration.isBottomTerminalExpanded
             ? Constants.dividerThickness
             : Constants.collapsedDividerThickness
 
-        let bottomHeight = resolvedBottomHeight(totalHeight: totalHeight, dividerHeight: bottomDividerHeight)
+        let bottomHeight = resolvedBottomHeight(
+            totalHeight: totalHeight, dividerHeight: bottomDividerHeight)
         let contentHeight = max(0, totalHeight - bottomDividerHeight - bottomHeight)
-        var sidebarWidth = resolvedSidebarWidth(totalWidth: totalWidth, dividerWidth: leftDividerWidth)
-        var rightWidth = resolvedRightPanelWidth(totalWidth: totalWidth, dividerWidth: rightDividerWidth)
+        var sidebarWidth = resolvedSidebarWidth(
+            totalWidth: totalWidth, dividerWidth: leftDividerWidth)
+        var rightWidth = resolvedRightPanelWidth(
+            totalWidth: totalWidth, dividerWidth: rightDividerWidth)
         let fixedWidth = leftDividerWidth + rightDividerWidth
         let availablePaneWidth = max(0, totalWidth - fixedWidth)
         var mainWidth = availablePaneWidth - sidebarWidth - rightWidth
@@ -308,12 +324,14 @@ private final class WorkspaceSplitHostView: NSView {
         if mainWidth < LayoutState.minimumMainWorkspaceWidth {
             var deficit = LayoutState.minimumMainWorkspaceWidth - mainWidth
             if !configuration.isRightPanelCollapsed {
-                let reducedRightWidth = max(LayoutState.minimumRightPanelWidth, rightWidth - deficit)
+                let reducedRightWidth = max(
+                    LayoutState.minimumRightPanelWidth, rightWidth - deficit)
                 deficit -= rightWidth - reducedRightWidth
                 rightWidth = reducedRightWidth
             }
             if deficit > 0, !configuration.isSidebarCollapsed {
-                let reducedSidebarWidth = max(LayoutState.minimumSidebarWidth, sidebarWidth - deficit)
+                let reducedSidebarWidth = max(
+                    LayoutState.minimumSidebarWidth, sidebarWidth - deficit)
                 deficit -= sidebarWidth - reducedSidebarWidth
                 sidebarWidth = reducedSidebarWidth
             }
@@ -536,7 +554,8 @@ private final class WorkspaceDividerView: NSView {
                 break
             }
             let location = nextEvent.locationInWindow
-            let delta = orientation == .vertical
+            let delta =
+                orientation == .vertical
                 ? location.x - startLocation.x
                 : location.y - startLocation.y
             onDragChanged(delta)
@@ -580,8 +599,8 @@ private final class WorkspaceDividerView: NSView {
     }
 }
 
-private extension NSColor {
-    convenience init(hex: String) {
+extension NSColor {
+    fileprivate convenience init(hex: String) {
         var value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         if value.count == 3 {
             value = value.map { "\($0)\($0)" }.joined()

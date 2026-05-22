@@ -34,7 +34,8 @@ public struct RightPanelTab: Identifiable, Equatable, Sendable {
     }
 
     public static let files = RightPanelTab(id: filesID, kind: .files, title: "Files")
-    public static let defaultBrowser = RightPanelTab(id: defaultBrowserID, kind: .browser, title: "Browser")
+    public static let defaultBrowser = RightPanelTab(
+        id: defaultBrowserID, kind: .browser, title: "Browser")
     public static let git = RightPanelTab(id: gitID, kind: .git, title: "Git")
     public static let defaultNvim = RightPanelTab(id: defaultNvimID, kind: .nvim, title: "nvim")
 
@@ -52,7 +53,9 @@ public struct RightPanelTab: Identifiable, Equatable, Sendable {
         "nvim:\(FilePathNormalizer.normalizedRelativePath(relativePath))"
     }
 
-    public static func browser(urlString: String?, relativePath: String? = nil, id: String? = nil) -> RightPanelTab {
+    public static func browser(urlString: String?, relativePath: String? = nil, id: String? = nil)
+        -> RightPanelTab
+    {
         let normalizedPath = relativePath.map(FilePathNormalizer.normalizedRelativePath)
         let normalizedURL = urlString?.trimmingCharacters(in: .whitespacesAndNewlines)
         return RightPanelTab(
@@ -68,7 +71,9 @@ public struct RightPanelTab: Identifiable, Equatable, Sendable {
         if let relativePath, !relativePath.isEmpty {
             return "browser-file:\(FilePathNormalizer.normalizedRelativePath(relativePath))"
         }
-        if let urlString = urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !urlString.isEmpty {
+        if let urlString = urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !urlString.isEmpty
+        {
             return "browser-url:\(urlString)"
         }
         return "browser-blank:\(UUID().uuidString)"
@@ -107,9 +112,13 @@ public struct RightPanelState: Equatable, Sendable {
     public var tabs: [RightPanelTab]
     public var selectedTabID: String
 
-    public init(tabs: [RightPanelTab] = RightPanelState.defaultTabs, selectedTabID: String = RightPanelTab.filesID) {
+    public init(
+        tabs: [RightPanelTab] = RightPanelState.defaultTabs,
+        selectedTabID: String = RightPanelTab.filesID
+    ) {
         self.tabs = Self.normalizedTabs(tabs)
-        self.selectedTabID = self.tabs.contains { $0.id == selectedTabID }
+        self.selectedTabID =
+            self.tabs.contains { $0.id == selectedTabID }
             ? selectedTabID
             : RightPanelTab.filesID
     }
@@ -118,14 +127,16 @@ public struct RightPanelState: Equatable, Sendable {
         .files,
         .defaultBrowser,
         .git,
-        .defaultNvim
+        .defaultNvim,
     ]
 
     public static func defaultState(selectedMode: RightPanelMode = .files) -> RightPanelState {
         RightPanelState(selectedTabID: selectedMode.defaultTabID)
     }
 
-    public static func restoredState(tabs: [RightPanelTab], selectedTabID: String) -> RightPanelState {
+    public static func restoredState(tabs: [RightPanelTab], selectedTabID: String)
+        -> RightPanelState
+    {
         let selectedKind = tabs.first { $0.id == selectedTabID }?.kind
         let selectedMode = selectedKind?.mode ?? .files
         return RightPanelState.defaultState(selectedMode: selectedMode)
@@ -162,7 +173,9 @@ public struct RightPanelState: Equatable, Sendable {
         return tab
     }
 
-    public mutating func openBrowserTab(urlString: String?, relativePath: String? = nil) -> RightPanelTab {
+    public mutating func openBrowserTab(urlString: String?, relativePath: String? = nil)
+        -> RightPanelTab
+    {
         let tab = RightPanelTab.browser(urlString: urlString, relativePath: relativePath)
         if !tabs.contains(where: { $0.id == tab.id }) {
             tabs.append(tab)
@@ -173,7 +186,9 @@ public struct RightPanelState: Equatable, Sendable {
     }
 
     public mutating func updateBrowserTab(id tabID: String, urlString: String?) {
-        guard let index = tabs.firstIndex(where: { $0.id == tabID && $0.kind == .browser }) else { return }
+        guard let index = tabs.firstIndex(where: { $0.id == tabID && $0.kind == .browser }) else {
+            return
+        }
         let preservedID = tabs[index].relativePath == nil ? tabID : nil
         tabs[index] = RightPanelTab.browser(
             urlString: urlString,
@@ -228,8 +243,8 @@ extension RightPanelMode {
     }
 }
 
-private extension RightPanelTabKind {
-    var mode: RightPanelMode {
+extension RightPanelTabKind {
+    fileprivate var mode: RightPanelMode {
         switch self {
         case .files:
             .files

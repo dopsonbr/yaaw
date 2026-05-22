@@ -1,6 +1,6 @@
-import YAAWKit
 import AppKit
 import UserNotifications
+import YAAWKit
 
 @MainActor
 final class MacSystemThreadActivityNotificationDispatcher: ThreadActivityNotificationDispatching {

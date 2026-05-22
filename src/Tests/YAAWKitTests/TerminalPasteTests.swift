@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+
 @testable import YAAWKit
 
 final class TerminalPasteTests: XCTestCase {
@@ -26,18 +27,19 @@ final class TerminalPasteTests: XCTestCase {
     }
 
     func testPasteShortcutDoesNotMatchReturnKey() throws {
-        let event = try XCTUnwrap(NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
-            modifierFlags: [],
-            timestamp: 0,
-            windowNumber: 0,
-            context: nil,
-            characters: "\r",
-            charactersIgnoringModifiers: "\r",
-            isARepeat: false,
-            keyCode: 0x24
-        ))
+        let event = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                isARepeat: false,
+                keyCode: 0x24
+            ))
 
         XCTAssertFalse(TerminalPasteShortcut.matches(event))
     }
@@ -93,18 +95,19 @@ final class TerminalPasteTests: XCTestCase {
         characters: String,
         modifiers: NSEvent.ModifierFlags
     ) throws -> NSEvent {
-        try XCTUnwrap(NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
-            modifierFlags: modifiers,
-            timestamp: 0,
-            windowNumber: 0,
-            context: nil,
-            characters: characters,
-            charactersIgnoringModifiers: characters,
-            isARepeat: false,
-            keyCode: 0x09
-        ))
+        try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: modifiers,
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: characters,
+                isARepeat: false,
+                keyCode: 0x09
+            ))
     }
 
     private static func samplePNGData() -> Data {

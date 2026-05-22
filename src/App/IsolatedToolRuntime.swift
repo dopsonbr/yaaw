@@ -12,7 +12,8 @@ final class IsolatedToolRuntime: ObservableObject {
     private var hostsByInstanceID: [String: IsolatedToolHostProcess] = [:]
     private let helperURLProvider: @MainActor () -> URL?
 
-    init(helperURLProvider: @escaping @MainActor () -> URL? = IsolatedToolRuntime.defaultHelperURL) {
+    init(helperURLProvider: @escaping @MainActor () -> URL? = IsolatedToolRuntime.defaultHelperURL)
+    {
         self.helperURLProvider = helperURLProvider
     }
 
@@ -22,7 +23,9 @@ final class IsolatedToolRuntime: ObservableObject {
 
     func ensureLaunched(kind: IsolatedToolKind, instanceID: String) {
         if hostsByInstanceID[instanceID] != nil { return }
-        guard let helperURL = helperURLProvider(), FileManager.default.isExecutableFile(atPath: helperURL.path) else {
+        guard let helperURL = helperURLProvider(),
+            FileManager.default.isExecutableFile(atPath: helperURL.path)
+        else {
             apply(.crashed("Tool host executable is unavailable."), instanceID: instanceID)
             return
         }
@@ -50,7 +53,9 @@ final class IsolatedToolRuntime: ObservableObject {
             send(type: "launchTool", kind: kind, instanceID: instanceID)
         } catch {
             hostsByInstanceID[instanceID] = nil
-            apply(.crashed("Tool host failed to start: \(error.localizedDescription)"), instanceID: instanceID)
+            apply(
+                .crashed("Tool host failed to start: \(error.localizedDescription)"),
+                instanceID: instanceID)
         }
     }
 
@@ -98,7 +103,7 @@ final class IsolatedToolRuntime: ObservableObject {
             "y": String(Double(frame.origin.y)),
             "width": String(Double(frame.size.width)),
             "height": String(Double(frame.size.height)),
-            "visible": String(visible)
+            "visible": String(visible),
         ]
         send(type: "setViewport", kind: .browser, instanceID: instanceID, payload: payload)
     }
@@ -108,7 +113,8 @@ final class IsolatedToolRuntime: ObservableObject {
     }
 
     func hideAll(except activeInstanceID: String? = nil) {
-        for instanceID in hostsByInstanceID.keys where activeInstanceID.map({ instanceID != $0 }) ?? true {
+        for instanceID in hostsByInstanceID.keys
+        where activeInstanceID.map({ instanceID != $0 }) ?? true {
             hide(instanceID: instanceID)
         }
     }
@@ -154,7 +160,9 @@ final class IsolatedToolRuntime: ObservableObject {
             try hostsByInstanceID[instanceID]?.send(envelope)
         } catch {
             hostsByInstanceID[instanceID] = nil
-            apply(.crashed("Tool host command failed: \(error.localizedDescription)"), instanceID: instanceID)
+            apply(
+                .crashed("Tool host command failed: \(error.localizedDescription)"),
+                instanceID: instanceID)
         }
     }
 
@@ -167,15 +175,20 @@ final class IsolatedToolRuntime: ObservableObject {
             case "stateChanged":
                 apply(.stateChanged(envelope.payload), instanceID: envelope.instanceID)
             case "titleChanged":
-                apply(.titleChanged(envelope.payload["title"] ?? ""), instanceID: envelope.instanceID)
+                apply(
+                    .titleChanged(envelope.payload["title"] ?? ""), instanceID: envelope.instanceID)
             case "error":
-                apply(.error(envelope.payload["message"] ?? "Tool host reported an error."), instanceID: envelope.instanceID)
+                apply(
+                    .error(envelope.payload["message"] ?? "Tool host reported an error."),
+                    instanceID: envelope.instanceID)
             case "newSurfaceRequested":
                 if let urlString = envelope.payload["urlString"], !urlString.isEmpty {
                     onNewSurfaceRequested?(urlString)
                 }
             default:
-                apply(.error("Tool host sent an unsupported event: \(envelope.type)"), instanceID: envelope.instanceID)
+                apply(
+                    .error("Tool host sent an unsupported event: \(envelope.type)"),
+                    instanceID: envelope.instanceID)
             }
         } catch {
             apply(.crashed("Tool host protocol error: \(error)"), instanceID: envelope.instanceID)
@@ -184,7 +197,9 @@ final class IsolatedToolRuntime: ObservableObject {
 
     private func handleExit(instanceID: String, wasExpected: Bool) {
         hostsByInstanceID[instanceID] = nil
-        apply(wasExpected ? .exited : .crashed("Tool host exited unexpectedly."), instanceID: instanceID)
+        apply(
+            wasExpected ? .exited : .crashed("Tool host exited unexpectedly."),
+            instanceID: instanceID)
     }
 
     private func apply(_ action: IsolatedToolRuntimeAction, instanceID: String) {
@@ -204,7 +219,8 @@ final class IsolatedToolRuntime: ObservableObject {
         }
 
         guard let executableURL = Bundle.main.executableURL else { return nil }
-        let sibling = executableURL.deletingLastPathComponent().appendingPathComponent("YAAWToolHost")
+        let sibling = executableURL.deletingLastPathComponent().appendingPathComponent(
+            "YAAWToolHost")
         if FileManager.default.isExecutableFile(atPath: sibling.path) {
             return sibling
         }
@@ -280,7 +296,8 @@ private final class IsolatedToolHostProcess: @unchecked Sendable {
             let line = outputBuffer[..<newlineIndex]
             outputBuffer.removeSubrange(...newlineIndex)
             guard !line.isEmpty else { continue }
-            if let envelope = try? JSONDecoder().decode(IsolatedToolEnvelope.self, from: Data(line)) {
+            if let envelope = try? JSONDecoder().decode(IsolatedToolEnvelope.self, from: Data(line))
+            {
                 onEvent(envelope)
             }
         }

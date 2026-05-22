@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import YAAWKit
 
 final class AppModelBenchmarks: BenchmarkCase {
@@ -33,7 +34,9 @@ final class AppModelBenchmarks: BenchmarkCase {
     func test_bench_selectThread_in_10kCorpus() throws {
         let model = try makeModel(threadCount: 10_000)
         let active = model.activeThreadsForSelectedProject
-        let candidates = stride(from: 0, to: active.count, by: max(active.count / 20, 1)).map { active[$0].id }
+        let candidates = stride(from: 0, to: active.count, by: max(active.count / 20, 1)).map {
+            active[$0].id
+        }
         XCTAssertFalse(candidates.isEmpty)
         measure {
             for id in candidates {

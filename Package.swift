@@ -11,18 +11,18 @@ let package = Package(
         .executable(name: "YAAW", targets: ["YAAW"]),
         .executable(name: "YAAWToolHost", targets: ["YAAWToolHost"]),
         .executable(name: "YAAWE2E", targets: ["YAAWE2E"]),
-        .library(name: "YAAWKit", targets: ["YAAWKit"])
+        .library(name: "YAAWKit", targets: ["YAAWKit"]),
     ],
     dependencies: [
         .package(url: "https://github.com/Lakr233/libghostty-spm.git", from: "1.1.4"),
-        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3")
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
     ],
     targets: [
         .executableTarget(
             name: "YAAW",
             dependencies: [
                 "YAAWKit",
-                .product(name: "GhosttyTerminal", package: "libghostty-spm")
+                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
             ],
             path: "src/App",
             resources: [
@@ -46,7 +46,7 @@ let package = Package(
                 "App",
                 "E2E",
                 "Tests",
-                "ToolHost"
+                "ToolHost",
             ],
             sources: [
                 "AgentCLI",
@@ -62,7 +62,7 @@ let package = Package(
                 "RightPanel",
                 "Terminal",
                 "Theme",
-                "Threads"
+                "Threads",
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")
@@ -82,6 +82,6 @@ let package = Package(
             name: "YAAWE2E",
             dependencies: ["YAAWKit"],
             path: "src/E2E"
-        )
+        ),
     ]
 )

@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import YAAWKit
 
 final class FileIndexerBenchmarks: BenchmarkCase {
@@ -18,7 +19,8 @@ final class FileIndexerBenchmarks: BenchmarkCase {
     }
 
     func test_bench_index_smallRepo() throws {
-        let root = try makeFixture(named: "small", files: 100, directories: 10, withIgnoredDirs: false)
+        let root = try makeFixture(
+            named: "small", files: 100, directories: 10, withIgnoredDirs: false)
         smallRoot = root
         measure {
             _ = try? BackgroundFileIndexer.buildIndex(
@@ -30,7 +32,8 @@ final class FileIndexerBenchmarks: BenchmarkCase {
     }
 
     func test_bench_index_mediumRepo() throws {
-        let root = try makeFixture(named: "medium", files: 5_000, directories: 200, withIgnoredDirs: true)
+        let root = try makeFixture(
+            named: "medium", files: 5_000, directories: 200, withIgnoredDirs: true)
         mediumRoot = root
         measure {
             _ = try? BackgroundFileIndexer.buildIndex(
@@ -42,7 +45,8 @@ final class FileIndexerBenchmarks: BenchmarkCase {
     }
 
     func test_bench_index_largeRepo() throws {
-        let root = try makeFixture(named: "large", files: 50_000, directories: 2_000, withIgnoredDirs: true)
+        let root = try makeFixture(
+            named: "large", files: 50_000, directories: 2_000, withIgnoredDirs: true)
         largeRoot = root
         measure {
             _ = try? BackgroundFileIndexer.buildIndex(

@@ -29,9 +29,11 @@ public struct FileIndexGitIdentityResolver: FileIndexGitIdentityResolving {
             return .notRepository
         }
         let headURL = gitURL.appendingPathComponent("HEAD")
-        guard let head = try? String(contentsOf: headURL, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !head.isEmpty else {
+        guard
+            let head = try? String(contentsOf: headURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !head.isEmpty
+        else {
             return .notRepository
         }
         if head.hasPrefix("ref: ") {
@@ -62,12 +64,15 @@ public struct FileIndexGitIdentityResolver: FileIndexGitIdentityResolving {
         if isDirectory.boolValue {
             return dotGit
         }
-        guard let contents = try? String(contentsOf: dotGit, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              contents.hasPrefix("gitdir:") else {
+        guard
+            let contents = try? String(contentsOf: dotGit, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            contents.hasPrefix("gitdir:")
+        else {
             return nil
         }
-        let path = contents.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = contents.dropFirst("gitdir:".count).trimmingCharacters(
+            in: .whitespacesAndNewlines)
         if path.hasPrefix("/") {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
@@ -96,13 +101,15 @@ public struct FileIndexCacheKey: Equatable, Sendable {
             rootPath,
             gitIdentity,
             ignoreRulesFingerprint,
-            "\(schemaVersion)"
+            "\(schemaVersion)",
         ])
         self.value = "file-index:v\(schemaVersion):\(digest)"
     }
 
     public static func fingerprint(ignoreRules: [String]) -> String {
-        fingerprint(parts: ignoreRules.map(FilePathNormalizer.normalizedRule).filter { !$0.isEmpty }.sorted())
+        fingerprint(
+            parts: ignoreRules.map(FilePathNormalizer.normalizedRule).filter { !$0.isEmpty }
+                .sorted())
     }
 
     private static func fingerprint(parts: [String]) -> String {
@@ -147,7 +154,8 @@ public final class FileIndexCacheCoordinator: @unchecked Sendable {
     }
 
     public func cacheKey(root: URL, ignoreRules: [String]) -> FileIndexCacheKey {
-        FileIndexCacheKey(root: root, ignoreRules: ignoreRules, gitIdentityResolver: gitIdentityResolver)
+        FileIndexCacheKey(
+            root: root, ignoreRules: ignoreRules, gitIdentityResolver: gitIdentityResolver)
     }
 
     public func cachedIndex(threadID: UUID, key: FileIndexCacheKey) -> FileIndexResult? {
@@ -173,7 +181,8 @@ public final class FileIndexCacheCoordinator: @unchecked Sendable {
         inFlightByCacheKey[key.value] = [consumer]
         lock.unlock()
 
-        fileIndexer.indexFiles(threadID: threadID, root: root, ignoreRules: ignoreRules) { [weak self] result in
+        fileIndexer.indexFiles(threadID: threadID, root: root, ignoreRules: ignoreRules) {
+            [weak self] result in
             self?.finishRefresh(result: result, key: key)
         }
     }
@@ -194,10 +203,12 @@ public final class FileIndexCacheCoordinator: @unchecked Sendable {
             let cached = CachedFileIndex(metadata: metadata, entries: result.entries)
             store.upsertCachedFileIndex(cached)
             for consumer in consumers {
-                consumer.completion(.success(FileIndexResult(
-                    entries: result.entries,
-                    metadata: metadata.forThread(consumer.threadID)
-                )))
+                consumer.completion(
+                    .success(
+                        FileIndexResult(
+                            entries: result.entries,
+                            metadata: metadata.forThread(consumer.threadID)
+                        )))
             }
         case .failure(let error):
             for consumer in consumers {

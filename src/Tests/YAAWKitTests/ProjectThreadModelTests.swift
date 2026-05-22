@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import YAAWKit
 
 final class ProjectThreadModelTests: XCTestCase {
@@ -31,7 +32,8 @@ final class ProjectThreadModelTests: XCTestCase {
     func testAgentThreadPreservesPublicMetadataAndArchiveState() {
         let id = UUID()
         let projectID = UUID()
-        let workingDirectory = URL(fileURLWithPath: "/tmp/sample-project/worktree", isDirectory: true)
+        let workingDirectory = URL(
+            fileURLWithPath: "/tmp/sample-project/worktree", isDirectory: true)
         let createdAt = Date(timeIntervalSince1970: 300)
         let lastOpenedAt = Date(timeIntervalSince1970: 400)
 

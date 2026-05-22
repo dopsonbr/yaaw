@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import YAAWKit
 
 final class IsolatedToolProtocolTests: XCTestCase {
@@ -47,7 +48,7 @@ final class IsolatedToolProtocolTests: XCTestCase {
                 "urlString": "file:///tmp/index.html",
                 "isLoading": "true",
                 "canGoBack": "true",
-                "canGoForward": "false"
+                "canGoForward": "false",
             ])
         )
         XCTAssertEqual(snapshot.phase, .loading)

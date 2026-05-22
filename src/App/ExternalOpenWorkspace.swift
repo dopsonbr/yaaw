@@ -1,6 +1,6 @@
-import YAAWKit
 import AppKit
 import Foundation
+import YAAWKit
 
 @MainActor
 final class ExternalOpenWorkspace {
@@ -73,7 +73,8 @@ final class ExternalOpenWorkspace {
 
     private func applicationURL(for tool: ExternalOpenToolID) -> URL? {
         if let bundleIdentifier = tool.primaryBundleIdentifier,
-           let url = workspace.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            let url = workspace.urlForApplication(withBundleIdentifier: bundleIdentifier)
+        {
             return url
         }
         for bundleIdentifier in tool.alternateBundleIdentifiers {
@@ -87,7 +88,8 @@ final class ExternalOpenWorkspace {
     private func applicationURL(named applicationName: String) -> URL? {
         let searchRoots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
-            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
+            fileManager.homeDirectoryForCurrentUser.appendingPathComponent(
+                "Applications", isDirectory: true),
         ]
         for root in searchRoots {
             let candidate = root.appendingPathComponent(applicationName, isDirectory: true)
@@ -99,8 +101,8 @@ final class ExternalOpenWorkspace {
     }
 }
 
-private extension ExternalOpenToolID {
-    var primaryBundleIdentifier: String? {
+extension ExternalOpenToolID {
+    fileprivate var primaryBundleIdentifier: String? {
         switch self {
         case .vscode:
             return "com.microsoft.VSCode"
@@ -123,7 +125,7 @@ private extension ExternalOpenToolID {
         }
     }
 
-    var alternateBundleIdentifiers: [String] {
+    fileprivate var alternateBundleIdentifiers: [String] {
         switch self {
         case .sublimeText:
             return ["com.sublimetext.3"]
@@ -132,7 +134,7 @@ private extension ExternalOpenToolID {
         }
     }
 
-    var applicationNames: [String] {
+    fileprivate var applicationNames: [String] {
         switch self {
         case .vscode:
             return ["Visual Studio Code.app"]

@@ -1,6 +1,8 @@
 import Foundation
 
-public enum ExternalOpenToolID: String, CaseIterable, Codable, Equatable, Hashable, Identifiable, Sendable {
+public enum ExternalOpenToolID: String, CaseIterable, Codable, Equatable, Hashable, Identifiable,
+    Sendable
+{
     case vscode
     case vscodeInsiders = "vscode-insiders"
     case sublimeText = "sublime-text"
@@ -72,7 +74,7 @@ public struct ExternalOpenSettings: Codable, Equatable, Sendable {
         .terminal,
         .ghostty,
         .xcode,
-        .webstorm
+        .webstorm,
     ]
 
     public var `default`: String
@@ -88,8 +90,11 @@ public struct ExternalOpenSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.default = try container.decodeIfPresent(String.self, forKey: .default) ?? Self.defaultTool.rawValue
-        self.preferred = try container.decodeIfPresent([String].self, forKey: .preferred)
+        self.default =
+            try container.decodeIfPresent(String.self, forKey: .default)
+            ?? Self.defaultTool.rawValue
+        self.preferred =
+            try container.decodeIfPresent([String].self, forKey: .preferred)
             ?? Self.defaultPreferred.map(\.rawValue)
     }
 
@@ -103,7 +108,8 @@ public struct ExternalOpenSettings: Codable, Equatable, Sendable {
         for value in preferred {
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let tool = ExternalOpenToolID(rawValue: normalized),
-                  seen.insert(tool).inserted else {
+                seen.insert(tool).inserted
+            else {
                 continue
             }
             tools.append(tool)
@@ -156,8 +162,9 @@ public enum ExternalOpenToolResolver {
     ) -> [ExternalOpenToolID] {
         var tools = settings.preferredToolIDs.filter { detectedTools.contains($0) }
         if !tools.contains(where: \.isEditor),
-           detectedTools.contains(.finder),
-           !tools.contains(.finder) {
+            detectedTools.contains(.finder),
+            !tools.contains(.finder)
+        {
             tools.append(.finder)
         }
         return tools

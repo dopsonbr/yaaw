@@ -74,7 +74,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         externalToolResolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
         configuration: YAAWConfiguration = YAAWConfiguration(),
         diagnosticRecorder: DiagnosticEventRecording = LoggerDiagnosticEventRecorder.shared,
-        notificationDispatcher: any ThreadActivityNotificationDispatching = NoopThreadActivityNotificationDispatcher(),
+        notificationDispatcher: any ThreadActivityNotificationDispatching =
+            NoopThreadActivityNotificationDispatcher(),
         badgeUpdater: any ThreadActivityBadgeUpdating = NoopThreadActivityBadgeUpdater(),
         isApplicationActive: @escaping () -> Bool = { false },
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -84,7 +85,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.terminalManager = terminalManager
         self.agentCLIBindings = agentCLIBindings
         self.fileIndexer = fileIndexer
-        self.fileIndexCacheCoordinator = FileIndexCacheCoordinator(store: store, fileIndexer: fileIndexer)
+        self.fileIndexCacheCoordinator = FileIndexCacheCoordinator(
+            store: store, fileIndexer: fileIndexer)
         self.fileIndexDirectoryWatcher = FileIndexDirectoryWatcher()
         self.externalToolResolver = externalToolResolver
         self.diagnosticRecorder = diagnosticRecorder
@@ -115,10 +117,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         for projectID in cachedArchivedThreadsByProject.keys {
             cachedArchivedThreadsByProject[projectID]?.sort(by: Self.threadPrecedes)
         }
-        let selectedProjectID = snapshot.projects.contains { $0.id == snapshot.selectedProjectID }
+        let selectedProjectID =
+            snapshot.projects.contains { $0.id == snapshot.selectedProjectID }
             ? snapshot.selectedProjectID
             : snapshot.projects[0].id
-        let selectedThreadID = snapshot.threads.contains { $0.id == snapshot.selectedThreadID }
+        let selectedThreadID =
+            snapshot.threads.contains { $0.id == snapshot.selectedThreadID }
             ? snapshot.selectedThreadID
             : snapshot.threads.first { $0.projectID == selectedProjectID && !$0.isArchived }?.id
         self.selectedProjectID = selectedProjectID
@@ -135,7 +139,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.rightPanelModesByThreadID = rightPanelModesByThreadID
         var rightPanelStatesByThreadID = snapshot.rightPanelStatesByThreadID
         for thread in snapshot.threads where rightPanelStatesByThreadID[thread.id] == nil {
-            let mode = rightPanelModesByThreadID[thread.id] ?? (thread.id == selectedThreadID ? snapshot.selectedRightPanelMode : .files)
+            let mode =
+                rightPanelModesByThreadID[thread.id]
+                ?? (thread.id == selectedThreadID ? snapshot.selectedRightPanelMode : .files)
             rightPanelStatesByThreadID[thread.id] = RightPanelState.defaultState(selectedMode: mode)
         }
         self.rightPanelStatesByThreadID = rightPanelStatesByThreadID
@@ -163,13 +169,15 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "app_model_loaded",
             metadata: [
                 "project_count": "\(projects.count)",
-                "thread_count": "\(threads.count)"
+                "thread_count": "\(threads.count)",
             ]
         )
     }
 
     public var selectedThread: AgentThread? {
-        guard let selectedThreadID, let index = threadIndexByID[selectedThreadID] else { return nil }
+        guard let selectedThreadID, let index = threadIndexByID[selectedThreadID] else {
+            return nil
+        }
         return threads[index]
     }
 
@@ -215,7 +223,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func updateCachedThread(previousThread: AgentThread, updatedThread: AgentThread) {
         if previousThread.projectID == updatedThread.projectID,
-           previousThread.isArchived == updatedThread.isArchived {
+            previousThread.isArchived == updatedThread.isArchived
+        {
             replaceCachedThread(updatedThread, matching: previousThread)
         } else {
             removeCachedThread(previousThread)
@@ -225,7 +234,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func replaceCachedThread(_ thread: AgentThread, matching previousThread: AgentThread) {
         if thread.isArchived {
-            replaceCachedThread(thread, matching: previousThread, in: &cachedArchivedThreadsByProject)
+            replaceCachedThread(
+                thread, matching: previousThread, in: &cachedArchivedThreadsByProject)
         } else {
             replaceCachedThread(thread, matching: previousThread, in: &cachedActiveThreadsByProject)
         }
@@ -237,13 +247,15 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         in cache: inout [UUID: [AgentThread]]
     ) {
         let projectID = thread.projectID
-        guard let currentIndex = cache[projectID]?.firstIndex(where: { $0.id == previousThread.id }) else {
+        guard let currentIndex = cache[projectID]?.firstIndex(where: { $0.id == previousThread.id })
+        else {
             insertCachedThread(thread, into: &cache)
             return
         }
 
         cache[projectID]?.remove(at: currentIndex)
-        let insertionIndex = cache[projectID]?.firstIndex { Self.threadPrecedes(thread, $0) }
+        let insertionIndex =
+            cache[projectID]?.firstIndex { Self.threadPrecedes(thread, $0) }
             ?? cache[projectID]?.endIndex
             ?? 0
         cache[projectID]?.insert(thread, at: insertionIndex)
@@ -257,7 +269,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func removeCachedThread(_ thread: AgentThread, from cache: inout [UUID: [AgentThread]]) {
+    private func removeCachedThread(_ thread: AgentThread, from cache: inout [UUID: [AgentThread]])
+    {
         guard var projectThreads = cache[thread.projectID] else { return }
         projectThreads.removeAll { $0.id == thread.id }
         if projectThreads.isEmpty {
@@ -275,10 +288,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func insertCachedThread(_ thread: AgentThread, into cache: inout [UUID: [AgentThread]]) {
+    private func insertCachedThread(_ thread: AgentThread, into cache: inout [UUID: [AgentThread]])
+    {
         var projectThreads = cache[thread.projectID] ?? []
         projectThreads.removeAll { $0.id == thread.id }
-        let insertionIndex = projectThreads.firstIndex { Self.threadPrecedes(thread, $0) } ?? projectThreads.endIndex
+        let insertionIndex =
+            projectThreads.firstIndex { Self.threadPrecedes(thread, $0) } ?? projectThreads.endIndex
         projectThreads.insert(thread, at: insertionIndex)
         cache[thread.projectID] = projectThreads
     }
@@ -329,13 +344,16 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         configuration.defaultAgentCLI
     }
 
-    public func keyboardShortcutDefinition(for action: KeyboardShortcutAction) -> KeyboardShortcutDefinition {
+    public func keyboardShortcutDefinition(for action: KeyboardShortcutAction)
+        -> KeyboardShortcutDefinition
+    {
         configuration.shortcut(for: action)
     }
 
     public func isKeyboardShortcutEnabled(for action: KeyboardShortcutAction) -> Bool {
         let definition = keyboardShortcutDefinition(for: action)
-        return definition.isBound && !configuration.keyboardShortcuts.duplicateActions().contains(action)
+        return definition.isBound
+            && !configuration.keyboardShortcuts.duplicateActions().contains(action)
     }
 
     public func reloadConfiguration(_ configuration: YAAWConfiguration) {
@@ -351,7 +369,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "file_icon_pack": self.configuration.fileIconPack.rawValue,
                 "interface_font_size": "\(self.configuration.fonts.interfaceSize)",
                 "editor_font_size": "\(self.configuration.fonts.editorSize)",
-                "terminal_font_size": "\(self.configuration.fonts.terminalSize)"
+                "terminal_font_size": "\(self.configuration.fonts.terminalSize)",
             ]
         )
         refreshSelectedFileBrowser()
@@ -371,7 +389,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return ExternalOpenTarget(url: thread.workingDirectory, kind: .directory)
         }
         guard let project = selectedProject,
-              isExistingDirectory(project.rootDirectory) else {
+            isExistingDirectory(project.rootDirectory)
+        else {
             return nil
         }
         return ExternalOpenTarget(url: project.rootDirectory, kind: .directory)
@@ -381,7 +400,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         fileBrowserExternalOpenTarget(relativePath: relativePath, isDirectory: false)
     }
 
-    public func fileBrowserExternalOpenTarget(relativePath: String, isDirectory: Bool) -> ExternalOpenTarget? {
+    public func fileBrowserExternalOpenTarget(relativePath: String, isDirectory: Bool)
+        -> ExternalOpenTarget?
+    {
         guard let url = fileBrowserURL(relativePath: relativePath) else { return nil }
         return ExternalOpenTarget(
             url: url,
@@ -393,9 +414,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectedThreadFileURL(relativePath: relativePath)?.url
     }
 
-    private func selectedThreadFileURL(relativePath: String) -> (normalizedPath: String, url: URL)? {
+    private func selectedThreadFileURL(relativePath: String) -> (normalizedPath: String, url: URL)?
+    {
         guard let thread = selectedThread,
-              isExistingDirectory(thread.workingDirectory) else {
+            isExistingDirectory(thread.workingDirectory)
+        else {
             return nil
         }
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
@@ -422,9 +445,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public var selectedRightPanelState: RightPanelState {
         guard let selectedThreadID else { return RightPanelState() }
-        return rightPanelStatesByThreadID[selectedThreadID] ?? RightPanelState.defaultState(
-            selectedMode: rightPanelModesByThreadID[selectedThreadID] ?? .files
-        )
+        return rightPanelStatesByThreadID[selectedThreadID]
+            ?? RightPanelState.defaultState(
+                selectedMode: rightPanelModesByThreadID[selectedThreadID] ?? .files
+            )
     }
 
     public var selectedRightPanelTab: RightPanelTab {
@@ -544,7 +568,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "bottom_terminal_toggled",
             metadata: [
                 "thread_id": selectedThreadID.uuidString,
-                "expanded": "\(bottomTerminalExpandedThreadIDs.contains(selectedThreadID))"
+                "expanded": "\(bottomTerminalExpandedThreadIDs.contains(selectedThreadID))",
             ]
         )
         persistBottomTerminalExpanded(threadID: selectedThreadID)
@@ -704,8 +728,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 )
                 return nil
             }
-            guard let tab = rightPanelStatesByThreadID[threadID]?.tabs.first(where: { $0.id == tabID }),
-                  tab.kind == .nvim else {
+            guard
+                let tab = rightPanelStatesByThreadID[threadID]?.tabs.first(where: { $0.id == tabID }
+                ),
+                tab.kind == .nvim
+            else {
                 return nil
             }
             let arguments = tab.relativePath.map { [$0] } ?? []
@@ -717,7 +744,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                     preferredNames: configuration.tools.editors.preferred,
                     arguments: arguments
                 ),
-                relaunchToken: nvimRelaunchTokensByTabKey[nvimTabKey(threadID: threadID, tabID: tabID)],
+                relaunchToken: nvimRelaunchTokensByTabKey[
+                    nvimTabKey(threadID: threadID, tabID: tabID)],
                 agentCLI: thread.agentCLI
             )
         case .lazygit(let threadID):
@@ -748,7 +776,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "terminal_launch_requested",
             metadata: [
                 "role": role.diagnosticName,
-                "surface": role.surfaceKind.rawValue
+                "surface": role.surfaceKind.rawValue,
             ]
         )
         return terminalManager.activate(request)
@@ -805,16 +833,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         terminalTitle: String? = nil
     ) {
         guard let index = threadIndexByID[threadID],
-              var metadata = agentCLIBindings.metadata(
+            var metadata = agentCLIBindings.metadata(
                 for: threads[index].agentCLI,
                 output: output,
                 terminalTitle: terminalTitle
-              ) else {
+            )
+        else {
             return
         }
         if metadata.reportedName == nil,
-           metadata.title == nil,
-           let pendingTitle = pendingTerminalTitlesByThreadID[threadID] {
+            metadata.title == nil,
+            let pendingTitle = pendingTerminalTitlesByThreadID[threadID]
+        {
             metadata.title = pendingTitle
         }
         applyAgentCLIMetadata(metadata, toThreadAt: index)
@@ -826,8 +856,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
         pendingTerminalTitlesByThreadID[threadID] = title
         guard let identity = threads[index].sessionIdentity,
-              threads[index].canonicalSessionName == nil
-                || threads[index].canonicalSessionName == identity else { return }
+            threads[index].canonicalSessionName == nil
+                || threads[index].canonicalSessionName == identity
+        else { return }
         let metadata = agentCLIBindings.metadata(
             fromExistingIdentity: identity,
             terminalTitle: title
@@ -897,10 +928,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func pollSelectedAgentCLICaptureLog() {
         guard let thread = selectedThread,
-              let captured = agentCLIBindings.capturedOutput(
+            let captured = agentCLIBindings.capturedOutput(
                 for: thread,
                 after: captureReadOffsetsByThreadID[thread.id] ?? 0
-              ) else {
+            )
+        else {
             return
         }
         captureReadOffsetsByThreadID[thread.id] = captured.nextOffset
@@ -911,17 +943,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         for threadID in threadIDsForAgentCLIActivityPolling() {
             guard let thread = activeThread(id: threadID) else { continue }
             let previousOffset = activityReadOffsetsByThreadID[thread.id] ?? 0
-            guard let captured = agentCLIBindings.capturedActivityEvents(
-                for: thread,
-                after: previousOffset
-            ) else {
+            guard
+                let captured = agentCLIBindings.capturedActivityEvents(
+                    for: thread,
+                    after: previousOffset
+                )
+            else {
                 continue
             }
             if captured.startOffset != previousOffset {
                 activityPartialLinesByThreadID.removeValue(forKey: thread.id)
             }
             activityReadOffsetsByThreadID[thread.id] = captured.nextOffset
-            let completeOutput = completeActivityLogOutput(threadID: thread.id, output: captured.output)
+            let completeOutput = completeActivityLogOutput(
+                threadID: thread.id, output: captured.output)
             for event in ThreadActivityEvent.helperEvents(from: completeOutput) {
                 applyThreadActivity(
                     event,
@@ -943,7 +978,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
         append(selectedThreadID)
         append(focusedProjectTerminalThreadID)
-        for threadID in activeProjectLaunchCommandsByThreadID.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+        for threadID in activeProjectLaunchCommandsByThreadID.keys.sorted(by: {
+            $0.uuidString < $1.uuidString
+        }) {
             append(threadID)
         }
         return threadIDs
@@ -972,13 +1009,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     private static func normalizedBrowserURLString(_ urlString: String?) -> String? {
-        guard let urlString = urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !urlString.isEmpty else {
+        guard let urlString = urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !urlString.isEmpty
+        else {
             return nil
         }
         if urlString.contains("://") || urlString.hasPrefix("file:") {
             return urlString
         }
-        if urlString.hasPrefix("localhost") || urlString.hasPrefix("127.0.0.1") || urlString.hasPrefix("[::1]") {
+        if urlString.hasPrefix("localhost") || urlString.hasPrefix("127.0.0.1")
+            || urlString.hasPrefix("[::1]")
+        {
             return "http://\(urlString)"
         }
         return "https://\(urlString)"
@@ -995,7 +1036,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func updateFileSearchQuery(_ query: String) {
         let startedAt = Date()
-        let fullEntries = selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] } ?? fileBrowserState.entries
+        let fullEntries =
+            selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] }
+            ?? fileBrowserState.entries
         let result = Self.visibleFileEntries(
             from: fullEntries,
             query: query,
@@ -1020,14 +1063,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return
         }
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
-        let fullEntries = selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] } ?? fileBrowserState.entries
+        let fullEntries =
+            selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] }
+            ?? fileBrowserState.entries
         guard fullEntries.contains(where: { $0.relativePath == normalizedPath }) else { return }
         selectedFileRelativePath = normalizedPath
     }
 
     public func recordFileBrowserTreeBuilt(entryCount: Int, rowCount: Int, durationMS: Int) {
-        guard entryCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
-            || durationMS >= FileBrowserPresentationLimits.slowTreeBuildDiagnosticThresholdMS else { return }
+        guard
+            entryCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
+                || durationMS >= FileBrowserPresentationLimits.slowTreeBuildDiagnosticThresholdMS
+        else { return }
         recordDiagnostic(
             category: "Indexing",
             name: "file_browser_tree_built",
@@ -1035,7 +1082,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "entry_count": "\(entryCount)",
                 "visible_row_count": "\(rowCount)",
                 "duration_ms": "\(durationMS)",
-                "limited": "\(rowCount >= FileBrowserPresentationLimits.maxPublishedEntries)"
+                "limited": "\(rowCount >= FileBrowserPresentationLimits.maxPublishedEntries)",
             ]
         )
     }
@@ -1046,9 +1093,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             selectedFileRelativePath = nil
             return
         }
-        let currentIndex = selectedFileRelativePath.flatMap { selectedPath in
-            entries.firstIndex { $0.relativePath == selectedPath }
-        } ?? -1
+        let currentIndex =
+            selectedFileRelativePath.flatMap { selectedPath in
+                entries.firstIndex { $0.relativePath == selectedPath }
+            } ?? -1
         let nextIndex: Int
         switch direction {
         case .up:
@@ -1076,7 +1124,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         rightPanelStatesByThreadID[selectedThreadID] = state
         rightPanelModesByThreadID[selectedThreadID] = .nvim
         if !alreadyOpen {
-            nvimRelaunchTokensByTabKey[nvimTabKey(threadID: selectedThreadID, tabID: tab.id)] = UUID()
+            nvimRelaunchTokensByTabKey[nvimTabKey(threadID: selectedThreadID, tabID: tab.id)] =
+                UUID()
             terminateTerminal(role: .nvimTab(threadID: selectedThreadID, tabID: tab.id))
         }
         nvimRelativePathsByThreadID[selectedThreadID] = normalizedPath
@@ -1100,7 +1149,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard let selectedThreadID else { return }
         var state = selectedRightPanelState
         guard state.selectedTab.kind == .browser else { return }
-        state.updateBrowserTab(id: state.selectedTabID, urlString: Self.normalizedBrowserURLString(urlString))
+        state.updateBrowserTab(
+            id: state.selectedTabID, urlString: Self.normalizedBrowserURLString(urlString))
         rightPanelStatesByThreadID[selectedThreadID] = state
         rightPanelModesByThreadID[selectedThreadID] = .browser
         browserUnavailableMessagesByThreadID.removeValue(forKey: selectedThreadID)
@@ -1113,15 +1163,19 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard let selectedThreadID, let thread = selectedThread else { return false }
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         guard !normalizedPath.isEmpty else {
-            setBrowserUnavailableMessage("Browser preview requires a file path.", threadID: selectedThreadID)
+            setBrowserUnavailableMessage(
+                "Browser preview requires a file path.", threadID: selectedThreadID)
             return false
         }
         guard Self.isBrowserPreviewSupported(relativePath: normalizedPath) else {
-            setBrowserUnavailableMessage("Unsupported browser preview type: \(normalizedPath)", threadID: selectedThreadID)
+            setBrowserUnavailableMessage(
+                "Unsupported browser preview type: \(normalizedPath)", threadID: selectedThreadID)
             return false
         }
         guard !normalizedPath.split(separator: "/").contains("..") else {
-            setBrowserUnavailableMessage("Browser preview is limited to files under the selected thread.", threadID: selectedThreadID)
+            setBrowserUnavailableMessage(
+                "Browser preview is limited to files under the selected thread.",
+                threadID: selectedThreadID)
             return false
         }
 
@@ -1129,13 +1183,19 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let fileURL = root.appendingPathComponent(normalizedPath).standardizedFileURL
         let rootPath = root.path.hasSuffix("/") ? root.path : "\(root.path)/"
         guard fileURL.path.hasPrefix(rootPath) else {
-            setBrowserUnavailableMessage("Browser preview is limited to files under the selected thread.", threadID: selectedThreadID)
+            setBrowserUnavailableMessage(
+                "Browser preview is limited to files under the selected thread.",
+                threadID: selectedThreadID)
             return false
         }
 
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-            setBrowserUnavailableMessage("Browser preview file does not exist: \(normalizedPath)", threadID: selectedThreadID)
+        guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
+            !isDirectory.boolValue
+        else {
+            setBrowserUnavailableMessage(
+                "Browser preview file does not exist: \(normalizedPath)", threadID: selectedThreadID
+            )
             return false
         }
 
@@ -1154,9 +1214,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         let supportedExtensions: Set<String> = [
             "html", "htm", "svg", "pdf", "png", "jpg", "jpeg", "gif", "webp", "txt", "json", "xml",
-            "md", "markdown"
+            "md", "markdown",
         ]
-        return supportedExtensions.contains(URL(fileURLWithPath: normalizedPath).pathExtension.lowercased())
+        return supportedExtensions.contains(
+            URL(fileURLWithPath: normalizedPath).pathExtension.lowercased())
     }
 
     @discardableResult
@@ -1220,7 +1281,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
 
         let trimmedDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedDisplayName = trimmedDisplayName?.isEmpty == false
+        let resolvedDisplayName =
+            trimmedDisplayName?.isEmpty == false
             ? trimmedDisplayName ?? ""
             : "Starting \(agentCLI.displayName)..."
         let thread = AgentThread(
@@ -1245,7 +1307,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "thread_created",
             metadata: [
                 "thread_id": thread.id.uuidString,
-                "agent_cli": thread.agentCLI.rawValue
+                "agent_cli": thread.agentCLI.rawValue,
             ]
         )
         persistThread(thread)
@@ -1299,7 +1361,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             candidateIndex = index + 1
         }
         guard projects.indices.contains(candidateIndex),
-              projects[index].isPinned == projects[candidateIndex].isPinned else {
+            projects[index].isPinned == projects[candidateIndex].isPinned
+        else {
             return
         }
         projects.swapAt(index, candidateIndex)
@@ -1310,8 +1373,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard projectID != targetProjectID else { return }
         projects = Self.sortedProjects(projects)
         guard let sourceIndex = projects.firstIndex(where: { $0.id == projectID }),
-              let targetIndex = projects.firstIndex(where: { $0.id == targetProjectID }),
-              projects[sourceIndex].isPinned == projects[targetIndex].isPinned else {
+            let targetIndex = projects.firstIndex(where: { $0.id == targetProjectID }),
+            projects[sourceIndex].isPinned == projects[targetIndex].isPinned
+        else {
             return
         }
         let project = projects.remove(at: sourceIndex)
@@ -1349,7 +1413,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func toggleSelectedProjectArchiveExpanded() {
-        setProjectArchiveExpanded(selectedProjectID, isExpanded: !isProjectArchiveExpanded(selectedProjectID))
+        setProjectArchiveExpanded(
+            selectedProjectID, isExpanded: !isProjectArchiveExpanded(selectedProjectID))
     }
 
     public func selectProject(id projectID: UUID) {
@@ -1385,7 +1450,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "thread_selected",
             metadata: [
                 "thread_id": thread.id.uuidString,
-                "agent_cli": thread.agentCLI.rawValue
+                "agent_cli": thread.agentCLI.rawValue,
             ]
         )
         persistProject(projects.first { $0.id == thread.projectID }!)
@@ -1439,7 +1504,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     private func pushCurrentSelection() {
-        navigationHistory.push(AppSelection(projectID: selectedProjectID, threadID: selectedThreadID))
+        navigationHistory.push(
+            AppSelection(projectID: selectedProjectID, threadID: selectedThreadID))
     }
 
     private func apply(_ selection: AppSelection) {
@@ -1483,7 +1549,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 name: "file_index_failed",
                 metadata: [
                     "thread_id": thread.id.uuidString,
-                    "reason": "missing_root"
+                    "reason": "missing_root",
                 ]
             )
             return
@@ -1496,9 +1562,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             ignoreRules: configuration.ignoreRules
         )
         let cachedResult = fileIndexCacheCoordinator.cachedIndex(threadID: thread.id, key: cacheKey)
-        let entries = cachedResult?.entries
+        let entries =
+            cachedResult?.entries
             ?? fileBrowserEntriesByThreadID[thread.id]
-            ?? (fileBrowserState.rootPath == thread.workingDirectory.path ? fileBrowserState.entries : [])
+            ?? (fileBrowserState.rootPath == thread.workingDirectory.path
+                ? fileBrowserState.entries : [])
         fileBrowserEntriesByThreadID[thread.id] = entries
         let visibleResult = Self.visibleFileEntries(
             from: entries,
@@ -1523,7 +1591,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             ignoreRules: configuration.ignoreRules,
             key: cacheKey
         ) { [weak self] result in
-            self?.finishFileBrowserRefresh(threadID: thread.id, requestID: requestID, result: result)
+            self?.finishFileBrowserRefresh(
+                threadID: thread.id, requestID: requestID, result: result)
         }
     }
 
@@ -1567,7 +1636,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 name: "file_index_failed",
                 metadata: [
                     "thread_id": threadID.uuidString,
-                    "error": sanitizedDiagnosticValue(String(describing: error))
+                    "error": sanitizedDiagnosticValue(String(describing: error)),
                 ]
             )
         }
@@ -1586,7 +1655,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 root: selectedThread.workingDirectory,
                 ignoreRules: configuration.ignoreRules
             )
-            cachedResult = fileIndexCacheCoordinator.cachedIndex(threadID: selectedThread.id, key: cacheKey)
+            cachedResult = fileIndexCacheCoordinator.cachedIndex(
+                threadID: selectedThread.id, key: cacheKey)
         } else {
             cachedResult = nil
         }
@@ -1615,13 +1685,15 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return
         }
         if let selectedFileRelativePath,
-           fileEntries.contains(where: { $0.relativePath == selectedFileRelativePath }) {
+            fileEntries.contains(where: { $0.relativePath == selectedFileRelativePath })
+        {
             return
         }
         selectedFileRelativePath = fileEntries.first?.relativePath
     }
 
-    private static func publishedTreeEntries(from entries: [FileBrowserEntry]) -> [FileBrowserEntry] {
+    private static func publishedTreeEntries(from entries: [FileBrowserEntry]) -> [FileBrowserEntry]
+    {
         FileBrowserTreeBuilder.presentationEntries(
             from: entries,
             limit: FileBrowserPresentationLimits.maxPublishedEntries
@@ -1640,7 +1712,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         limit: Int
     ) -> FuzzyFileMatcher.Result {
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let visibleEntries = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: limit)
+            let visibleEntries = FileBrowserTreeBuilder.presentationEntries(
+                from: entries, limit: limit)
             return FuzzyFileMatcher.Result(
                 entries: visibleEntries,
                 totalMatches: entries.count,
@@ -1657,8 +1730,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         visibleCount: Int,
         durationMS: Int
     ) {
-        guard sourceCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
-            || durationMS >= FileBrowserPresentationLimits.slowSearchDiagnosticThresholdMS else { return }
+        guard
+            sourceCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
+                || durationMS >= FileBrowserPresentationLimits.slowSearchDiagnosticThresholdMS
+        else { return }
         recordDiagnostic(
             category: "Indexing",
             name: "file_browser_search_completed",
@@ -1668,15 +1743,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "match_count": "\(matchCount)",
                 "visible_count": "\(visibleCount)",
                 "duration_ms": "\(durationMS)",
-                "limited": "\(visibleCount < matchCount)"
+                "limited": "\(visibleCount < matchCount)",
             ]
         )
     }
 
     private func recordIndexDiagnosticIfNeeded(result: FileIndexResult) {
         let durationMS = Self.elapsedMilliseconds(since: result.metadata.indexedAt)
-        guard result.metadata.fileCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
-            || durationMS >= FileBrowserPresentationLimits.slowSearchDiagnosticThresholdMS else { return }
+        guard
+            result.metadata.fileCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
+                || durationMS >= FileBrowserPresentationLimits.slowSearchDiagnosticThresholdMS
+        else { return }
         recordDiagnostic(
             category: "Indexing",
             name: "file_index_completed",
@@ -1684,7 +1761,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "root": sanitizedDiagnosticValue(result.metadata.rootPath),
                 "file_count": "\(result.metadata.fileCount)",
                 "ignored_directory_count": "\(result.metadata.ignoredDirectoryCount)",
-                "duration_ms": "\(durationMS)"
+                "duration_ms": "\(durationMS)",
             ]
         )
     }
@@ -1701,22 +1778,28 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func isExistingDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     private func defaultShellPath() -> String {
         ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
     }
 
-    private func externalToolCommand(named executableName: String, arguments: [String] = []) -> [String] {
+    private func externalToolCommand(named executableName: String, arguments: [String] = [])
+        -> [String]
+    {
         [
-            externalToolResolver.executablePath(named: executableName, environment: environment) ?? executableName
+            externalToolResolver.executablePath(named: executableName, environment: environment)
+                ?? executableName
         ] + arguments
     }
 
-    private func externalToolCommand(preferredNames: [String], arguments: [String] = []) -> [String] {
+    private func externalToolCommand(preferredNames: [String], arguments: [String] = []) -> [String]
+    {
         for name in preferredNames {
-            if let path = externalToolResolver.executablePath(named: name, environment: environment) {
+            if let path = externalToolResolver.executablePath(named: name, environment: environment)
+            {
                 return [path] + arguments
             }
         }
@@ -1725,17 +1808,23 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func gitToolCommand() -> [String] {
         let gitTool = configuration.tools.git.preferred
-        if let resolvedGitTool = externalToolResolver.executablePath(named: gitTool, environment: environment) {
+        if let resolvedGitTool = externalToolResolver.executablePath(
+            named: gitTool, environment: environment)
+        {
             return [resolvedGitTool]
         }
         let fallback = configuration.tools.diff.fallback
         if isGitDiffFallback(fallback) {
             let gitExecutable = fallback.first ?? "git"
-            let resolvedGit = externalToolResolver.executablePath(named: gitExecutable, environment: environment) ?? gitExecutable
+            let resolvedGit =
+                externalToolResolver.executablePath(named: gitExecutable, environment: environment)
+                ?? gitExecutable
             return [resolvedGit, "--no-pager", "diff"]
         }
         guard let executable = fallback.first else { return ["git", "--no-pager", "diff"] }
-        let resolvedExecutable = externalToolResolver.executablePath(named: executable, environment: environment) ?? executable
+        let resolvedExecutable =
+            externalToolResolver.executablePath(named: executable, environment: environment)
+            ?? executable
         return [resolvedExecutable] + Array(fallback.dropFirst())
     }
 
@@ -1836,7 +1925,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private func persistLaunchDowngradedThreadActivity(_ loaded: [UUID: ThreadActivityState]) {
         for (threadID, loadedActivity) in loaded {
             guard let downgraded = threadActivityByThreadID[threadID],
-                  downgraded != loadedActivity else { continue }
+                downgraded != loadedActivity
+            else { continue }
             persistThreadActivity(downgraded)
         }
     }
@@ -1848,7 +1938,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     ) {
         guard let threadIndex = threadIndexByID[event.threadID] else { return }
         let currentActivity = threadActivity(for: event.threadID)
-        let status = event.status
+        let status =
+            event.status
             ?? ThreadActivityText.inferredStatus(title: event.title, body: event.body)
             ?? currentActivity.status
         let preview = ThreadActivityText.preview(title: event.title, body: event.body)
@@ -1880,7 +1971,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             metadata: [
                 "thread_id": event.threadID.uuidString,
                 "status": status.rawValue,
-                "source": event.source.rawValue
+                "source": event.source.rawValue,
             ]
         )
         if shouldNotify, activity.isUnread, !suppressNotification {
@@ -1904,13 +1995,15 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private func dispatchSystemNotification(for activity: ThreadActivityState) {
         guard let thread = thread(withID: activity.threadID),
-              let project = projects.first(where: { $0.id == thread.projectID }) else { return }
+            let project = projects.first(where: { $0.id == thread.projectID })
+        else { return }
         notificationDispatcher.dispatch(
             ThreadActivityNotification(
                 threadID: activity.threadID,
                 title: thread.displayName,
                 subtitle: "\(project.displayName) - \(activity.status.cliValue)",
-                body: activity.preview ?? activity.body ?? activity.title ?? activity.status.cliValue
+                body: activity.preview ?? activity.body ?? activity.title
+                    ?? activity.status.cliValue
             )
         )
     }
@@ -1927,7 +2020,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "role": role.diagnosticName,
                 "surface": role.surfaceKind.rawValue,
                 "reason": reason,
-                "path": sanitizedDiagnosticValue(path)
+                "path": sanitizedDiagnosticValue(path),
             ]
         )
     }
@@ -1936,8 +2029,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         "\(threadID.uuidString)|\(tabID)"
     }
 
-    private func recordDiagnostic(category: String, name: String, metadata: [String: String] = [:]) {
-        diagnosticRecorder.record(DiagnosticEvent(category: category, name: name, metadata: metadata))
+    private func recordDiagnostic(category: String, name: String, metadata: [String: String] = [:])
+    {
+        diagnosticRecorder.record(
+            DiagnosticEvent(category: category, name: name, metadata: metadata))
     }
 
     private func sanitizedDiagnosticValue(_ value: String) -> String {
@@ -1947,8 +2042,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 }
 
-private extension TerminalRole {
-    var diagnosticName: String {
+extension TerminalRole {
+    fileprivate var diagnosticName: String {
         switch self {
         case .project:
             return "project"

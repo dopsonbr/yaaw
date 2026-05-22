@@ -52,7 +52,8 @@ public enum FileBrowserTreeBuilder {
                     isNewBox = false
                 } else {
                     box = FileBrowserTreeNodeBox(
-                        entry: FileBrowserEntry(relativePath: currentPath, isDirectory: isDirectory),
+                        entry: FileBrowserEntry(
+                            relativePath: currentPath, isDirectory: isDirectory),
                         name: component
                     )
                     boxesByPath[currentPath] = box
@@ -70,7 +71,8 @@ public enum FileBrowserTreeBuilder {
             }
         }
 
-        return rootBoxes
+        return
+            rootBoxes
             .sorted(by: Self.sortBoxes)
             .map { Self.node(from: $0) }
     }
@@ -84,7 +86,9 @@ public enum FileBrowserTreeBuilder {
 
         let prefix = Array(entries.prefix(limit))
         let visibleFileFloor = min(minimumBalancedFileRows, max(1, limit / 10))
-        if prefix.lazy.filter({ !$0.isDirectory }).prefix(visibleFileFloor).count >= visibleFileFloor {
+        if prefix.lazy.filter({ !$0.isDirectory }).prefix(visibleFileFloor).count
+            >= visibleFileFloor
+        {
             return prefix
         }
 
@@ -127,7 +131,9 @@ public enum FileBrowserTreeBuilder {
         for entry in entries {
             let components = entry.relativePath.split(separator: "/").map(String.init)
             guard !components.isEmpty else { continue }
-            guard isVisible(components: components, expandedFolders: expandedFolders) else { continue }
+            guard isVisible(components: components, expandedFolders: expandedFolders) else {
+                continue
+            }
 
             rows.append(
                 FileBrowserVisibleTreeRow(
@@ -160,26 +166,32 @@ public enum FileBrowserTreeBuilder {
         return FileBrowserTreeNode(entry: box.entry, displayName: box.name, children: children)
     }
 
-    private static func sortBoxes(_ left: FileBrowserTreeNodeBox, _ right: FileBrowserTreeNodeBox) -> Bool {
+    private static func sortBoxes(_ left: FileBrowserTreeNodeBox, _ right: FileBrowserTreeNodeBox)
+        -> Bool
+    {
         if left.entry.isDirectory != right.entry.isDirectory {
             return left.entry.isDirectory && !right.entry.isDirectory
         }
         return left.name.localizedStandardCompare(right.name) == .orderedAscending
     }
 
-    public static func sortEntriesForTree(_ left: FileBrowserEntry, _ right: FileBrowserEntry) -> Bool {
+    public static func sortEntriesForTree(_ left: FileBrowserEntry, _ right: FileBrowserEntry)
+        -> Bool
+    {
         let leftComponents = left.relativePath.split(separator: "/").map(String.init)
         let rightComponents = right.relativePath.split(separator: "/").map(String.init)
         let sharedCount = min(leftComponents.count, rightComponents.count)
 
         for index in 0..<sharedCount where leftComponents[index] != rightComponents[index] {
-            let sameParent = leftComponents.prefix(index) == rightComponents.prefix(index)
+            let sameParent =
+                leftComponents.prefix(index) == rightComponents.prefix(index)
                 && leftComponents.count == index + 1
                 && rightComponents.count == index + 1
             if sameParent, left.isDirectory != right.isDirectory {
                 return left.isDirectory && !right.isDirectory
             }
-            return leftComponents[index].localizedStandardCompare(rightComponents[index]) == .orderedAscending
+            return leftComponents[index].localizedStandardCompare(rightComponents[index])
+                == .orderedAscending
         }
 
         if leftComponents.count != rightComponents.count {

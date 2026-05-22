@@ -1,7 +1,7 @@
-import YAAWKit
 import AppKit
 import GhosttyTerminal
 import SwiftUI
+import YAAWKit
 
 @available(macOS 14.0, *)
 struct GhosttyTerminalSurfaceView: NSViewRepresentable {
@@ -138,8 +138,8 @@ private final class TerminalContainerView: NSView {
         guard let terminalView else { return }
         DispatchQueue.main.async { [weak self, weak terminalView] in
             guard let self,
-                  let terminalView,
-                  terminalView.window?.isKeyWindow == true
+                let terminalView,
+                terminalView.window?.isKeyWindow == true
             else {
                 return
             }
@@ -174,7 +174,7 @@ private final class TerminalContainerView: NSView {
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         guard shouldFocusWhenWindowIsReady,
-              notification.object as? NSWindow === window
+            notification.object as? NSWindow === window
         else {
             return
         }
@@ -183,10 +183,11 @@ private final class TerminalContainerView: NSView {
 
     private func startMonitoringMouseDown() {
         guard mouseDownMonitor == nil else { return }
-        mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+        mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) {
+            [weak self] event in
             guard let self,
-                  let terminalView,
-                  event.window === window
+                let terminalView,
+                event.window === window
             else {
                 return event
             }
@@ -252,9 +253,9 @@ private final class TerminalImagePasteBridge {
 
     private func handlePasteShortcut(_ event: NSEvent) -> NSEvent? {
         guard TerminalPasteShortcut.matches(event),
-              let registration = focusedRegistration(in: event.window),
-              let terminalView = registration.terminalView,
-              PasteboardImageExtractor.pngData(from: .general) != nil
+            let registration = focusedRegistration(in: event.window),
+            let terminalView = registration.terminalView,
+            PasteboardImageExtractor.pngData(from: .general) != nil
         else {
             return event
         }
@@ -267,9 +268,9 @@ private final class TerminalImagePasteBridge {
     private func focusedRegistration(in eventWindow: NSWindow?) -> Registration? {
         registrations.values.first { registration in
             guard let container = registration.container,
-                  let terminalView = registration.terminalView,
-                  terminalView.window === eventWindow,
-                  container.window === eventWindow
+                let terminalView = registration.terminalView,
+                terminalView.window === eventWindow,
+                container.window === eventWindow
             else {
                 return false
             }
@@ -309,7 +310,8 @@ private final class GhosttyTerminalStateRegistry {
 
         let state = TerminalViewState(
             theme: terminalTheme(for: ThemeCatalog.defaultTheme),
-            terminalConfiguration: terminalConfiguration(for: request, theme: ThemeCatalog.defaultTheme)
+            terminalConfiguration: terminalConfiguration(
+                for: request, theme: ThemeCatalog.defaultTheme)
         )
         let view = TerminalView(frame: .zero)
         view.delegate = state
@@ -401,7 +403,8 @@ private final class GhosttyTerminalStateRegistry {
         theme: ThemeDefinition,
         fonts: FontSettings = FontSettings()
     ) -> TerminalConfiguration {
-        var configuration = baseTerminalConfiguration(for: theme).fontSize(Float(fonts.terminalSize))
+        var configuration = baseTerminalConfiguration(for: theme).fontSize(
+            Float(fonts.terminalSize))
         let terminalFamily = fonts.terminalFamily.trimmingCharacters(in: .whitespacesAndNewlines)
         if !terminalFamily.isEmpty {
             configuration = configuration.fontFamily(terminalFamily)
@@ -430,7 +433,10 @@ private final class GhosttyTerminalStateRegistry {
 
     private func shellCommandLine(for command: [String]) -> String {
         command.map { argument in
-            if argument.rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: "\"'\\$`"))) == nil {
+            if argument.rangeOfCharacter(
+                from: CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: "\"'\\$`")))
+                == nil
+            {
                 return argument
             }
             return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"

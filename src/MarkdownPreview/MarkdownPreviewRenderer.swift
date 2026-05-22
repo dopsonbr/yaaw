@@ -2,31 +2,32 @@ import Foundation
 
 public enum MarkdownPreviewRenderer {
     public static func renderHTML(markdown: String, sourceURL: URL) -> String {
-        let title = sourceURL.lastPathComponent.isEmpty ? "Markdown Preview" : sourceURL.lastPathComponent
+        let title =
+            sourceURL.lastPathComponent.isEmpty ? "Markdown Preview" : sourceURL.lastPathComponent
         var renderer = MarkdownBlockRenderer(markdown: markdown)
         let body = renderer.render()
         return """
-        <!doctype html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file: data: https: http:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-          <title>\(Self.escapeHTML(title))</title>
-          <style>
-        \(Self.styles)
-          </style>
-        </head>
-        <body>
-          <main class="markdown-body">
-        \(body)
-          </main>
-          <script>
-        \(Self.mermaidRendererScript)
-          </script>
-        </body>
-        </html>
-        """
+            <!doctype html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file: data: https: http:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+              <title>\(Self.escapeHTML(title))</title>
+              <style>
+            \(Self.styles)
+              </style>
+            </head>
+            <body>
+              <main class="markdown-body">
+            \(body)
+              </main>
+              <script>
+            \(Self.mermaidRendererScript)
+              </script>
+            </body>
+            </html>
+            """
     }
 
     static func escapeHTML(_ value: String) -> String {
@@ -319,7 +320,8 @@ private struct MarkdownBlockRenderer {
         let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") else { return nil }
         let marker = String(trimmed.prefix(3))
-        let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         index += 1
         var body: [String] = []
         while index < lines.count {
@@ -334,12 +336,14 @@ private struct MarkdownBlockRenderer {
         let code = body.joined(separator: "\n")
         if language == "mermaid" {
             return """
-            <div class="mermaid-card">
-              <pre class="mermaid-source">\(MarkdownPreviewRenderer.escapeHTML(code))</pre>
-            </div>
-            """
+                <div class="mermaid-card">
+                  <pre class="mermaid-source">\(MarkdownPreviewRenderer.escapeHTML(code))</pre>
+                </div>
+                """
         }
-        let className = language.isEmpty ? "" : " class=\"language-\(MarkdownPreviewRenderer.escapeHTML(language))\""
+        let className =
+            language.isEmpty
+            ? "" : " class=\"language-\(MarkdownPreviewRenderer.escapeHTML(language))\""
         return "<pre><code\(className)>\(MarkdownPreviewRenderer.escapeHTML(code))</code></pre>"
     }
 
@@ -369,7 +373,8 @@ private struct MarkdownBlockRenderer {
                 || tableStarts(at: index)
                 || unorderedListStarts(line)
                 || orderedListStarts(line)
-                || line.trimmingCharacters(in: .whitespaces).hasPrefix(">") {
+                || line.trimmingCharacters(in: .whitespaces).hasPrefix(">")
+            {
                 break
             }
             paragraph.append(line.trimmingCharacters(in: .whitespaces))
@@ -386,7 +391,8 @@ private struct MarkdownBlockRenderer {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             let item: String
             if ordered, let dotIndex = trimmed.firstIndex(of: ".") {
-                item = String(trimmed[trimmed.index(after: dotIndex)...]).trimmingCharacters(in: .whitespaces)
+                item = String(trimmed[trimmed.index(after: dotIndex)...]).trimmingCharacters(
+                    in: .whitespaces)
             } else {
                 item = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
             }
@@ -405,7 +411,8 @@ private struct MarkdownBlockRenderer {
             quote.append(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces))
             index += 1
         }
-        return "<blockquote>\n<p>\(InlineMarkdownRenderer.render(quote.joined(separator: " ")))</p>\n</blockquote>"
+        return
+            "<blockquote>\n<p>\(InlineMarkdownRenderer.render(quote.joined(separator: " ")))</p>\n</blockquote>"
     }
 
     private mutating func tableBlock() -> String {
@@ -414,7 +421,9 @@ private struct MarkdownBlockRenderer {
         var rows: [[String]] = []
         while index < lines.count {
             let line = lines[index]
-            guard line.contains("|"), !line.trimmingCharacters(in: .whitespaces).isEmpty else { break }
+            guard line.contains("|"), !line.trimmingCharacters(in: .whitespaces).isEmpty else {
+                break
+            }
             rows.append(splitTableRow(line))
             index += 1
         }
@@ -428,10 +437,11 @@ private struct MarkdownBlockRenderer {
     private func tableStarts(at index: Int) -> Bool {
         guard lines.indices.contains(index + 1), lines[index].contains("|") else { return false }
         let separator = splitTableRow(lines[index + 1])
-        return !separator.isEmpty && separator.allSatisfy { cell in
-            let trimmed = cell.trimmingCharacters(in: .whitespaces)
-            return trimmed.count >= 3 && trimmed.allSatisfy { $0 == "-" || $0 == ":" }
-        }
+        return !separator.isEmpty
+            && separator.allSatisfy { cell in
+                let trimmed = cell.trimmingCharacters(in: .whitespaces)
+                return trimmed.count >= 3 && trimmed.allSatisfy { $0 == "-" || $0 == ":" }
+            }
     }
 
     private func splitTableRow(_ line: String) -> [String] {
@@ -506,10 +516,13 @@ private enum InlineMarkdownRenderer {
         }
     }
 
-    private static func replaceDelimited(in value: String, delimiter: String, tag: String) -> String {
+    private static func replaceDelimited(in value: String, delimiter: String, tag: String) -> String
+    {
         var output = ""
         var remainder = value[...]
-        while let start = remainder.range(of: delimiter), let end = remainder[start.upperBound...].range(of: delimiter) {
+        while let start = remainder.range(of: delimiter),
+            let end = remainder[start.upperBound...].range(of: delimiter)
+        {
             output += remainder[..<start.lowerBound]
             output += "<\(tag)>\(remainder[start.upperBound..<end.lowerBound])</\(tag)>"
             remainder = remainder[end.upperBound...]
@@ -556,7 +569,7 @@ private enum SanitizedHTMLRenderer {
     private static let allowedTags: Set<String> = [
         "a", "abbr", "b", "br", "code", "del", "details", "div", "em", "i", "img", "kbd",
         "li", "mark", "ol", "p", "s", "samp", "span", "strong", "sub", "summary", "sup",
-        "table", "tbody", "td", "th", "thead", "tr", "u", "ul"
+        "table", "tbody", "td", "th", "thead", "tr", "u", "ul",
     ]
 
     static func render(_ value: String) -> String {
@@ -584,19 +597,25 @@ private enum SanitizedHTMLRenderer {
         guard !body.isEmpty else { return nil }
         if body.hasPrefix("!--") { return nil }
         let isClosing = body.hasPrefix("/")
-        let content = isClosing ? body.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines) : body
+        let content =
+            isClosing ? body.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines) : body
         let name = content.prefix { $0.isLetter || $0.isNumber }.lowercased()
         guard allowedTags.contains(String(name)) else { return nil }
         if isClosing { return "</\(name)>" }
-        if content.contains("on") && content.range(of: #"on[a-z]+\s*="#, options: .regularExpression) != nil {
+        if content.contains("on")
+            && content.range(of: #"on[a-z]+\s*="#, options: .regularExpression) != nil
+        {
             return "<\(name)>"
         }
         switch name {
         case "a":
-            return "<a\(sanitizedAttribute(named: "href", in: String(content)).map { " href=\"\($0)\"" } ?? "")>"
+            return
+                "<a\(sanitizedAttribute(named: "href", in: String(content)).map { " href=\"\($0)\"" } ?? "")>"
         case "img":
-            let src = sanitizedAttribute(named: "src", in: String(content)).map { " src=\"\($0)\"" } ?? ""
-            let alt = sanitizedAttribute(named: "alt", in: String(content)).map { " alt=\"\($0)\"" } ?? ""
+            let src =
+                sanitizedAttribute(named: "src", in: String(content)).map { " src=\"\($0)\"" } ?? ""
+            let alt =
+                sanitizedAttribute(named: "alt", in: String(content)).map { " alt=\"\($0)\"" } ?? ""
             return "<img\(src)\(alt)>"
         default:
             return "<\(name)>"
@@ -604,9 +623,12 @@ private enum SanitizedHTMLRenderer {
     }
 
     private static func sanitizedAttribute(named name: String, in content: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: #"\#(name)\s*=\s*["']([^"']*)["']"#, options: .caseInsensitive),
-              let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..<content.endIndex, in: content)),
-              let range = Range(match.range(at: 1), in: content)
+        guard
+            let regex = try? NSRegularExpression(
+                pattern: #"\#(name)\s*=\s*["']([^"']*)["']"#, options: .caseInsensitive),
+            let match = regex.firstMatch(
+                in: content, range: NSRange(content.startIndex..<content.endIndex, in: content)),
+            let range = Range(match.range(at: 1), in: content)
         else { return nil }
         let value = String(content[range]).trimmingCharacters(in: .whitespacesAndNewlines)
         let lowercased = value.lowercased()

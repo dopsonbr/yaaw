@@ -1,5 +1,5 @@
-import YAAWKit
 import Foundation
+import YAAWKit
 
 @main
 struct YAAWE2E {
@@ -15,7 +15,8 @@ private struct E2EOptions {
 
     init(arguments: [String]) throws {
         guard let artifactsIndex = arguments.firstIndex(of: "--artifacts"),
-              artifactsIndex + 1 < arguments.count else {
+            artifactsIndex + 1 < arguments.count
+        else {
             throw E2EFailure("usage: YAAWE2E --artifacts <directory>")
         }
         artifactsDirectory = URL(fileURLWithPath: arguments[artifactsIndex + 1], isDirectory: true)
@@ -48,14 +49,21 @@ private final class E2ERunner {
             try fileManager.removeItem(at: artifactsDirectory)
         }
         try fileManager.createDirectory(at: paths.binDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: paths.missingToolBinDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: paths.workspaceDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: paths.projectDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: paths.missingToolBinDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: paths.workspaceDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: paths.projectDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: paths.captureDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: paths.activityDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: paths.helperBinDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: paths.screenshotDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: paths.captureDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: paths.activityDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: paths.helperBinDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: paths.screenshotDirectory, withIntermediateDirectories: true)
     }
 
     private func writeFixtureProject() throws {
@@ -114,123 +122,123 @@ private final class E2ERunner {
         try writeExecutable(
             named: "codex",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            if [[ "${YAAW_E2E_KEYBOARD_PROBE:-}" == "1" ]]; then
-              printf 'YAAW_KEYBOARD_PROBE_READY\\n'
-              IFS= read -r line
-              printf 'YAAW_ENTER_RECEIVED=%s\\n' "$line"
-              sleep 1
-              exit 0
-            fi
-            if [[ "${1:-}" == "resume" ]]; then
-              printf 'YAAW_SESSION_ID=%s\\n' "$2"
-              printf 'YAAW_SESSION_NAME=Codex Resumed %s\\n' "$2"
-            else
-              printf 'YAAW_SESSION_ID=codex-e2e-001\\n'
-              printf 'YAAW_SESSION_NAME=Codex E2E Session\\n'
-            fi
-            if [[ -t 1 ]]; then
-              while true; do sleep 1; done
-            fi
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [[ "${YAAW_E2E_KEYBOARD_PROBE:-}" == "1" ]]; then
+                  printf 'YAAW_KEYBOARD_PROBE_READY\\n'
+                  IFS= read -r line
+                  printf 'YAAW_ENTER_RECEIVED=%s\\n' "$line"
+                  sleep 1
+                  exit 0
+                fi
+                if [[ "${1:-}" == "resume" ]]; then
+                  printf 'YAAW_SESSION_ID=%s\\n' "$2"
+                  printf 'YAAW_SESSION_NAME=Codex Resumed %s\\n' "$2"
+                else
+                  printf 'YAAW_SESSION_ID=codex-e2e-001\\n'
+                  printf 'YAAW_SESSION_NAME=Codex E2E Session\\n'
+                fi
+                if [[ -t 1 ]]; then
+                  while true; do sleep 1; done
+                fi
+                """
         )
         try writeExecutable(
             named: "claude",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            if [[ "${1:-}" == "--resume" ]]; then
-              printf 'YAAW_SESSION_ID=%s\\n' "$2"
-              printf 'YAAW_SESSION_NAME=Claude Resumed %s\\n' "$2"
-            else
-              printf 'YAAW_SESSION_ID=claude-e2e-001\\n'
-              printf 'YAAW_SESSION_NAME=Claude E2E Session\\n'
-            fi
-            if [[ -t 1 ]]; then
-              while true; do sleep 1; done
-            fi
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [[ "${1:-}" == "--resume" ]]; then
+                  printf 'YAAW_SESSION_ID=%s\\n' "$2"
+                  printf 'YAAW_SESSION_NAME=Claude Resumed %s\\n' "$2"
+                else
+                  printf 'YAAW_SESSION_ID=claude-e2e-001\\n'
+                  printf 'YAAW_SESSION_NAME=Claude E2E Session\\n'
+                fi
+                if [[ -t 1 ]]; then
+                  while true; do sleep 1; done
+                fi
+                """
         )
         try writeExecutable(
             named: "opencode",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            if [[ "${1:-}" == "--session" ]]; then
-              printf 'YAAW_SESSION_ID=%s\\n' "$2"
-              printf 'YAAW_SESSION_NAME=OpenCode Resumed %s\\n' "$2"
-            else
-              printf 'YAAW_SESSION_ID=opencode-e2e-001\\n'
-              printf 'YAAW_SESSION_NAME=OpenCode E2E Session\\n'
-            fi
-            if [[ -t 1 ]]; then
-              while true; do sleep 1; done
-            fi
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [[ "${1:-}" == "--session" ]]; then
+                  printf 'YAAW_SESSION_ID=%s\\n' "$2"
+                  printf 'YAAW_SESSION_NAME=OpenCode Resumed %s\\n' "$2"
+                else
+                  printf 'YAAW_SESSION_ID=opencode-e2e-001\\n'
+                  printf 'YAAW_SESSION_NAME=OpenCode E2E Session\\n'
+                fi
+                if [[ -t 1 ]]; then
+                  while true; do sleep 1; done
+                fi
+                """
         )
         try writeExecutable(
             named: "copilot",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            if [[ "${1:-}" == --resume=* ]]; then
-              session="${1#--resume=}"
-              printf 'YAAW_SESSION_ID=%s\\n' "$session"
-              printf 'YAAW_SESSION_NAME=Copilot Resumed %s\\n' "$session"
-            else
-              printf 'YAAW_SESSION_ID=copilot-e2e-001\\n'
-              printf 'YAAW_SESSION_NAME=Copilot E2E Session\\n'
-            fi
-            if [[ -t 1 ]]; then
-              while true; do sleep 1; done
-            fi
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [[ "${1:-}" == --resume=* ]]; then
+                  session="${1#--resume=}"
+                  printf 'YAAW_SESSION_ID=%s\\n' "$session"
+                  printf 'YAAW_SESSION_NAME=Copilot Resumed %s\\n' "$session"
+                else
+                  printf 'YAAW_SESSION_ID=copilot-e2e-001\\n'
+                  printf 'YAAW_SESSION_NAME=Copilot E2E Session\\n'
+                fi
+                if [[ -t 1 ]]; then
+                  while true; do sleep 1; done
+                fi
+                """
         )
         try writeExecutable(
             named: "nvim",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            printf 'NVIM_DOUBLE %s\\n' "${*:-}"
-            sleep 1
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf 'NVIM_DOUBLE %s\\n' "${*:-}"
+                sleep 1
+                """
         )
         try writeExecutable(
             named: "lazygit",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            printf 'LAZYGIT_DOUBLE\\n'
-            sleep 1
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf 'LAZYGIT_DOUBLE\\n'
+                sleep 1
+                """
         )
         try writeExecutable(
             named: "vim",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            printf 'VIM_DOUBLE %s\\n' "${*:-}"
-            sleep 1
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf 'VIM_DOUBLE %s\\n' "${*:-}"
+                sleep 1
+                """
         )
         try writeExecutable(
             named: "vi",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            printf 'VI_DOUBLE %s\\n' "${*:-}"
-            sleep 1
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf 'VI_DOUBLE %s\\n' "${*:-}"
+                sleep 1
+                """
         )
         try writeExecutable(
             named: "git",
             contents: """
-            #!/usr/bin/env bash
-            set -euo pipefail
-            printf 'GIT_DOUBLE %s\\n' "${*:-}"
-            sleep 1
-            """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf 'GIT_DOUBLE %s\\n' "${*:-}"
+                sleep 1
+                """
         )
         for tool in ["codex", "claude", "opencode", "copilot", "nvim", "vim", "vi", "git"] {
             let source = paths.binDirectory.appendingPathComponent(tool)
@@ -253,7 +261,9 @@ private final class E2ERunner {
         let model = try makeModel(databasePath: databasePath)
         let settingsText = try String(contentsOf: paths.configPath, encoding: .utf8)
         try assert(settingsText.contains("externalOpen:"), "settings YAML exposes externalOpen")
-        try assert(settingsText.contains("default: zed"), "settings YAML exposes the default external-open destination")
+        try assert(
+            settingsText.contains("default: zed"),
+            "settings YAML exposes the default external-open destination")
         let detectedExternalTools: Set<ExternalOpenToolID> = [.vscode, .finder]
         try assert(
             ExternalOpenToolResolver.defaultTool(
@@ -262,17 +272,25 @@ private final class E2ERunner {
             ) == .vscode,
             "external-open default falls back to first detected preferred destination"
         )
-        try assert(model.selectedProject?.displayName == "E2E Sandbox", "initial launch selected the seeded sandbox project")
-        try assert(model.selectedProject?.rootDirectory == paths.workspaceDirectory, "initial launch used an E2E sandbox root")
         try assert(
-            model.selectedExternalOpenDirectoryTarget == ExternalOpenTarget(url: paths.workspaceDirectory, kind: .directory),
+            model.selectedProject?.displayName == "E2E Sandbox",
+            "initial launch selected the seeded sandbox project")
+        try assert(
+            model.selectedProject?.rootDirectory == paths.workspaceDirectory,
+            "initial launch used an E2E sandbox root")
+        try assert(
+            model.selectedExternalOpenDirectoryTarget
+                == ExternalOpenTarget(url: paths.workspaceDirectory, kind: .directory),
             "external-open target falls back to selected project when no thread is selected"
         )
 
         try model.createProject(displayName: "E2E Project", rootDirectory: paths.projectDirectory)
-        try assert(model.selectedProject?.rootDirectory == paths.projectDirectory, "project creation selected the fixture project")
         try assert(
-            model.selectedExternalOpenDirectoryTarget == ExternalOpenTarget(url: paths.projectDirectory, kind: .directory),
+            model.selectedProject?.rootDirectory == paths.projectDirectory,
+            "project creation selected the fixture project")
+        try assert(
+            model.selectedExternalOpenDirectoryTarget
+                == ExternalOpenTarget(url: paths.projectDirectory, kind: .directory),
             "external-open target follows the selected project before thread creation"
         )
         let e2eProjectID = try unwrap(model.selectedProject?.id, "fixture project id exists")
@@ -285,27 +303,41 @@ private final class E2ERunner {
             agentCLI: .codex,
             displayName: "  Sandbox Named Thread  "
         )
-        try assert(model.selectedProjectID == sandboxProjectID, "project-row thread creation selected the target project")
-        try assert(model.selectedThread?.displayName == "Sandbox Named Thread", "project-row thread creation accepted optional name")
-        try assert(model.activeThreads(for: sandboxProjectID).contains { $0.id == sandboxThreadID }, "targeted thread appeared under its project")
-        try assert(model.isProjectExpanded(sandboxProjectID), "targeted project expanded after creating a thread")
+        try assert(
+            model.selectedProjectID == sandboxProjectID,
+            "project-row thread creation selected the target project")
+        try assert(
+            model.selectedThread?.displayName == "Sandbox Named Thread",
+            "project-row thread creation accepted optional name")
+        try assert(
+            model.activeThreads(for: sandboxProjectID).contains { $0.id == sandboxThreadID },
+            "targeted thread appeared under its project")
+        try assert(
+            model.isProjectExpanded(sandboxProjectID),
+            "targeted project expanded after creating a thread")
         model.toggleProjectPinned(id: e2eProjectID)
         try assert(model.projects.first?.id == e2eProjectID, "pinned project sorted first")
         model.toggleThreadPinned(id: sandboxThreadID)
-        try assert(model.activeThreads(for: sandboxProjectID).first?.id == sandboxThreadID, "pinned thread sorted first")
+        try assert(
+            model.activeThreads(for: sandboxProjectID).first?.id == sandboxThreadID,
+            "pinned thread sorted first")
         model.selectProject(id: e2eProjectID)
 
         let codexThreadID = try model.createThread(agentCLI: .codex)
-        try assert(model.selectedThread?.agentCLI == .codex, "codex choice created a codex-backed thread")
         try assert(
-            model.selectedExternalOpenDirectoryTarget == ExternalOpenTarget(url: paths.projectDirectory, kind: .directory),
+            model.selectedThread?.agentCLI == .codex, "codex choice created a codex-backed thread")
+        try assert(
+            model.selectedExternalOpenDirectoryTarget
+                == ExternalOpenTarget(url: paths.projectDirectory, kind: .directory),
             "external-open target follows the selected thread working directory"
         )
         model.recordAgentCLIOutput(
             threadID: codexThreadID,
             output: "YAAW_SESSION_ID=codex-e2e-001\nYAAW_SESSION_NAME=Codex E2E Session\n"
         )
-        try assert(model.selectedThread?.displayName == "Codex E2E Session", "codex CLI metadata renamed the thread")
+        try assert(
+            model.selectedThread?.displayName == "Codex E2E Session",
+            "codex CLI metadata renamed the thread")
         try runYAAWNotify(
             threadID: codexThreadID,
             status: "needs-input",
@@ -321,10 +353,15 @@ private final class E2ERunner {
             model.threadActivity(for: codexThreadID).preview == "Review fixture command",
             "helper notification preview was captured"
         )
-        try assert(model.threadActivity(for: codexThreadID).isUnread, "helper notification marked codex thread unread")
+        try assert(
+            model.threadActivity(for: codexThreadID).isUnread,
+            "helper notification marked codex thread unread")
         model.recordAgentTerminalFocus(threadID: codexThreadID, focused: true)
-        try assert(!model.threadActivity(for: codexThreadID).isUnread, "focused codex terminal cleared unread notification")
-        model.recordAgentTerminalNotification(threadID: codexThreadID, title: "Task complete", body: "Fixture tests passed")
+        try assert(
+            !model.threadActivity(for: codexThreadID).isUnread,
+            "focused codex terminal cleared unread notification")
+        model.recordAgentTerminalNotification(
+            threadID: codexThreadID, title: "Task complete", body: "Fixture tests passed")
         try assert(
             model.threadActivity(for: codexThreadID).status == .complete,
             "OSC-style terminal notification marked codex thread complete"
@@ -335,27 +372,40 @@ private final class E2ERunner {
             threadID: claudeThreadID,
             output: "YAAW_SESSION_ID=claude-e2e-001\nYAAW_SESSION_NAME=Claude E2E Session\n"
         )
-        try assert(model.selectedThread?.displayName == "Claude E2E Session", "claude CLI metadata renamed the thread")
+        try assert(
+            model.selectedThread?.displayName == "Claude E2E Session",
+            "claude CLI metadata renamed the thread")
 
         let opencodeThreadID = try model.createThread(agentCLI: .opencode)
         model.recordAgentCLIOutput(
             threadID: opencodeThreadID,
             output: "YAAW_SESSION_ID=opencode-e2e-001\nYAAW_SESSION_NAME=OpenCode E2E Session\n"
         )
-        try assert(model.selectedThread?.displayName == "OpenCode E2E Session", "opencode CLI metadata renamed the thread")
+        try assert(
+            model.selectedThread?.displayName == "OpenCode E2E Session",
+            "opencode CLI metadata renamed the thread")
 
         let copilotThreadID = try model.createThread(agentCLI: .copilot)
         model.recordAgentCLIOutput(
             threadID: copilotThreadID,
             output: "YAAW_SESSION_ID=copilot-e2e-001\nYAAW_SESSION_NAME=Copilot E2E Session\n"
         )
-        try assert(model.selectedThread?.displayName == "Copilot E2E Session", "copilot CLI metadata renamed the thread")
+        try assert(
+            model.selectedThread?.displayName == "Copilot E2E Session",
+            "copilot CLI metadata renamed the thread")
 
         model.selectThread(id: codexThreadID)
-        model.reloadConfiguration(YAAWConfiguration(theme: ThemeSettings(active: "light-high-contrast")))
-        try assert(model.configuration.themeName == "light-high-contrast", "settings reload applied selected built-in theme")
-        try assert(model.configuration.resolvedTheme.group == .highContrast, "selected theme resolved to high contrast group")
-        try assert(model.selectedThread?.id == codexThreadID, "theme settings reload preserved selected thread")
+        model.reloadConfiguration(
+            YAAWConfiguration(theme: ThemeSettings(active: "light-high-contrast")))
+        try assert(
+            model.configuration.themeName == "light-high-contrast",
+            "settings reload applied selected built-in theme")
+        try assert(
+            model.configuration.resolvedTheme.group == .highContrast,
+            "selected theme resolved to high contrast group")
+        try assert(
+            model.selectedThread?.id == codexThreadID,
+            "theme settings reload preserved selected thread")
 
         model.refreshSelectedFileBrowser()
         try waitUntil("file index contains README.md") {
@@ -372,31 +422,51 @@ private final class E2ERunner {
             model.fileBrowserState.visibleEntries.first?.relativePath == "src/App/RootView.swift",
             "fuzzy search preferred RootView.swift"
         )
-        try assert(model.openFileInBrowser(relativePath: "index.html"), "HTML fixture opened in Browser mode")
-        try assert(model.selectedRightPanelMode == .browser, "browser preview selected Browser mode")
-        try assert(model.selectedRightPanelTab.relativePath == "index.html", "browser tab tracked HTML relative path")
+        try assert(
+            model.openFileInBrowser(relativePath: "index.html"),
+            "HTML fixture opened in Browser mode")
+        try assert(
+            model.selectedRightPanelMode == .browser, "browser preview selected Browser mode")
+        try assert(
+            model.selectedRightPanelTab.relativePath == "index.html",
+            "browser tab tracked HTML relative path")
         try assert(
             model.selectedRightPanelTab.urlString
-                == paths.projectDirectory.appendingPathComponent("index.html").standardizedFileURL.absoluteString,
+                == paths.projectDirectory.appendingPathComponent("index.html").standardizedFileURL
+                .absoluteString,
             "browser tab loaded HTML fixture file URL"
         )
-        try assert(model.openFileInBrowser(relativePath: "diagram.svg"), "SVG fixture opened in Browser mode")
-        try assert(model.selectedRightPanelTab.relativePath == "diagram.svg", "browser tab tracked SVG relative path")
-        let browserTabIDs = model.selectedRightPanelState.tabs.filter { $0.kind == .browser }.map(\.id)
         try assert(
-            browserTabIDs.contains(RightPanelTab.browserTabID(urlString: nil, relativePath: "index.html"))
-                && browserTabIDs.contains(RightPanelTab.browserTabID(urlString: nil, relativePath: "diagram.svg")),
+            model.openFileInBrowser(relativePath: "diagram.svg"),
+            "SVG fixture opened in Browser mode")
+        try assert(
+            model.selectedRightPanelTab.relativePath == "diagram.svg",
+            "browser tab tracked SVG relative path")
+        let browserTabIDs = model.selectedRightPanelState.tabs.filter { $0.kind == .browser }.map(
+            \.id)
+        try assert(
+            browserTabIDs.contains(
+                RightPanelTab.browserTabID(urlString: nil, relativePath: "index.html"))
+                && browserTabIDs.contains(
+                    RightPanelTab.browserTabID(urlString: nil, relativePath: "diagram.svg")),
             "browser tabs included HTML and SVG preview files"
         )
-        try assert(model.openFileInBrowser(relativePath: "README.md"), "Markdown fixture opened in Browser mode")
-        try assert(model.selectedRightPanelTab.relativePath == "README.md", "browser tab tracked Markdown relative path")
+        try assert(
+            model.openFileInBrowser(relativePath: "README.md"),
+            "Markdown fixture opened in Browser mode")
+        try assert(
+            model.selectedRightPanelTab.relativePath == "README.md",
+            "browser tab tracked Markdown relative path")
         model.openBrowserTab(urlString: "example.com")
-        try assert(model.selectedRightPanelTab.urlString == "https://example.com", "typed browser URL normalized")
+        try assert(
+            model.selectedRightPanelTab.urlString == "https://example.com",
+            "typed browser URL normalized")
         model.openFileInNvim(relativePath: "src/App/RootView.swift")
         try assert(
             model.externalOpenFileTarget(relativePath: "src/App/RootView.swift")
                 == ExternalOpenTarget(
-                    url: paths.projectDirectory.appendingPathComponent("src/App/RootView.swift").standardizedFileURL,
+                    url: paths.projectDirectory.appendingPathComponent("src/App/RootView.swift")
+                        .standardizedFileURL,
                     kind: .file
                 ),
             "external-open file target uses the selected thread working directory"
@@ -408,7 +478,10 @@ private final class E2ERunner {
         let nvimCommandSuffix = Array(nvimRequest.command.suffix(2))
         try assert(
             nvimCommandSuffix == ["nvim", "src/App/RootView.swift"]
-                || nvimCommandSuffix == [paths.binDirectory.appendingPathComponent("nvim").path, "src/App/RootView.swift"],
+                || nvimCommandSuffix == [
+                    paths.binDirectory.appendingPathComponent("nvim").path,
+                    "src/App/RootView.swift",
+                ],
             "nvim request included the selected relative path"
         )
 
@@ -417,7 +490,8 @@ private final class E2ERunner {
             model.terminalLaunchRequest(for: .lazygit(threadID: codexThreadID)),
             "git request exists"
         )
-        try assert(gitRequest.command.last?.hasSuffix("/lazygit") == true, "git mode launched lazygit")
+        try assert(
+            gitRequest.command.last?.hasSuffix("/lazygit") == true, "git mode launched lazygit")
         try assertMissingLazygitFallsBackToGitDiff()
         try assertMissingNvimFallsBackToVimThenVi()
         try assertImagePastePolicyUsesNativeShortcut()
@@ -430,7 +504,9 @@ private final class E2ERunner {
         model.toggleRightPanelCollapsed()
         model.toggleRightPanelCollapsed()
         model.archiveThread(id: claudeThreadID)
-        try assert(model.archivedThreadsForSelectedProject.contains { $0.id == claudeThreadID }, "archive moved the claude thread")
+        try assert(
+            model.archivedThreadsForSelectedProject.contains { $0.id == claudeThreadID },
+            "archive moved the claude thread")
 
         let service = makeAgentCLIService()
         let freshCodexMetadata = try service.captureMetadataByRunningCLI(
@@ -438,7 +514,9 @@ private final class E2ERunner {
             workingDirectory: paths.projectDirectory,
             environment: environment
         )
-        try assert(freshCodexMetadata.identity == "codex-e2e-001", "codex command double reported deterministic identity")
+        try assert(
+            freshCodexMetadata.identity == "codex-e2e-001",
+            "codex command double reported deterministic identity")
         let resumedClaudeMetadata = try service.captureMetadataByRunningCLI(
             kind: .claude,
             resumeIdentity: "claude-e2e-001",
@@ -471,15 +549,24 @@ private final class E2ERunner {
         )
 
         let reloadedModel = try makeModel(databasePath: databasePath)
-        try assert(reloadedModel.selectedThread?.id == codexThreadID, "relaunch preserved selected codex thread")
-        try assert(reloadedModel.selectedThread?.sessionIdentity == "codex-e2e-001", "relaunch preserved codex session identity")
-        try assert(reloadedModel.layoutState.sidebarWidth == 320, "relaunch preserved resized sidebar width")
-        try assert(reloadedModel.layoutState.rightPanelWidth == 560, "relaunch preserved resized right panel width")
+        try assert(
+            reloadedModel.selectedThread?.id == codexThreadID,
+            "relaunch preserved selected codex thread")
+        try assert(
+            reloadedModel.selectedThread?.sessionIdentity == "codex-e2e-001",
+            "relaunch preserved codex session identity")
+        try assert(
+            reloadedModel.layoutState.sidebarWidth == 320,
+            "relaunch preserved resized sidebar width")
+        try assert(
+            reloadedModel.layoutState.rightPanelWidth == 560,
+            "relaunch preserved resized right panel width")
         try assert(
             reloadedModel.layoutState.globalTerminalHeight == 240,
             "relaunch preserved resized bottom terminal height"
         )
-        let resumedRequest = try unwrap(reloadedModel.activateSelectedProjectTerminal(), "resumed project terminal exists")
+        let resumedRequest = try unwrap(
+            reloadedModel.activateSelectedProjectTerminal(), "resumed project terminal exists")
         let resumedCommand = resumedRequest.request.command.joined(separator: " ")
         try assert(
             resumedCommand.contains("resume")
@@ -496,7 +583,8 @@ private final class E2ERunner {
 
     private func writeVisualStateDatabases(selectedThreadID: UUID) throws {
         for state in VisualState.allCases {
-            let databasePath = paths.stateDirectory.appendingPathComponent("\(state.rawValue).sqlite")
+            let databasePath = paths.stateDirectory.appendingPathComponent(
+                "\(state.rawValue).sqlite")
             let model = try makeFixtureOnlyModel(databasePath: databasePath)
             if state == .projectCreation {
                 continue
@@ -509,7 +597,8 @@ private final class E2ERunner {
             if state == .missingDirectory {
                 let missingRoot = paths.missingDirectory
                 try fileManager.createDirectory(at: missingRoot, withIntermediateDirectories: true)
-                try model.createProject(displayName: "Missing Directory Project", rootDirectory: missingRoot)
+                try model.createProject(
+                    displayName: "Missing Directory Project", rootDirectory: missingRoot)
                 _ = try model.createThread(agentCLI: .codex)
                 try fileManager.removeItem(at: missingRoot)
                 continue
@@ -520,7 +609,9 @@ private final class E2ERunner {
             case .files:
                 model.refreshSelectedFileBrowser()
                 try waitUntil("visual files state indexed README.md") {
-                    model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" }
+                    model.fileBrowserState.visibleEntries.contains {
+                        $0.relativePath == "README.md"
+                    }
                 }
             case .nvim:
                 model.openFileInNvim(relativePath: "README.md")
@@ -550,7 +641,8 @@ private final class E2ERunner {
         let store = try makeSandboxSeededStore(databasePath: databasePath)
         let configuration = YAMLConfigurationStore(path: paths.configPath).load()
         var missingToolEnvironment = environment
-        missingToolEnvironment["PATH"] = paths.missingToolBinDirectory.path + ":/usr/bin:/bin:/usr/sbin:/sbin"
+        missingToolEnvironment["PATH"] =
+            paths.missingToolBinDirectory.path + ":/usr/bin:/bin:/usr/sbin:/sbin"
         let model = AppModel(
             store: store,
             agentCLIBindings: AgentCLISessionBindingService(
@@ -564,13 +656,19 @@ private final class E2ERunner {
             configuration: configuration,
             environment: missingToolEnvironment
         )
-        try model.createProject(displayName: "Missing Tool Project", rootDirectory: paths.projectDirectory)
+        try model.createProject(
+            displayName: "Missing Tool Project", rootDirectory: paths.projectDirectory)
         let threadID = try model.createThread(agentCLI: .codex)
         model.selectRightPanelMode(.git)
-        let request = try unwrap(model.terminalLaunchRequest(for: .lazygit(threadID: threadID)), "missing lazygit request")
+        let request = try unwrap(
+            model.terminalLaunchRequest(for: .lazygit(threadID: threadID)),
+            "missing lazygit request")
         try assert(
             request.command == ["git", "--no-pager", "diff"]
-                || request.command == [paths.missingToolBinDirectory.appendingPathComponent("git").path, "--no-pager", "diff"]
+                || request.command == [
+                    paths.missingToolBinDirectory.appendingPathComponent("git").path, "--no-pager",
+                    "diff",
+                ]
                 || request.command == ["/usr/bin/git", "--no-pager", "diff"],
             "missing lazygit fell back to git --no-pager diff"
         )
@@ -598,20 +696,28 @@ private final class E2ERunner {
             configuration: configuration,
             environment: missingToolEnvironment
         )
-        try model.createProject(displayName: "Missing nvim Project", rootDirectory: paths.projectDirectory)
+        try model.createProject(
+            displayName: "Missing nvim Project", rootDirectory: paths.projectDirectory)
         let threadID = try model.createThread(agentCLI: .codex)
         model.openFileInNvim(relativePath: "README.md")
-        let request = try unwrap(model.terminalLaunchRequest(for: .nvim(threadID: threadID)), "missing nvim request")
+        let request = try unwrap(
+            model.terminalLaunchRequest(for: .nvim(threadID: threadID)), "missing nvim request")
         try assert(
-            Array(request.command.suffix(2)) == [paths.missingToolBinDirectory.appendingPathComponent("vim").path, "README.md"],
+            Array(request.command.suffix(2)) == [
+                paths.missingToolBinDirectory.appendingPathComponent("vim").path, "README.md",
+            ],
             "missing nvim fell back to vim"
         )
 
         let vimPath = paths.missingToolBinDirectory.appendingPathComponent("vim")
         try fileManager.removeItem(at: vimPath)
-        let viRequest = try unwrap(model.terminalLaunchRequest(for: .nvim(threadID: threadID)), "missing nvim and vim request")
+        let viRequest = try unwrap(
+            model.terminalLaunchRequest(for: .nvim(threadID: threadID)),
+            "missing nvim and vim request")
         try assert(
-            Array(viRequest.command.suffix(2)) == [paths.missingToolBinDirectory.appendingPathComponent("vi").path, "README.md"],
+            Array(viRequest.command.suffix(2)) == [
+                paths.missingToolBinDirectory.appendingPathComponent("vi").path, "README.md",
+            ],
             "missing nvim and vim fell back to vi"
         )
     }
@@ -625,24 +731,37 @@ private final class E2ERunner {
                 text == TerminalImagePastePolicy.nativeAttachmentShortcutText,
                 "\(cli.displayName) image paste uses native attachment shortcut"
             )
-            try assert(!text.contains("Attached image:"), "\(cli.displayName) image paste avoids path formatter")
-            try assert(!text.contains(paths.root.path), "\(cli.displayName) image paste does not expose sandbox path")
+            try assert(
+                !text.contains("Attached image:"),
+                "\(cli.displayName) image paste avoids path formatter")
+            try assert(
+                !text.contains(paths.root.path),
+                "\(cli.displayName) image paste does not expose sandbox path")
         }
     }
 
     private func assertMissingDirectoryRecovery() throws {
-        let databasePath = paths.stateDirectory.appendingPathComponent("missing-directory-recovery.sqlite")
-        let recoverableRoot = paths.root.appendingPathComponent("recoverable-project", isDirectory: true)
+        let databasePath = paths.stateDirectory.appendingPathComponent(
+            "missing-directory-recovery.sqlite")
+        let recoverableRoot = paths.root.appendingPathComponent(
+            "recoverable-project", isDirectory: true)
         try fileManager.createDirectory(at: recoverableRoot, withIntermediateDirectories: true)
         let model = try makeModel(databasePath: databasePath)
         try model.createProject(displayName: "Recoverable Project", rootDirectory: recoverableRoot)
         let threadID = try model.createThread(agentCLI: .codex)
         try fileManager.removeItem(at: recoverableRoot)
 
-        try assert(model.selectedThreadWorkingDirectoryState == .missing(path: recoverableRoot.path), "deleted directory reported missing")
-        try assert(model.terminalLaunchRequest(for: .project(threadID: threadID)) == nil, "missing directory blocked terminal launch")
+        try assert(
+            model.selectedThreadWorkingDirectoryState == .missing(path: recoverableRoot.path),
+            "deleted directory reported missing")
+        try assert(
+            model.terminalLaunchRequest(for: .project(threadID: threadID)) == nil,
+            "missing directory blocked terminal launch")
         model.refreshSelectedFileBrowser()
-        try assert(model.fileBrowserState.errorMessage == "Missing working directory: \(recoverableRoot.path)", "missing directory surfaced in file browser")
+        try assert(
+            model.fileBrowserState.errorMessage
+                == "Missing working directory: \(recoverableRoot.path)",
+            "missing directory surfaced in file browser")
 
         try fileManager.createDirectory(at: recoverableRoot, withIntermediateDirectories: true)
         try "restored\n".write(
@@ -652,7 +771,8 @@ private final class E2ERunner {
         )
         let reloadedModel = try makeModel(databasePath: databasePath)
         try assert(
-            reloadedModel.selectedThreadWorkingDirectoryState == .available(path: recoverableRoot.path),
+            reloadedModel.selectedThreadWorkingDirectoryState
+                == .available(path: recoverableRoot.path),
             "restored directory reported available after reload"
         )
         try assert(
@@ -687,29 +807,30 @@ private final class E2ERunner {
 
     private func protectedUserDirectories() -> [String] {
         let home = fileManager.homeDirectoryForCurrentUser
-        return [home.standardizedFileURL.path] + [
-            "Desktop",
-            "Documents",
-            "Downloads",
-            "Music",
-            "Movies",
-            "Pictures"
-        ].map { home.appendingPathComponent($0, isDirectory: true).standardizedFileURL.path }
+        return [home.standardizedFileURL.path]
+            + [
+                "Desktop",
+                "Documents",
+                "Downloads",
+                "Music",
+                "Movies",
+                "Pictures",
+            ].map { home.appendingPathComponent($0, isDirectory: true).standardizedFileURL.path }
     }
 
     private func writeManifest(focusedBehavior: FocusedBehaviorResult) throws {
         let manifest = """
-        YAAW E2E artifacts
+            YAAW E2E artifacts
 
-        focused_behavior_database=\(focusedBehavior.databasePath.path)
-        codex_thread_id=\(focusedBehavior.codexThreadID.uuidString)
-        claude_thread_id=\(focusedBehavior.claudeThreadID.uuidString)
-        fixture_project=\(paths.projectDirectory.path)
-        sandbox_workspace=\(paths.workspaceDirectory.path)
-        fixture_bin=\(paths.binDirectory.path)
-        config_path=\(paths.configPath.path)
-        screenshots=\(paths.screenshotDirectory.path)
-        """
+            focused_behavior_database=\(focusedBehavior.databasePath.path)
+            codex_thread_id=\(focusedBehavior.codexThreadID.uuidString)
+            claude_thread_id=\(focusedBehavior.claudeThreadID.uuidString)
+            fixture_project=\(paths.projectDirectory.path)
+            sandbox_workspace=\(paths.workspaceDirectory.path)
+            fixture_bin=\(paths.binDirectory.path)
+            config_path=\(paths.configPath.path)
+            screenshots=\(paths.screenshotDirectory.path)
+            """
         try manifest.write(
             to: artifactsDirectory.appendingPathComponent("manifest.txt"),
             atomically: true,
@@ -745,13 +866,14 @@ private final class E2ERunner {
             )
             _ = makeAgentCLIService().terminalCommand(for: thread)
         }
-        let eventLogURL = paths.activityDirectory.appendingPathComponent("\(threadID.uuidString).ndjson")
+        let eventLogURL = paths.activityDirectory.appendingPathComponent(
+            "\(threadID.uuidString).ndjson")
         let process = Process()
         process.executableURL = helperURL
         process.arguments = ["--status", status, "--title", title, "--body", body]
         process.environment = [
             "YAAW_THREAD_ID": threadID.uuidString,
-            "YAAW_EVENT_LOG": eventLogURL.path
+            "YAAW_EVENT_LOG": eventLogURL.path,
         ]
         process.standardOutput = Pipe()
         try process.run()
@@ -846,14 +968,20 @@ private struct E2EPaths {
     let root: URL
 
     var binDirectory: URL { root.appendingPathComponent("bin", isDirectory: true) }
-    var missingToolBinDirectory: URL { root.appendingPathComponent("bin-missing-lazygit", isDirectory: true) }
+    var missingToolBinDirectory: URL {
+        root.appendingPathComponent("bin-missing-lazygit", isDirectory: true)
+    }
     var captureDirectory: URL { root.appendingPathComponent("captures", isDirectory: true) }
     var activityDirectory: URL { root.appendingPathComponent("activity", isDirectory: true) }
     var helperBinDirectory: URL { root.appendingPathComponent("helper-bin", isDirectory: true) }
     var configPath: URL { root.appendingPathComponent("config/settings.yaml") }
-    var workspaceDirectory: URL { root.appendingPathComponent("sandbox-workspace", isDirectory: true) }
+    var workspaceDirectory: URL {
+        root.appendingPathComponent("sandbox-workspace", isDirectory: true)
+    }
     var projectDirectory: URL { root.appendingPathComponent("fixture-project", isDirectory: true) }
-    var missingDirectory: URL { root.appendingPathComponent("missing-directory-project", isDirectory: true) }
+    var missingDirectory: URL {
+        root.appendingPathComponent("missing-directory-project", isDirectory: true)
+    }
     var screenshotDirectory: URL { root.appendingPathComponent("screenshots", isDirectory: true) }
     var stateDirectory: URL { root.appendingPathComponent("states", isDirectory: true) }
 }
@@ -906,8 +1034,8 @@ private final class ImmediateFileIndexer: FileIndexing {
     }
 }
 
-private extension [String] {
-    func containsPath(_ candidate: String) -> Bool {
+extension [String] {
+    fileprivate func containsPath(_ candidate: String) -> Bool {
         let candidate = URL(fileURLWithPath: candidate).standardizedFileURL.path
         return contains { protected in
             candidate == protected || candidate.hasPrefix(protected + "/")

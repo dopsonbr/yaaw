@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import YAAWKit
 
 final class RightPanelModeTests: XCTestCase {
@@ -23,13 +24,16 @@ final class RightPanelModeTests: XCTestCase {
     }
 
     func testBrowserTabTitleUsesReadableShortURL() {
-        let tab = RightPanelTab.browser(urlString: "https://www.example.com/docs/user-guide/README.html?debug=true")
+        let tab = RightPanelTab.browser(
+            urlString: "https://www.example.com/docs/user-guide/README.html?debug=true")
 
         XCTAssertEqual(tab.title, "example.com/docs/user-guide")
     }
 
     func testBrowserTabTitleUsesPreviewFileName() {
-        let tab = RightPanelTab.browser(urlString: "file:///Users/example/project/docs/index.html", relativePath: "docs/index.html")
+        let tab = RightPanelTab.browser(
+            urlString: "file:///Users/example/project/docs/index.html",
+            relativePath: "docs/index.html")
 
         XCTAssertEqual(tab.title, "index.html")
     }

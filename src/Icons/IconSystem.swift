@@ -29,7 +29,8 @@ public struct BundledIconAsset: Equatable, Sendable {
     public let systemSymbolName: String
     public let draculaRole: DraculaRole
 
-    public init(id: String, pack: FileIconPack, systemSymbolName: String, draculaRole: DraculaRole) {
+    public init(id: String, pack: FileIconPack, systemSymbolName: String, draculaRole: DraculaRole)
+    {
         self.id = id
         self.pack = pack
         self.systemSymbolName = systemSymbolName
@@ -230,7 +231,9 @@ public struct FileIconManifest: Equatable, Sendable {
     public let licenseID: String
     public let entries: [FileIconManifestEntry]
 
-    public init(pack: FileIconPack, sourceName: String, licenseID: String, entries: [FileIconManifestEntry]) {
+    public init(
+        pack: FileIconPack, sourceName: String, licenseID: String, entries: [FileIconManifestEntry]
+    ) {
         self.pack = pack
         self.sourceName = sourceName
         self.licenseID = licenseID
@@ -246,32 +249,73 @@ public struct FileIconManifest: Equatable, Sendable {
         }
     }
 
-    private static func makeManifest(pack: FileIconPack, sourceName: String, licenseID: String) -> FileIconManifest {
+    private static func makeManifest(pack: FileIconPack, sourceName: String, licenseID: String)
+        -> FileIconManifest
+    {
         FileIconManifest(
             pack: pack,
             sourceName: sourceName,
             licenseID: licenseID,
             entries: [
-                entry("swift", pack, licenseID, exact: ["package.swift"], ext: ["swift"], symbol: "swift", role: .orange),
-                entry("typescript", pack, licenseID, compound: ["test.ts", "spec.ts", "config.ts", "d.ts"], ext: ["ts"], symbol: "chevron.left.forwardslash.chevron.right", role: .cyan),
-                entry("typescript-react", pack, licenseID, compound: ["test.tsx", "spec.tsx"], ext: ["tsx"], symbol: "chevron.left.forwardslash.chevron.right", role: .cyan),
-                entry("javascript", pack, licenseID, compound: ["test.js", "spec.js", "config.js"], ext: ["js", "mjs", "cjs"], symbol: "curlybraces", role: .yellow),
-                entry("json", pack, licenseID, exact: ["tsconfig.json"], ext: ["json"], symbol: "curlybraces.square", role: .yellow),
-                entry("css", pack, licenseID, compound: ["module.css"], ext: ["css"], symbol: "paintpalette", role: .pink),
-                entry("markdown", pack, licenseID, exact: ["readme", "readme.md", "agents.md"], ext: ["md", "markdown"], symbol: "doc.richtext", role: .purple),
-                entry("yaml", pack, licenseID, ext: ["yml", "yaml"], symbol: "slider.horizontal.3", role: .pink),
-                entry("shell", pack, licenseID, ext: ["sh", "bash", "zsh"], symbol: "terminal", role: .green),
-                entry("docker", pack, licenseID, exact: ["dockerfile", "docker-compose.yml", "docker-compose.yaml"], symbol: "shippingbox", role: .cyan),
-                entry("git", pack, licenseID, exact: [".gitignore", ".gitattributes", ".gitmodules"], folder: [".git", ".github"], symbol: "arrow.triangle.branch", role: .orange),
-                entry("package", pack, licenseID, exact: ["package.json", "package-lock.json", "bun.lockb", "pnpm-lock.yaml", "yarn.lock"], symbol: "cube.box", role: .yellow),
-                entry("docs-folder", pack, licenseID, folder: ["docs", "documentation"], symbol: "folder.badge.gearshape", role: .purple),
-                entry("src-folder", pack, licenseID, folder: ["src", "source", "sources"], symbol: "folder.badge.gearshape", role: .cyan),
-                entry("tests-folder", pack, licenseID, folder: ["test", "tests", "__tests__"], symbol: "folder.badge.questionmark", role: .green),
-                entry("assets-folder", pack, licenseID, folder: ["asset", "assets", "resources"], symbol: "folder.badge.plus", role: .pink),
-                entry("vscode-folder", pack, licenseID, folder: [".vscode"], symbol: "folder.badge.gearshape", role: .cyan),
+                entry(
+                    "swift", pack, licenseID, exact: ["package.swift"], ext: ["swift"],
+                    symbol: "swift", role: .orange),
+                entry(
+                    "typescript", pack, licenseID,
+                    compound: ["test.ts", "spec.ts", "config.ts", "d.ts"], ext: ["ts"],
+                    symbol: "chevron.left.forwardslash.chevron.right", role: .cyan),
+                entry(
+                    "typescript-react", pack, licenseID, compound: ["test.tsx", "spec.tsx"],
+                    ext: ["tsx"], symbol: "chevron.left.forwardslash.chevron.right", role: .cyan),
+                entry(
+                    "javascript", pack, licenseID, compound: ["test.js", "spec.js", "config.js"],
+                    ext: ["js", "mjs", "cjs"], symbol: "curlybraces", role: .yellow),
+                entry(
+                    "json", pack, licenseID, exact: ["tsconfig.json"], ext: ["json"],
+                    symbol: "curlybraces.square", role: .yellow),
+                entry(
+                    "css", pack, licenseID, compound: ["module.css"], ext: ["css"],
+                    symbol: "paintpalette", role: .pink),
+                entry(
+                    "markdown", pack, licenseID, exact: ["readme", "readme.md", "agents.md"],
+                    ext: ["md", "markdown"], symbol: "doc.richtext", role: .purple),
+                entry(
+                    "yaml", pack, licenseID, ext: ["yml", "yaml"], symbol: "slider.horizontal.3",
+                    role: .pink),
+                entry(
+                    "shell", pack, licenseID, ext: ["sh", "bash", "zsh"], symbol: "terminal",
+                    role: .green),
+                entry(
+                    "docker", pack, licenseID,
+                    exact: ["dockerfile", "docker-compose.yml", "docker-compose.yaml"],
+                    symbol: "shippingbox", role: .cyan),
+                entry(
+                    "git", pack, licenseID, exact: [".gitignore", ".gitattributes", ".gitmodules"],
+                    folder: [".git", ".github"], symbol: "arrow.triangle.branch", role: .orange),
+                entry(
+                    "package", pack, licenseID,
+                    exact: [
+                        "package.json", "package-lock.json", "bun.lockb", "pnpm-lock.yaml",
+                        "yarn.lock",
+                    ], symbol: "cube.box", role: .yellow),
+                entry(
+                    "docs-folder", pack, licenseID, folder: ["docs", "documentation"],
+                    symbol: "folder.badge.gearshape", role: .purple),
+                entry(
+                    "src-folder", pack, licenseID, folder: ["src", "source", "sources"],
+                    symbol: "folder.badge.gearshape", role: .cyan),
+                entry(
+                    "tests-folder", pack, licenseID, folder: ["test", "tests", "__tests__"],
+                    symbol: "folder.badge.questionmark", role: .green),
+                entry(
+                    "assets-folder", pack, licenseID, folder: ["asset", "assets", "resources"],
+                    symbol: "folder.badge.plus", role: .pink),
+                entry(
+                    "vscode-folder", pack, licenseID, folder: [".vscode"],
+                    symbol: "folder.badge.gearshape", role: .cyan),
                 entry("open-folder", pack, licenseID, symbol: "folder.fill", role: .cyan),
                 entry("folder", pack, licenseID, symbol: "folder", role: .cyan),
-                entry("file", pack, licenseID, symbol: "doc.text", role: .foreground)
+                entry("file", pack, licenseID, symbol: "doc.text", role: .foreground),
             ]
         )
     }
@@ -311,7 +355,8 @@ public struct FileIconResolver: Equatable, Sendable {
     }
 
     public func icon(for entry: FileBrowserEntry, isExpanded: Bool = false) -> AppIcon {
-        let normalizedPath = FilePathNormalizer.normalizedRelativePath(entry.relativePath).lowercased()
+        let normalizedPath = FilePathNormalizer.normalizedRelativePath(entry.relativePath)
+            .lowercased()
         let fileName = normalizedPath.split(separator: "/").last.map(String.init) ?? normalizedPath
 
         if entry.isDirectory {
@@ -340,7 +385,8 @@ public struct FileIconResolver: Equatable, Sendable {
     }
 
     private func fallbackAsset(_ id: String) -> AppIcon {
-        guard let match = manifest.entries.first(where: { $0.assetID == "\(pack.rawValue)/\(id)" }) else {
+        guard let match = manifest.entries.first(where: { $0.assetID == "\(pack.rawValue)/\(id)" })
+        else {
             return .systemSymbol(id == "file" ? "doc.text" : "folder")
         }
         return .bundledAsset(match.asset)

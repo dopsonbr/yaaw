@@ -1,6 +1,6 @@
-import YAAWKit
 import AppKit
 import SwiftUI
+import YAAWKit
 
 @main
 struct YAAWApp: App {
@@ -22,28 +22,33 @@ struct YAAWApp: App {
             environment["PATH"] = pathOverride
             appliedOverrides.append("\(envPrefix)PATH")
         }
-        let databasePath = Self.databasePath(environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
-        let configurationPath = Self.configurationPath(environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
+        let databasePath = Self.databasePath(
+            environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
+        let configurationPath = Self.configurationPath(
+            environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
         self.databasePath = databasePath
         self.configurationPath = configurationPath
-        self.configurationStore = YAMLConfigurationStore(path: configurationPath, diagnosticRecorder: diagnostics)
+        self.configurationStore = YAMLConfigurationStore(
+            path: configurationPath, diagnosticRecorder: diagnostics)
         diagnostics.record(
             DiagnosticEvent(
                 category: "Lifecycle",
                 name: "env_override_applied",
                 metadata: [
                     "prefix": envPrefix,
-                    "applied": appliedOverrides.joined(separator: ",")
+                    "applied": appliedOverrides.joined(separator: ","),
                 ]
             )
         )
         do {
             diagnostics.record(DiagnosticEvent(category: "Lifecycle", name: "app_starting"))
-            let store = try SQLiteYAAWStore(databasePath: databasePath, diagnosticRecorder: diagnostics)
+            let store = try SQLiteYAAWStore(
+                databasePath: databasePath, diagnosticRecorder: diagnostics)
             let configuration = configurationStore.load()
             let agentCLIBindings = AgentCLISessionBindingService(
                 environment: environment,
-                captureDirectory: Self.captureDirectory(environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
+                captureDirectory: Self.captureDirectory(
+                    environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
             )
             _model = StateObject(
                 wrappedValue: AppModel(
@@ -103,29 +108,44 @@ struct YAAWApp: App {
         .commands {
             if startupError == nil {
                 CommandMenu("App") {
-                    ShortcutCommandButton(model: model, action: .openSettings, title: "Settings...") {
+                    ShortcutCommandButton(model: model, action: .openSettings, title: "Settings...")
+                    {
                         isSettingsOpen = true
                     }
                 }
 
                 CommandMenu("Project") {
-                    ShortcutCommandButton(model: model, action: .newProject, title: "New Project...") {
+                    ShortcutCommandButton(
+                        model: model, action: .newProject, title: "New Project..."
+                    ) {
                         createProjectFromPanel()
                     }
 
-                    ShortcutCommandButton(model: model, action: .toggleSelectedProjectPinned, title: "Pin or Unpin Selected Project") {
+                    ShortcutCommandButton(
+                        model: model, action: .toggleSelectedProjectPinned,
+                        title: "Pin or Unpin Selected Project"
+                    ) {
                         model.toggleSelectedProjectPinned()
                     }
 
-                    ShortcutCommandButton(model: model, action: .moveSelectedProjectUp, title: "Move Selected Project Up") {
+                    ShortcutCommandButton(
+                        model: model, action: .moveSelectedProjectUp,
+                        title: "Move Selected Project Up"
+                    ) {
                         model.moveSelectedProject(direction: .up)
                     }
 
-                    ShortcutCommandButton(model: model, action: .moveSelectedProjectDown, title: "Move Selected Project Down") {
+                    ShortcutCommandButton(
+                        model: model, action: .moveSelectedProjectDown,
+                        title: "Move Selected Project Down"
+                    ) {
                         model.moveSelectedProject(direction: .down)
                     }
 
-                    ShortcutCommandButton(model: model, action: .toggleSelectedProjectExpanded, title: "Expand or Collapse Selected Project") {
+                    ShortcutCommandButton(
+                        model: model, action: .toggleSelectedProjectExpanded,
+                        title: "Expand or Collapse Selected Project"
+                    ) {
                         model.toggleSelectedProjectExpanded()
                     }
 
@@ -143,51 +163,79 @@ struct YAAWApp: App {
                         try? model.createThread(agentCLI: nil)
                     }
 
-                    ShortcutCommandButton(model: model, action: .toggleSelectedThreadPinned, title: "Pin or Unpin Selected Thread") {
+                    ShortcutCommandButton(
+                        model: model, action: .toggleSelectedThreadPinned,
+                        title: "Pin or Unpin Selected Thread"
+                    ) {
                         model.toggleSelectedThreadPinned()
                     }
 
-                    ShortcutCommandButton(model: model, action: .archiveSelectedThread, title: "Archive Selected Thread") {
+                    ShortcutCommandButton(
+                        model: model, action: .archiveSelectedThread,
+                        title: "Archive Selected Thread"
+                    ) {
                         model.archiveSelectedThread()
                     }
 
-                    ShortcutCommandButton(model: model, action: .unarchiveSelectedThread, title: "Unarchive Selected Thread") {
+                    ShortcutCommandButton(
+                        model: model, action: .unarchiveSelectedThread,
+                        title: "Unarchive Selected Thread"
+                    ) {
                         model.unarchiveSelectedThread()
                     }
                 }
 
                 CommandMenu("Right Panel") {
-                    ShortcutCommandButton(model: model, action: .previousRightPanelMode, title: "Previous Right Panel Mode") {
+                    ShortcutCommandButton(
+                        model: model, action: .previousRightPanelMode,
+                        title: "Previous Right Panel Mode"
+                    ) {
                         model.cycleRightPanelModeBackward()
                     }
 
-                    ShortcutCommandButton(model: model, action: .nextRightPanelMode, title: "Next Right Panel Mode") {
+                    ShortcutCommandButton(
+                        model: model, action: .nextRightPanelMode, title: "Next Right Panel Mode"
+                    ) {
                         model.cycleRightPanelModeForward()
                     }
 
-                    ShortcutCommandButton(model: model, action: .selectFilesRightPanelMode, title: "Files") {
+                    ShortcutCommandButton(
+                        model: model, action: .selectFilesRightPanelMode, title: "Files"
+                    ) {
                         model.selectRightPanelMode(.files)
                     }
 
-                    ShortcutCommandButton(model: model, action: .selectGitRightPanelMode, title: "Git") {
+                    ShortcutCommandButton(
+                        model: model, action: .selectGitRightPanelMode, title: "Git"
+                    ) {
                         model.selectRightPanelMode(.git)
                     }
 
-                    ShortcutCommandButton(model: model, action: .selectNvimRightPanelMode, title: "nvim") {
+                    ShortcutCommandButton(
+                        model: model, action: .selectNvimRightPanelMode, title: "nvim"
+                    ) {
                         model.selectRightPanelMode(.nvim)
                     }
 
-                    ShortcutCommandButton(model: model, action: .openNvimFilePicker, title: "Open File in New nvim Tab...") {
+                    ShortcutCommandButton(
+                        model: model, action: .openNvimFilePicker,
+                        title: "Open File in New nvim Tab..."
+                    ) {
                         openNvimFileFromPanel()
                     }
                 }
 
                 CommandMenu("Files") {
-                    ShortcutCommandButton(model: model, action: .refreshFiles, title: "Refresh Files") {
+                    ShortcutCommandButton(
+                        model: model, action: .refreshFiles, title: "Refresh Files"
+                    ) {
                         model.refreshSelectedFileBrowser()
                     }
 
-                    ShortcutCommandButton(model: model, action: .openSelectedFileInNvim, title: "Open Selected File in nvim") {
+                    ShortcutCommandButton(
+                        model: model, action: .openSelectedFileInNvim,
+                        title: "Open Selected File in nvim"
+                    ) {
                         model.openSelectedFileInNvim()
                     }
                     .disabled(model.selectedExternalOpenFileTarget == nil)
@@ -238,11 +286,15 @@ struct YAAWApp: App {
                 }
 
                 CommandMenu("Layout") {
-                    ShortcutCommandButton(model: model, action: .toggleSidebar, title: "Toggle Sidebar") {
+                    ShortcutCommandButton(
+                        model: model, action: .toggleSidebar, title: "Toggle Sidebar"
+                    ) {
                         model.toggleSidebarCollapsed()
                     }
 
-                    ShortcutCommandButton(model: model, action: .toggleRightPanel, title: "Toggle Right Panel") {
+                    ShortcutCommandButton(
+                        model: model, action: .toggleRightPanel, title: "Toggle Right Panel"
+                    ) {
                         model.toggleRightPanelCollapsed()
                     }
                 }
@@ -252,13 +304,16 @@ struct YAAWApp: App {
                         model.navigateBack()
                     }
 
-                    ShortcutCommandButton(model: model, action: .navigateForward, title: "Forward") {
+                    ShortcutCommandButton(model: model, action: .navigateForward, title: "Forward")
+                    {
                         model.navigateForward()
                     }
                 }
 
                 CommandMenu("Terminal") {
-                    ShortcutCommandButton(model: model, action: .toggleBottomTerminal, title: "Toggle Bottom Terminal") {
+                    ShortcutCommandButton(
+                        model: model, action: .toggleBottomTerminal, title: "Toggle Bottom Terminal"
+                    ) {
                         model.toggleBottomTerminal()
                     }
                 }
@@ -293,7 +348,10 @@ struct YAAWApp: App {
     }
 
     private func openSelectedDirectoryWithDefaultExternalTool() {
-        guard let tool = externalOpenWorkspace.defaultTool(settings: model.configuration.tools.externalOpen) else { return }
+        guard
+            let tool = externalOpenWorkspace.defaultTool(
+                settings: model.configuration.tools.externalOpen)
+        else { return }
         openSelectedDirectoryExternally(tool)
     }
 
@@ -303,7 +361,10 @@ struct YAAWApp: App {
     }
 
     private func openSelectedFileWithDefaultExternalTool() {
-        guard let tool = externalOpenWorkspace.defaultTool(settings: model.configuration.tools.externalOpen) else { return }
+        guard
+            let tool = externalOpenWorkspace.defaultTool(
+                settings: model.configuration.tools.externalOpen)
+        else { return }
         openSelectedFileExternally(tool)
     }
 
@@ -316,7 +377,9 @@ struct YAAWApp: App {
         Bundle.main.bundleIdentifier == "dev.dopsonbr.YAAW.E2E" ? "YAAW_E2E_" : "YAAW_"
     }
 
-    private static func databasePath(environment: [String: String], envPrefix: String, applied: inout [String]) -> URL {
+    private static func databasePath(
+        environment: [String: String], envPrefix: String, applied: inout [String]
+    ) -> URL {
         let key = "\(envPrefix)DATABASE_PATH"
         if let value = environment[key] {
             applied.append(key)
@@ -325,7 +388,9 @@ struct YAAWApp: App {
         return SQLiteYAAWStore.defaultDatabasePath()
     }
 
-    private static func configurationPath(environment: [String: String], envPrefix: String, applied: inout [String]) -> URL {
+    private static func configurationPath(
+        environment: [String: String], envPrefix: String, applied: inout [String]
+    ) -> URL {
         let key = "\(envPrefix)CONFIG_PATH"
         if let value = environment[key] {
             applied.append(key)
@@ -334,7 +399,9 @@ struct YAAWApp: App {
         return YAMLConfigurationStore.defaultPath()
     }
 
-    private static func captureDirectory(environment: [String: String], envPrefix: String, applied: inout [String]) -> URL? {
+    private static func captureDirectory(
+        environment: [String: String], envPrefix: String, applied: inout [String]
+    ) -> URL? {
         let key = "\(envPrefix)CAPTURE_DIRECTORY"
         if let value = environment[key] {
             applied.append(key)
@@ -384,8 +451,8 @@ struct YAAWApp: App {
     }
 }
 
-private extension AppModel {
-    func keyEquivalent(for action: KeyboardShortcutAction) -> KeyEquivalent {
+extension AppModel {
+    fileprivate func keyEquivalent(for action: KeyboardShortcutAction) -> KeyEquivalent {
         let definition = keyboardShortcutDefinition(for: action)
         guard let character = definition.key.first else {
             return KeyEquivalent(" ")
@@ -393,7 +460,7 @@ private extension AppModel {
         return KeyEquivalent(character)
     }
 
-    func eventModifiers(for action: KeyboardShortcutAction) -> EventModifiers {
+    fileprivate func eventModifiers(for action: KeyboardShortcutAction) -> EventModifiers {
         var eventModifiers = EventModifiers()
         for modifier in keyboardShortcutDefinition(for: action).modifiers {
             switch modifier {
@@ -425,15 +492,18 @@ private struct ShortcutCommandButton: View {
     private var commandButton: some View {
         let button = Button(title, action: perform)
         if model.isKeyboardShortcutEnabled(for: action) {
-            button.keyboardShortcut(model.keyEquivalent(for: action), modifiers: model.eventModifiers(for: action))
+            button.keyboardShortcut(
+                model.keyEquivalent(for: action), modifiers: model.eventModifiers(for: action))
         } else {
             button
         }
     }
 }
 
-private extension KeyboardShortcutAction {
-    static func directoryExternalOpenAction(for tool: ExternalOpenToolID) -> KeyboardShortcutAction {
+extension KeyboardShortcutAction {
+    fileprivate static func directoryExternalOpenAction(for tool: ExternalOpenToolID)
+        -> KeyboardShortcutAction
+    {
         switch tool {
         case .vscode:
             .openSelectedDirectoryInVSCode
@@ -456,7 +526,9 @@ private extension KeyboardShortcutAction {
         }
     }
 
-    static func fileExternalOpenAction(for tool: ExternalOpenToolID) -> KeyboardShortcutAction {
+    fileprivate static func fileExternalOpenAction(for tool: ExternalOpenToolID)
+        -> KeyboardShortcutAction
+    {
         switch tool {
         case .vscode:
             .openSelectedFileInVSCode
@@ -490,9 +562,11 @@ private struct PersistenceStartupFailureView: View {
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(dracula(.red))
 
-            Text("The app did not open an in-memory fallback because doing so could hide existing projects or threads.")
-                .foregroundStyle(dracula(.foreground))
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "The app did not open an in-memory fallback because doing so could hide existing projects or threads."
+            )
+            .foregroundStyle(dracula(.foreground))
+            .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Database")

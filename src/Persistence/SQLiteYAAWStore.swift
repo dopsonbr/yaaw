@@ -53,7 +53,8 @@ public final class SQLiteYAAWStore: YAAWStore {
     }
 
     public static func defaultDatabasePath() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
+            0]
         return base.appendingPathComponent("YAAW", isDirectory: true)
             .appendingPathComponent("YAAW.sqlite")
     }
@@ -69,12 +70,16 @@ public final class SQLiteYAAWStore: YAAWStore {
 
             let threads = try loadThreads()
             let selectedProjectID = try loadUUID(key: "selected_project_id") ?? projects[0].id
-            let selectedThreadID = try loadUUID(key: "selected_thread_id")
+            let selectedThreadID =
+                try loadUUID(key: "selected_thread_id")
                 ?? threads.first { $0.projectID == selectedProjectID && !$0.isArchived }?.id
             let modes = try loadRightPanelModes()
             let rightPanelStates = try loadRightPanelStates(fallbackModes: modes)
-            let selectedMode = selectedThreadID.map { rightPanelStates[$0]?.selectedMode ?? modes[$0] ?? .files } ?? .files
-            let fallbackGlobalTerminalExpanded = try loadBool(key: "is_global_terminal_expanded") ?? false
+            let selectedMode =
+                selectedThreadID.map { rightPanelStates[$0]?.selectedMode ?? modes[$0] ?? .files }
+                ?? .files
+            let fallbackGlobalTerminalExpanded =
+                try loadBool(key: "is_global_terminal_expanded") ?? false
             let layoutState = try loadLayoutState(
                 fallbackGlobalTerminalExpanded: fallbackGlobalTerminalExpanded
             )
@@ -130,7 +135,8 @@ public final class SQLiteYAAWStore: YAAWStore {
                     try insertRightPanelMode(threadID: threadID, mode: mode)
                 }
                 for thread in snapshot.threads {
-                    let state = snapshot.rightPanelStatesByThreadID[thread.id]
+                    let state =
+                        snapshot.rightPanelStatesByThreadID[thread.id]
                         ?? RightPanelState.defaultState(
                             selectedMode: snapshot.rightPanelModesByThreadID[thread.id] ?? .files
                         )
@@ -152,9 +158,11 @@ public final class SQLiteYAAWStore: YAAWStore {
                         isArchiveExpanded: snapshot.expandedArchivedProjectIDs.contains(project.id)
                     )
                 }
-                try insertAppState(key: "selected_project_id", value: snapshot.selectedProjectID.uuidString)
+                try insertAppState(
+                    key: "selected_project_id", value: snapshot.selectedProjectID.uuidString)
                 if let selectedThreadID = snapshot.selectedThreadID {
-                    try insertAppState(key: "selected_thread_id", value: selectedThreadID.uuidString)
+                    try insertAppState(
+                        key: "selected_thread_id", value: selectedThreadID.uuidString)
                 }
                 try insertAppState(
                     key: "is_global_terminal_expanded",
@@ -289,8 +297,10 @@ public final class SQLiteYAAWStore: YAAWStore {
         runIncremental(name: "set_layout_state") {
             try upsertLayoutStateValue(key: "sidebar_width", value: "\(state.sidebarWidth)")
             try upsertLayoutStateValue(key: "right_panel_width", value: "\(state.rightPanelWidth)")
-            try upsertLayoutStateValue(key: "global_terminal_height", value: "\(state.globalTerminalHeight)")
-            try upsertLayoutStateValue(key: "sidebar_collapsed", value: state.isSidebarCollapsed ? "true" : "false")
+            try upsertLayoutStateValue(
+                key: "global_terminal_height", value: "\(state.globalTerminalHeight)")
+            try upsertLayoutStateValue(
+                key: "sidebar_collapsed", value: state.isSidebarCollapsed ? "true" : "false")
             try upsertLayoutStateValue(
                 key: "right_panel_collapsed",
                 value: state.isRightPanelCollapsed ? "true" : "false"
@@ -304,7 +314,8 @@ public final class SQLiteYAAWStore: YAAWStore {
 
     public func setProjectExpanded(_ projectID: UUID, isExpanded: Bool) {
         runIncremental(name: "set_project_expanded") {
-            let currentArchiveState = try loadSidebarProjectState(projectID: projectID)?.isArchiveExpanded ?? false
+            let currentArchiveState =
+                try loadSidebarProjectState(projectID: projectID)?.isArchiveExpanded ?? false
             try upsertSidebarProjectState(
                 projectID: projectID,
                 isExpanded: isExpanded,
@@ -315,7 +326,8 @@ public final class SQLiteYAAWStore: YAAWStore {
 
     public func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool) {
         runIncremental(name: "set_project_archive_expanded") {
-            let currentExpandedState = try loadSidebarProjectState(projectID: projectID)?.isExpanded ?? false
+            let currentExpandedState =
+                try loadSidebarProjectState(projectID: projectID)?.isExpanded ?? false
             try upsertSidebarProjectState(
                 projectID: projectID,
                 isExpanded: currentExpandedState,
@@ -386,14 +398,15 @@ public final class SQLiteYAAWStore: YAAWStore {
             try deleteCachedFileIndexEntries(cacheKey: cacheKey)
             try upsertCachedFileIndexMetadata(index.metadata)
             for (entryOrder, entry) in index.entries.enumerated() {
-                try insertCachedFileIndexEntry(cacheKey: cacheKey, entry: entry, entryOrder: entryOrder)
+                try insertCachedFileIndexEntry(
+                    cacheKey: cacheKey, entry: entry, entryOrder: entryOrder)
             }
         }
     }
 }
 
-private extension SQLiteYAAWStore {
-    func recordSQLiteError(name: String, error: Error) {
+extension SQLiteYAAWStore {
+    fileprivate func recordSQLiteError(name: String, error: Error) {
         diagnosticRecorder.record(
             DiagnosticEvent(
                 category: "SQLite",
@@ -402,19 +415,19 @@ private extension SQLiteYAAWStore {
                     "database": databasePath.path,
                     "error": String(describing: error)
                         .replacingOccurrences(of: "\n", with: " ")
-                        .replacingOccurrences(of: "\r", with: " ")
+                        .replacingOccurrences(of: "\r", with: " "),
                 ]
             )
         )
     }
 
-    func open() throws {
+    fileprivate func open() throws {
         guard sqlite3_open(databasePath.path, &database) == SQLITE_OK else {
             throw SQLiteStoreError.openFailed(errorMessage)
         }
     }
 
-    func migrate() throws {
+    fileprivate func migrate() throws {
         try execute("PRAGMA foreign_keys = ON")
         let currentVersion = try userVersion()
         guard currentVersion <= Self.schemaVersion else {
@@ -503,7 +516,7 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func migrateToVersionNine() throws {
+    fileprivate func migrateToVersionNine() throws {
         try execute(
             "CREATE INDEX IF NOT EXISTS idx_threads_project_archived ON threads(project_id, is_archived)"
         )
@@ -512,16 +525,20 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func migrateToVersionTen() throws {
+    fileprivate func migrateToVersionTen() throws {
         let columns = try tableColumns("file_index_metadata")
         if !columns.contains("cache_key") {
             try execute("ALTER TABLE file_index_metadata ADD COLUMN cache_key TEXT")
         }
         if !columns.contains("git_identity") {
-            try execute("ALTER TABLE file_index_metadata ADD COLUMN git_identity TEXT NOT NULL DEFAULT 'nogit'")
+            try execute(
+                "ALTER TABLE file_index_metadata ADD COLUMN git_identity TEXT NOT NULL DEFAULT 'nogit'"
+            )
         }
         if !columns.contains("ignore_rules_fingerprint") {
-            try execute("ALTER TABLE file_index_metadata ADD COLUMN ignore_rules_fingerprint TEXT NOT NULL DEFAULT ''")
+            try execute(
+                "ALTER TABLE file_index_metadata ADD COLUMN ignore_rules_fingerprint TEXT NOT NULL DEFAULT ''"
+            )
         }
         if !columns.contains("schema_version") {
             try execute(
@@ -531,7 +548,7 @@ private extension SQLiteYAAWStore {
         try createFileIndexCacheSchema()
     }
 
-    func migrateToVersionEleven() throws {
+    fileprivate func migrateToVersionEleven() throws {
         let projectColumns = try tableColumns("projects")
         if !projectColumns.contains("is_pinned") {
             try execute("ALTER TABLE projects ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
@@ -556,7 +573,7 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func migrateToVersionThirteen() throws {
+    fileprivate func migrateToVersionThirteen() throws {
         if try tableColumns("right_panel_modes").isEmpty {
             try execute(
                 """
@@ -620,7 +637,7 @@ private extension SQLiteYAAWStore {
         try execute("ALTER TABLE right_panel_tabs_v13 RENAME TO right_panel_tabs")
     }
 
-    func createThreadActivityStateSchema() throws {
+    fileprivate func createThreadActivityStateSchema() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS thread_activity_state (
@@ -637,7 +654,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func createVersionOneSchema() throws {
+    fileprivate func createVersionOneSchema() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS projects (
@@ -680,7 +697,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func migrateToVersionTwo() throws {
+    fileprivate func migrateToVersionTwo() throws {
         let columns = try tableColumns("threads")
         guard !columns.contains("agent_cli") else { return }
         let existingThreadCount = try querySingleInt("SELECT COUNT(*) FROM threads") ?? 0
@@ -707,7 +724,7 @@ private extension SQLiteYAAWStore {
         try execute("ALTER TABLE threads_v2 RENAME TO threads")
     }
 
-    func createLayoutStateSchema() throws {
+    fileprivate func createLayoutStateSchema() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS layout_state (
@@ -718,12 +735,12 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func seedLayoutStateFromLegacyAppState() throws {
+    fileprivate func seedLayoutStateFromLegacyAppState() throws {
         let isExpanded = try loadBool(key: "is_global_terminal_expanded") ?? false
         try insertLayoutState(LayoutState(isGlobalTerminalExpanded: isExpanded))
     }
 
-    func migrateToVersionFour() throws {
+    fileprivate func migrateToVersionFour() throws {
         let columns = try tableColumns("threads")
         if !columns.contains("session_identity") {
             try execute("ALTER TABLE threads ADD COLUMN session_identity TEXT")
@@ -733,7 +750,7 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func createFileIndexMetadataSchema() throws {
+    fileprivate func createFileIndexMetadataSchema() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS file_index_metadata (
@@ -751,7 +768,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func createFileIndexCacheSchema() throws {
+    fileprivate func createFileIndexCacheSchema() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS file_index_cache_metadata (
@@ -782,7 +799,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func migrateToVersionSixAgentCLIValues() throws {
+    fileprivate func migrateToVersionSixAgentCLIValues() throws {
         try execute("PRAGMA defer_foreign_keys = ON")
         try execute(
             """
@@ -832,7 +849,7 @@ private extension SQLiteYAAWStore {
         try execute("ALTER TABLE threads_v6 RENAME TO threads")
     }
 
-    func createBottomTerminalStateSchema() throws {
+    fileprivate func createBottomTerminalStateSchema() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS bottom_terminal_state (
@@ -843,7 +860,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func createRightPanelTabStateSchema() throws {
+    fileprivate func createRightPanelTabStateSchema() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS right_panel_tabs (
@@ -868,7 +885,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func createSidebarProjectStateSchema() throws {
+    fileprivate func createSidebarProjectStateSchema() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS sidebar_project_state (
@@ -880,7 +897,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func seedProjectSortOrder() throws {
+    fileprivate func seedProjectSortOrder() throws {
         let statement = try prepare(
             "SELECT id FROM projects ORDER BY created_at, display_name"
         )
@@ -898,17 +915,19 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func seedBottomTerminalStateFromLegacyLayout() throws {
-        let isExpanded = try loadLayoutBool(key: "global_terminal_expanded")
+    fileprivate func seedBottomTerminalStateFromLegacyLayout() throws {
+        let isExpanded =
+            try loadLayoutBool(key: "global_terminal_expanded")
             ?? (try loadBool(key: "is_global_terminal_expanded") ?? false)
         guard isExpanded,
-              let selectedThreadID = try loadUUID(key: "selected_thread_id") else {
+            let selectedThreadID = try loadUUID(key: "selected_thread_id")
+        else {
             return
         }
         try insertBottomTerminalState(threadID: selectedThreadID, isExpanded: true)
     }
 
-    func seedRightPanelTabStateFromLegacyModes() throws {
+    fileprivate func seedRightPanelTabStateFromLegacyModes() throws {
         let modes = try loadRightPanelModes()
         let statement = try prepare("SELECT id FROM threads")
         defer { sqlite3_finalize(statement) }
@@ -921,11 +940,11 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func userVersion() throws -> Int {
+    fileprivate func userVersion() throws -> Int {
         try querySingleInt("PRAGMA user_version") ?? 0
     }
 
-    func transaction(_ work: () throws -> Void) throws {
+    fileprivate func transaction(_ work: () throws -> Void) throws {
         try execute("BEGIN IMMEDIATE TRANSACTION")
         do {
             try work()
@@ -936,7 +955,7 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func execute(_ sql: String) throws {
+    fileprivate func execute(_ sql: String) throws {
         var message: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(database, sql, nil, nil, &message) == SQLITE_OK else {
             let error = message.map { String(cString: $0) } ?? errorMessage
@@ -945,7 +964,7 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func prepare(_ sql: String) throws -> OpaquePointer? {
+    fileprivate func prepare(_ sql: String) throws -> OpaquePointer? {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
             throw SQLiteStoreError.prepareFailed(errorMessage)
@@ -953,14 +972,14 @@ private extension SQLiteYAAWStore {
         return statement
     }
 
-    func querySingleInt(_ sql: String) throws -> Int? {
+    fileprivate func querySingleInt(_ sql: String) throws -> Int? {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return Int(sqlite3_column_int(statement, 0))
     }
 
-    func tableColumns(_ table: String) throws -> Set<String> {
+    fileprivate func tableColumns(_ table: String) throws -> Set<String> {
         let statement = try prepare("PRAGMA table_info(\(table))")
         defer { sqlite3_finalize(statement) }
         var columns = Set<String>()
@@ -970,12 +989,12 @@ private extension SQLiteYAAWStore {
         return columns
     }
 
-    var errorMessage: String {
+    fileprivate var errorMessage: String {
         guard let database else { return "Missing SQLite database" }
         return String(cString: sqlite3_errmsg(database))
     }
 
-    func runIncremental(name: String, _ work: () throws -> Void) {
+    fileprivate func runIncremental(name: String, _ work: () throws -> Void) {
         do {
             try transaction(work)
         } catch {
@@ -983,7 +1002,7 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func upsertProjectStatement(_ project: Project) throws {
+    fileprivate func upsertProjectStatement(_ project: Project) throws {
         let statement = try prepare(
             """
             INSERT INTO projects (
@@ -1016,7 +1035,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func upsertThreadStatement(_ thread: AgentThread) throws {
+    fileprivate func upsertThreadStatement(_ thread: AgentThread) throws {
         let statement = try prepare(
             """
             INSERT INTO threads (
@@ -1061,7 +1080,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func upsertAppStateStatement(key: String, value: String) throws {
+    fileprivate func upsertAppStateStatement(key: String, value: String) throws {
         let statement = try prepare(
             """
             INSERT INTO app_state (key, value) VALUES (?, ?)
@@ -1074,7 +1093,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func upsertLayoutStateValue(key: String, value: String) throws {
+    fileprivate func upsertLayoutStateValue(key: String, value: String) throws {
         let statement = try prepare(
             """
             INSERT INTO layout_state (key, value) VALUES (?, ?)
@@ -1087,7 +1106,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertProject(_ project: Project) throws {
+    fileprivate func insertProject(_ project: Project) throws {
         let statement = try prepare(
             """
             INSERT INTO projects (
@@ -1113,7 +1132,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertThread(_ thread: AgentThread) throws {
+    fileprivate func insertThread(_ thread: AgentThread) throws {
         let statement = try prepare(
             """
             INSERT INTO threads (
@@ -1147,7 +1166,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertRightPanelMode(threadID: UUID, mode: RightPanelMode) throws {
+    fileprivate func insertRightPanelMode(threadID: UUID, mode: RightPanelMode) throws {
         let statement = try prepare(
             "INSERT INTO right_panel_modes (thread_id, mode) VALUES (?, ?)"
         )
@@ -1157,7 +1176,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertRightPanelState(threadID: UUID, state: RightPanelState) throws {
+    fileprivate func insertRightPanelState(threadID: UUID, state: RightPanelState) throws {
         let persistedState = state.persistenceSnapshot
         let tabs = RightPanelState.normalizedTabs(persistedState.tabs)
         for (index, tab) in tabs.enumerated() {
@@ -1195,7 +1214,7 @@ private extension SQLiteYAAWStore {
         try stepDone(stateStatement)
     }
 
-    func insertBottomTerminalState(threadID: UUID, isExpanded: Bool) throws {
+    fileprivate func insertBottomTerminalState(threadID: UUID, isExpanded: Bool) throws {
         let statement = try prepare(
             "INSERT INTO bottom_terminal_state (thread_id, is_expanded) VALUES (?, ?)"
         )
@@ -1205,7 +1224,9 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertSidebarProjectState(projectID: UUID, isExpanded: Bool, isArchiveExpanded: Bool) throws {
+    fileprivate func insertSidebarProjectState(
+        projectID: UUID, isExpanded: Bool, isArchiveExpanded: Bool
+    ) throws {
         let statement = try prepare(
             """
             INSERT INTO sidebar_project_state (
@@ -1223,7 +1244,9 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func upsertSidebarProjectState(projectID: UUID, isExpanded: Bool, isArchiveExpanded: Bool) throws {
+    fileprivate func upsertSidebarProjectState(
+        projectID: UUID, isExpanded: Bool, isArchiveExpanded: Bool
+    ) throws {
         let statement = try prepare(
             """
             INSERT INTO sidebar_project_state (
@@ -1244,7 +1267,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertAppState(key: String, value: String) throws {
+    fileprivate func insertAppState(key: String, value: String) throws {
         let statement = try prepare("INSERT INTO app_state (key, value) VALUES (?, ?)")
         defer { sqlite3_finalize(statement) }
         bind(key, at: 1, in: statement)
@@ -1252,11 +1275,14 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertLayoutState(_ layoutState: LayoutState) throws {
+    fileprivate func insertLayoutState(_ layoutState: LayoutState) throws {
         try insertLayoutStateValue(key: "sidebar_width", value: "\(layoutState.sidebarWidth)")
-        try insertLayoutStateValue(key: "right_panel_width", value: "\(layoutState.rightPanelWidth)")
-        try insertLayoutStateValue(key: "global_terminal_height", value: "\(layoutState.globalTerminalHeight)")
-        try insertLayoutStateValue(key: "sidebar_collapsed", value: layoutState.isSidebarCollapsed ? "true" : "false")
+        try insertLayoutStateValue(
+            key: "right_panel_width", value: "\(layoutState.rightPanelWidth)")
+        try insertLayoutStateValue(
+            key: "global_terminal_height", value: "\(layoutState.globalTerminalHeight)")
+        try insertLayoutStateValue(
+            key: "sidebar_collapsed", value: layoutState.isSidebarCollapsed ? "true" : "false")
         try insertLayoutStateValue(
             key: "right_panel_collapsed",
             value: layoutState.isRightPanelCollapsed ? "true" : "false"
@@ -1267,7 +1293,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func insertLayoutStateValue(key: String, value: String) throws {
+    fileprivate func insertLayoutStateValue(key: String, value: String) throws {
         let statement = try prepare("INSERT INTO layout_state (key, value) VALUES (?, ?)")
         defer { sqlite3_finalize(statement) }
         bind(key, at: 1, in: statement)
@@ -1275,7 +1301,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertFileIndexMetadata(_ metadata: FileIndexMetadata) throws {
+    fileprivate func insertFileIndexMetadata(_ metadata: FileIndexMetadata) throws {
         let statement = try prepare(
             """
             INSERT INTO file_index_metadata (
@@ -1305,7 +1331,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertThreadActivity(_ activity: ThreadActivityState) throws {
+    fileprivate func insertThreadActivity(_ activity: ThreadActivityState) throws {
         let statement = try prepare(
             """
             INSERT INTO thread_activity_state (
@@ -1333,7 +1359,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func upsertThreadActivityStatement(_ activity: ThreadActivityState) throws {
+    fileprivate func upsertThreadActivityStatement(_ activity: ThreadActivityState) throws {
         let statement = try prepare(
             """
             INSERT INTO thread_activity_state (
@@ -1369,14 +1395,14 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func deleteCachedFileIndexEntries(cacheKey: String) throws {
+    fileprivate func deleteCachedFileIndexEntries(cacheKey: String) throws {
         let statement = try prepare("DELETE FROM file_index_cache_entries WHERE cache_key = ?")
         defer { sqlite3_finalize(statement) }
         bind(cacheKey, at: 1, in: statement)
         try stepDone(statement)
     }
 
-    func upsertCachedFileIndexMetadata(_ metadata: FileIndexMetadata) throws {
+    fileprivate func upsertCachedFileIndexMetadata(_ metadata: FileIndexMetadata) throws {
         guard let cacheKey = metadata.cacheKey else { return }
         let statement = try prepare(
             """
@@ -1413,7 +1439,9 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func insertCachedFileIndexEntry(cacheKey: String, entry: FileBrowserEntry, entryOrder: Int) throws {
+    fileprivate func insertCachedFileIndexEntry(
+        cacheKey: String, entry: FileBrowserEntry, entryOrder: Int
+    ) throws {
         let statement = try prepare(
             """
             INSERT INTO file_index_cache_entries (
@@ -1433,7 +1461,7 @@ private extension SQLiteYAAWStore {
         try stepDone(statement)
     }
 
-    func loadBottomTerminalExpandedThreadIDs() throws -> Set<UUID> {
+    fileprivate func loadBottomTerminalExpandedThreadIDs() throws -> Set<UUID> {
         let statement = try prepare(
             "SELECT thread_id FROM bottom_terminal_state WHERE is_expanded = 1"
         )
@@ -1447,7 +1475,7 @@ private extension SQLiteYAAWStore {
         return threadIDs
     }
 
-    func loadSidebarProjectState() throws -> SidebarProjectStateSnapshot {
+    fileprivate func loadSidebarProjectState() throws -> SidebarProjectStateSnapshot {
         let statement = try prepare(
             "SELECT project_id, is_expanded, is_archive_expanded FROM sidebar_project_state"
         )
@@ -1469,7 +1497,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func loadSidebarProjectState(projectID: UUID) throws -> SidebarProjectStateRow? {
+    fileprivate func loadSidebarProjectState(projectID: UUID) throws -> SidebarProjectStateRow? {
         let statement = try prepare(
             "SELECT is_expanded, is_archive_expanded FROM sidebar_project_state WHERE project_id = ?"
         )
@@ -1482,7 +1510,7 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func loadProjects() throws -> [Project] {
+    fileprivate func loadProjects() throws -> [Project] {
         let statement = try prepare(
             """
             SELECT
@@ -1507,7 +1535,8 @@ private extension SQLiteYAAWStore {
                 Project(
                     id: id,
                     displayName: text(at: 1, in: statement),
-                    rootDirectory: URL(fileURLWithPath: text(at: 2, in: statement), isDirectory: true),
+                    rootDirectory: URL(
+                        fileURLWithPath: text(at: 2, in: statement), isDirectory: true),
                     createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
                     lastOpenedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
                     isPinned: sqlite3_column_int(statement, 5) == 1,
@@ -1518,7 +1547,7 @@ private extension SQLiteYAAWStore {
         return projects
     }
 
-    func loadThreads() throws -> [AgentThread] {
+    fileprivate func loadThreads() throws -> [AgentThread] {
         let statement = try prepare(
             """
             SELECT
@@ -1541,8 +1570,9 @@ private extension SQLiteYAAWStore {
         var threads: [AgentThread] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = UUID(uuidString: text(at: 0, in: statement)),
-                  let projectID = UUID(uuidString: text(at: 2, in: statement)),
-                  let agentCLI = AgentCLIKind(rawValue: text(at: 7, in: statement)) else {
+                let projectID = UUID(uuidString: text(at: 2, in: statement)),
+                let agentCLI = AgentCLIKind(rawValue: text(at: 7, in: statement))
+            else {
                 throw SQLiteStoreError.executionFailed("Invalid thread id")
             }
             threads.append(
@@ -1550,7 +1580,8 @@ private extension SQLiteYAAWStore {
                     id: id,
                     displayName: text(at: 1, in: statement),
                     projectID: projectID,
-                    workingDirectory: URL(fileURLWithPath: text(at: 3, in: statement), isDirectory: true),
+                    workingDirectory: URL(
+                        fileURLWithPath: text(at: 3, in: statement), isDirectory: true),
                     agentCLI: agentCLI,
                     sessionIdentity: optionalText(at: 8, in: statement),
                     canonicalSessionName: optionalText(at: 9, in: statement),
@@ -1564,7 +1595,7 @@ private extension SQLiteYAAWStore {
         return threads
     }
 
-    func loadUUID(key: String) throws -> UUID? {
+    fileprivate func loadUUID(key: String) throws -> UUID? {
         let statement = try prepare("SELECT value FROM app_state WHERE key = ?")
         defer { sqlite3_finalize(statement) }
         bind(key, at: 1, in: statement)
@@ -1572,7 +1603,7 @@ private extension SQLiteYAAWStore {
         return UUID(uuidString: text(at: 0, in: statement))
     }
 
-    func loadBool(key: String) throws -> Bool? {
+    fileprivate func loadBool(key: String) throws -> Bool? {
         let statement = try prepare("SELECT value FROM app_state WHERE key = ?")
         defer { sqlite3_finalize(statement) }
         bind(key, at: 1, in: statement)
@@ -1587,10 +1618,12 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func loadLayoutState(fallbackGlobalTerminalExpanded: Bool) throws -> LayoutState {
+    fileprivate func loadLayoutState(fallbackGlobalTerminalExpanded: Bool) throws -> LayoutState {
         LayoutState(
-            sidebarWidth: try loadLayoutDouble(key: "sidebar_width") ?? LayoutState.defaultSidebarWidth,
-            rightPanelWidth: try loadLayoutDouble(key: "right_panel_width") ?? LayoutState.defaultRightPanelWidth,
+            sidebarWidth: try loadLayoutDouble(key: "sidebar_width")
+                ?? LayoutState.defaultSidebarWidth,
+            rightPanelWidth: try loadLayoutDouble(key: "right_panel_width")
+                ?? LayoutState.defaultRightPanelWidth,
             globalTerminalHeight: try loadLayoutDouble(key: "global_terminal_height")
                 ?? LayoutState.defaultGlobalTerminalHeight,
             isSidebarCollapsed: try loadLayoutBool(key: "sidebar_collapsed") ?? false,
@@ -1600,12 +1633,12 @@ private extension SQLiteYAAWStore {
         )
     }
 
-    func loadLayoutDouble(key: String) throws -> Double? {
+    fileprivate func loadLayoutDouble(key: String) throws -> Double? {
         guard let value = try loadLayoutValue(key: key) else { return nil }
         return Double(value)
     }
 
-    func loadLayoutBool(key: String) throws -> Bool? {
+    fileprivate func loadLayoutBool(key: String) throws -> Bool? {
         guard let value = try loadLayoutValue(key: key) else { return nil }
         switch value {
         case "true":
@@ -1617,7 +1650,7 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func loadLayoutValue(key: String) throws -> String? {
+    fileprivate func loadLayoutValue(key: String) throws -> String? {
         let statement = try prepare("SELECT value FROM layout_state WHERE key = ?")
         defer { sqlite3_finalize(statement) }
         bind(key, at: 1, in: statement)
@@ -1625,20 +1658,23 @@ private extension SQLiteYAAWStore {
         return text(at: 0, in: statement)
     }
 
-    func loadRightPanelModes() throws -> [UUID: RightPanelMode] {
+    fileprivate func loadRightPanelModes() throws -> [UUID: RightPanelMode] {
         let statement = try prepare("SELECT thread_id, mode FROM right_panel_modes")
         defer { sqlite3_finalize(statement) }
         var modes: [UUID: RightPanelMode] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
             if let threadID = UUID(uuidString: text(at: 0, in: statement)),
-               let mode = RightPanelMode(rawValue: text(at: 1, in: statement)) {
+                let mode = RightPanelMode(rawValue: text(at: 1, in: statement))
+            {
                 modes[threadID] = mode
             }
         }
         return modes
     }
 
-    func loadRightPanelStates(fallbackModes: [UUID: RightPanelMode]) throws -> [UUID: RightPanelState] {
+    fileprivate func loadRightPanelStates(fallbackModes: [UUID: RightPanelMode]) throws -> [UUID:
+        RightPanelState]
+    {
         let tabsStatement = try prepare(
             """
             SELECT thread_id, tab_id, kind, title, relative_path, url_string
@@ -1650,7 +1686,8 @@ private extension SQLiteYAAWStore {
         var tabsByThreadID: [UUID: [RightPanelTab]] = [:]
         while sqlite3_step(tabsStatement) == SQLITE_ROW {
             guard let threadID = UUID(uuidString: text(at: 0, in: tabsStatement)),
-                  let kind = RightPanelTabKind(rawValue: text(at: 2, in: tabsStatement)) else {
+                let kind = RightPanelTabKind(rawValue: text(at: 2, in: tabsStatement))
+            else {
                 continue
             }
             tabsByThreadID[threadID, default: []].append(
@@ -1664,7 +1701,8 @@ private extension SQLiteYAAWStore {
             )
         }
 
-        let stateStatement = try prepare("SELECT thread_id, selected_tab_id FROM right_panel_tab_state")
+        let stateStatement = try prepare(
+            "SELECT thread_id, selected_tab_id FROM right_panel_tab_state")
         defer { sqlite3_finalize(stateStatement) }
         var selectedTabIDsByThreadID: [UUID: String] = [:]
         while sqlite3_step(stateStatement) == SQLITE_ROW {
@@ -1675,15 +1713,17 @@ private extension SQLiteYAAWStore {
         var states: [UUID: RightPanelState] = [:]
         for thread in try loadThreads() {
             let tabs = tabsByThreadID[thread.id] ?? RightPanelState.defaultTabs
-            let selectedTabID = selectedTabIDsByThreadID[thread.id]
+            let selectedTabID =
+                selectedTabIDsByThreadID[thread.id]
                 ?? fallbackModes[thread.id]?.defaultTabID
                 ?? RightPanelTab.filesID
-            states[thread.id] = RightPanelState.restoredState(tabs: tabs, selectedTabID: selectedTabID)
+            states[thread.id] = RightPanelState.restoredState(
+                tabs: tabs, selectedTabID: selectedTabID)
         }
         return states
     }
 
-    func loadFileIndexMetadata() throws -> [UUID: FileIndexMetadata] {
+    fileprivate func loadFileIndexMetadata() throws -> [UUID: FileIndexMetadata] {
         let statement = try prepare(
             """
             SELECT
@@ -1720,7 +1760,7 @@ private extension SQLiteYAAWStore {
         return metadataByThreadID
     }
 
-    func loadThreadActivity() throws -> [UUID: ThreadActivityState] {
+    fileprivate func loadThreadActivity() throws -> [UUID: ThreadActivityState] {
         let statement = try prepare(
             """
             SELECT
@@ -1739,8 +1779,8 @@ private extension SQLiteYAAWStore {
         var activityByThreadID: [UUID: ThreadActivityState] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let threadID = UUID(uuidString: text(at: 0, in: statement)),
-                  let status = ThreadActivityStatus(rawValue: text(at: 1, in: statement)),
-                  let source = ThreadActivitySource(rawValue: text(at: 6, in: statement))
+                let status = ThreadActivityStatus(rawValue: text(at: 1, in: statement)),
+                let source = ThreadActivitySource(rawValue: text(at: 6, in: statement))
             else {
                 throw SQLiteStoreError.executionFailed("Invalid thread activity state")
             }
@@ -1758,7 +1798,7 @@ private extension SQLiteYAAWStore {
         return activityByThreadID
     }
 
-    func loadCachedFileIndex(cacheKey: String) throws -> CachedFileIndex? {
+    fileprivate func loadCachedFileIndex(cacheKey: String) throws -> CachedFileIndex? {
         let metadataStatement = try prepare(
             """
             SELECT
@@ -1810,11 +1850,11 @@ private extension SQLiteYAAWStore {
         return CachedFileIndex(metadata: metadata, entries: entries)
     }
 
-    func bind(_ value: String, at index: Int32, in statement: OpaquePointer?) {
-        sqlite3_bind_text(statement, index, value, -1, SQLITE_TRANSIENT)
+    fileprivate func bind(_ value: String, at index: Int32, in statement: OpaquePointer?) {
+        sqlite3_bind_text(statement, index, value, -1, sqliteTransient)
     }
 
-    func bindOptional(_ value: String?, at index: Int32, in statement: OpaquePointer?) {
+    fileprivate func bindOptional(_ value: String?, at index: Int32, in statement: OpaquePointer?) {
         if let value {
             bind(value, at: index, in: statement)
         } else {
@@ -1822,20 +1862,20 @@ private extension SQLiteYAAWStore {
         }
     }
 
-    func text(at index: Int32, in statement: OpaquePointer?) -> String {
+    fileprivate func text(at index: Int32, in statement: OpaquePointer?) -> String {
         String(cString: sqlite3_column_text(statement, index))
     }
 
-    func optionalText(at index: Int32, in statement: OpaquePointer?) -> String? {
+    fileprivate func optionalText(at index: Int32, in statement: OpaquePointer?) -> String? {
         guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
         return text(at: index, in: statement)
     }
 
-    func stepDone(_ statement: OpaquePointer?) throws {
+    fileprivate func stepDone(_ statement: OpaquePointer?) throws {
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw SQLiteStoreError.executionFailed(errorMessage)
         }
     }
 }
 
-private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)

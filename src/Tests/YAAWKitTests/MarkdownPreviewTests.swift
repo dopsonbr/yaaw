@@ -1,19 +1,20 @@
 import XCTest
+
 @testable import YAAWKit
 
 final class MarkdownPreviewTests: XCTestCase {
     func testRendererBuildsHTMLForMarkdownAndMermaid() {
         let html = MarkdownPreviewRenderer.renderHTML(
             markdown: """
-            # Architecture
+                # Architecture
 
-            See [guide](docs/guide.md).
+                See [guide](docs/guide.md).
 
-            ```mermaid
-            graph TD
-              A[Start] --> B[Done]
-            ```
-            """,
+                ```mermaid
+                graph TD
+                  A[Start] --> B[Done]
+                ```
+                """,
             sourceURL: URL(fileURLWithPath: "/tmp/project/README.md")
         )
 
@@ -27,10 +28,10 @@ final class MarkdownPreviewTests: XCTestCase {
     func testRendererSanitizesUnsafeHTML() {
         let html = MarkdownPreviewRenderer.renderHTML(
             markdown: """
-            <script>alert(1)</script>
-            <a href="javascript:alert(1)" onclick="alert(1)">bad</a>
-            <strong>ok</strong>
-            """,
+                <script>alert(1)</script>
+                <a href="javascript:alert(1)" onclick="alert(1)">bad</a>
+                <strong>ok</strong>
+                """,
             sourceURL: URL(fileURLWithPath: "/tmp/project/README.md")
         )
 
@@ -42,8 +43,11 @@ final class MarkdownPreviewTests: XCTestCase {
 
     func testMarkdownURLDetectionIsCaseInsensitiveForFileURLs() {
         XCTAssertTrue(MarkdownPreviewRenderer.isMarkdownURL(URL(fileURLWithPath: "/tmp/README.MD")))
-        XCTAssertTrue(MarkdownPreviewRenderer.isMarkdownURL(URL(fileURLWithPath: "/tmp/docs/file.markdown")))
-        XCTAssertFalse(MarkdownPreviewRenderer.isMarkdownURL(URL(fileURLWithPath: "/tmp/index.html")))
-        XCTAssertFalse(MarkdownPreviewRenderer.isMarkdownURL(URL(string: "https://example.com/README.md")!))
+        XCTAssertTrue(
+            MarkdownPreviewRenderer.isMarkdownURL(URL(fileURLWithPath: "/tmp/docs/file.markdown")))
+        XCTAssertFalse(
+            MarkdownPreviewRenderer.isMarkdownURL(URL(fileURLWithPath: "/tmp/index.html")))
+        XCTAssertFalse(
+            MarkdownPreviewRenderer.isMarkdownURL(URL(string: "https://example.com/README.md")!))
     }
 }

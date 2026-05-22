@@ -72,18 +72,21 @@ public final class BackgroundFileIndexer: FileIndexing {
         let root = root.standardizedFileURL
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
+            isDirectory.boolValue
+        else {
             throw FileBrowserIndexError.missingRoot(root.path)
         }
 
         let ignoreMatcher = FileBrowserIgnoreMatcher(rules: ignoreRules)
         var entries: [FileBrowserEntry] = []
         var ignoredDirectoryCount = 0
-        guard let enumerator = fileManager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsPackageDescendants]
-        ) else {
+        guard
+            let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsPackageDescendants]
+            )
+        else {
             throw FileBrowserIndexError.missingRoot(root.path)
         }
 
@@ -92,7 +95,9 @@ public final class BackgroundFileIndexer: FileIndexing {
             guard !normalizedPath.isEmpty else { continue }
             let resourceValues = try url.resourceValues(forKeys: [.isDirectoryKey])
             let isDirectory = resourceValues.isDirectory ?? false
-            if isDirectory, ignoreMatcher.shouldIgnore(relativePath: normalizedPath, isDirectory: true) {
+            if isDirectory,
+                ignoreMatcher.shouldIgnore(relativePath: normalizedPath, isDirectory: true)
+            {
                 ignoredDirectoryCount += 1
                 enumerator.skipDescendants()
                 continue
@@ -194,18 +199,24 @@ public enum FuzzyFileMatcher {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedQuery.isEmpty {
             let limitedEntries = limit.map { Array(entries.prefix($0)) } ?? entries
-            return Result(entries: limitedEntries, totalMatches: entries.count, isLimitApplied: limitedEntries.count < entries.count)
+            return Result(
+                entries: limitedEntries, totalMatches: entries.count,
+                isLimitApplied: limitedEntries.count < entries.count)
         }
         if let limit {
             return rankedLimitedResult(entries, query: normalizedQuery, limit: limit)
         }
-        let ranked = entries
+        let ranked =
+            entries
             .compactMap { entry -> RankedFileBrowserEntry? in
-                rank(entry, query: normalizedQuery).map { RankedFileBrowserEntry(entry: entry, rank: $0) }
+                rank(entry, query: normalizedQuery).map {
+                    RankedFileBrowserEntry(entry: entry, rank: $0)
+                }
             }
             .sorted { left, right in
                 if left.rank != right.rank { return left.rank < right.rank }
-                return left.entry.relativePath.localizedStandardCompare(right.entry.relativePath) == .orderedAscending
+                return left.entry.relativePath.localizedStandardCompare(right.entry.relativePath)
+                    == .orderedAscending
             }
         let limitedEntries = limit.map { Array(ranked.prefix($0)) } ?? ranked
         return Result(
@@ -338,8 +349,11 @@ private struct BoundedRankedFileBuffer {
         }
     }
 
-    private static func precedes(_ left: RankedFileBrowserEntry, _ right: RankedFileBrowserEntry) -> Bool {
+    private static func precedes(_ left: RankedFileBrowserEntry, _ right: RankedFileBrowserEntry)
+        -> Bool
+    {
         if left.rank != right.rank { return left.rank < right.rank }
-        return left.entry.relativePath.localizedStandardCompare(right.entry.relativePath) == .orderedAscending
+        return left.entry.relativePath.localizedStandardCompare(right.entry.relativePath)
+            == .orderedAscending
     }
 }

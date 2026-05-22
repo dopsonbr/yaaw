@@ -69,15 +69,15 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
             )
 
             guard let window else { return }
-            [
+            for name in [
                 NSWindow.didMoveNotification,
                 NSWindow.didResizeNotification,
                 NSWindow.didBecomeKeyNotification,
                 NSWindow.didResignKeyNotification,
                 NSWindow.didMiniaturizeNotification,
                 NSWindow.didDeminiaturizeNotification,
-                NSWindow.didChangeOcclusionStateNotification
-            ].forEach { name in
+                NSWindow.didChangeOcclusionStateNotification,
+            ] {
                 center.addObserver(
                     self,
                     selector: #selector(reportFromNotification),
@@ -108,7 +108,8 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
             }
             let windowRect = convert(bounds, to: nil)
             let screenRect = window.convertToScreen(windowRect)
-            let visible = !isHiddenOrHasHiddenAncestor
+            let visible =
+                !isHiddenOrHasHiddenAncestor
                 && window.isVisible
                 && NSApp.isActive
                 && screenRect.width > 1

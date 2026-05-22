@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import YAAWKit
 
 final class DraculaThemeTests: XCTestCase {
@@ -20,7 +21,7 @@ final class DraculaThemeTests: XCTestCase {
                 "monokai",
                 "solarized-dark",
                 "dark-high-contrast",
-                "light-high-contrast"
+                "light-high-contrast",
             ]
         )
     }
@@ -76,7 +77,7 @@ final class DraculaThemeTests: XCTestCase {
                 "#d6acff",
                 "#ff92df",
                 "#a4ffff",
-                "#ffffff"
+                "#ffffff",
             ]
         )
     }

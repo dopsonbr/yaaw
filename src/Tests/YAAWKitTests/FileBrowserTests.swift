@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import YAAWKit
 
 final class FileBrowserTests: XCTestCase {
@@ -11,11 +12,14 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "Music", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "Movies", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "Pictures", isDirectory: true))
-        XCTAssertTrue(matcher.shouldIgnore(relativePath: "Pictures/Photos Library.photoslibrary", isDirectory: true))
+        XCTAssertTrue(
+            matcher.shouldIgnore(
+                relativePath: "Pictures/Photos Library.photoslibrary", isDirectory: true))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "dist", isDirectory: false))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "src/.build", isDirectory: false))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: ".env", isDirectory: false))
-        XCTAssertFalse(matcher.shouldIgnore(relativePath: "src/.config/settings.json", isDirectory: false))
+        XCTAssertFalse(
+            matcher.shouldIgnore(relativePath: "src/.config/settings.json", isDirectory: false))
     }
 
     func testPathNormalizationRemovesRootAndCollapsesSeparators() throws {
@@ -23,7 +27,9 @@ final class FileBrowserTests: XCTestCase {
         let file = URL(fileURLWithPath: "/tmp/project/src//App.swift")
 
         XCTAssertEqual(FilePathNormalizer.relativePath(for: file, from: root), "src/App.swift")
-        XCTAssertEqual(FilePathNormalizer.normalizedRelativePath("./src\\Core//AppModel.swift"), "src/Core/AppModel.swift")
+        XCTAssertEqual(
+            FilePathNormalizer.normalizedRelativePath("./src\\Core//AppModel.swift"),
+            "src/Core/AppModel.swift")
         XCTAssertEqual(FilePathNormalizer.normalizedRule(" /node_modules/ "), "node_modules")
     }
 
@@ -32,16 +38,18 @@ final class FileBrowserTests: XCTestCase {
             FileBrowserEntry(relativePath: "src/r/e/a/d/m/e.swift", isDirectory: false),
             FileBrowserEntry(relativePath: "docs/README.md", isDirectory: false),
             FileBrowserEntry(relativePath: "README", isDirectory: false),
-            FileBrowserEntry(relativePath: "src/other.swift", isDirectory: false)
+            FileBrowserEntry(relativePath: "src/other.swift", isDirectory: false),
         ]
 
         let ranked = FuzzyFileMatcher.rankedEntries(entries, query: "readme")
 
-        XCTAssertEqual(ranked.map(\.relativePath), [
-            "README",
-            "docs/README.md",
-            "src/r/e/a/d/m/e.swift"
-        ])
+        XCTAssertEqual(
+            ranked.map(\.relativePath),
+            [
+                "README",
+                "docs/README.md",
+                "src/r/e/a/d/m/e.swift",
+            ])
     }
 
     func testFuzzyRankingLimitedResultKeepsBestMatchesAndCountsAllMatches() {
@@ -50,12 +58,13 @@ final class FileBrowserTests: XCTestCase {
             FileBrowserEntry(relativePath: "Target.swift", isDirectory: false),
             FileBrowserEntry(relativePath: "docs/target-notes.md", isDirectory: false),
             FileBrowserEntry(relativePath: "src/t/a/r/g/e/t.swift", isDirectory: false),
-            FileBrowserEntry(relativePath: "src/unrelated.swift", isDirectory: false)
+            FileBrowserEntry(relativePath: "src/unrelated.swift", isDirectory: false),
         ]
 
         let result = FuzzyFileMatcher.rankedResult(entries, query: "target", limit: 2)
 
-        XCTAssertEqual(result.entries.map(\.relativePath), ["Target.swift", "docs/target-notes.md"])
+        XCTAssertEqual(
+            result.entries.map(\.relativePath), ["Target.swift", "docs/target-notes.md"])
         XCTAssertEqual(result.totalMatches, 4)
         XCTAssertTrue(result.isLimitApplied)
     }
@@ -67,16 +76,20 @@ final class FileBrowserTests: XCTestCase {
             FileBrowserEntry(relativePath: "src", isDirectory: true),
             FileBrowserEntry(relativePath: "src/App.swift", isDirectory: false),
             FileBrowserEntry(relativePath: "src/Core", isDirectory: true),
-            FileBrowserEntry(relativePath: "src/Core/AppModel.swift", isDirectory: false)
+            FileBrowserEntry(relativePath: "src/Core/AppModel.swift", isDirectory: false),
         ]
 
-        let collapsed = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: [], limit: 10)
+        let collapsed = FileBrowserTreeBuilder.visibleRows(
+            from: entries, expandedFolders: [], limit: 10)
         XCTAssertEqual(collapsed.map(\.entry.relativePath), ["docs", "src"])
 
-        let expanded = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: ["src"], limit: 10)
-        XCTAssertEqual(expanded.map(\.entry.relativePath), ["docs", "src", "src/App.swift", "src/Core"])
+        let expanded = FileBrowserTreeBuilder.visibleRows(
+            from: entries, expandedFolders: ["src"], limit: 10)
+        XCTAssertEqual(
+            expanded.map(\.entry.relativePath), ["docs", "src", "src/App.swift", "src/Core"])
 
-        let limited = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: ["src"], limit: 2)
+        let limited = FileBrowserTreeBuilder.visibleRows(
+            from: entries, expandedFolders: ["src"], limit: 2)
         XCTAssertEqual(limited.map(\.entry.relativePath), ["docs", "src"])
     }
 
@@ -104,11 +117,14 @@ final class FileBrowserTests: XCTestCase {
 
         XCTAssertEqual(presented.count, 10_000)
         XCTAssertTrue(presented.contains { !$0.isDirectory })
-        XCTAssertTrue(rows.contains(FileBrowserVisibleTreeRow(
-            entry: FileBrowserEntry(relativePath: "dir_00000/file_00000.swift", isDirectory: false),
-            displayName: "file_00000.swift",
-            depth: 1
-        )))
+        XCTAssertTrue(
+            rows.contains(
+                FileBrowserVisibleTreeRow(
+                    entry: FileBrowserEntry(
+                        relativePath: "dir_00000/file_00000.swift", isDirectory: false),
+                    displayName: "file_00000.swift",
+                    depth: 1
+                )))
     }
 
     func testTemporaryDirectoryIndexUsesTreeOrderWithFilesNearParents() throws {
@@ -125,13 +141,15 @@ final class FileBrowserTests: XCTestCase {
             indexedAt: Date(timeIntervalSince1970: 123)
         )
 
-        XCTAssertEqual(result.entries.map(\.relativePath), [
-            "a-dir",
-            "a-dir/file.swift",
-            "b-dir",
-            "b-dir/file.swift",
-            "root-file.swift"
-        ])
+        XCTAssertEqual(
+            result.entries.map(\.relativePath),
+            [
+                "a-dir",
+                "a-dir/file.swift",
+                "b-dir",
+                "b-dir/file.swift",
+                "root-file.swift",
+            ])
     }
 
     func testTemporaryDirectoryIndexIncludesHiddenFilesAndSkipsIgnoredDirectories() throws {
@@ -143,7 +161,8 @@ final class FileBrowserTests: XCTestCase {
         try writeFile(root.appendingPathComponent(".git/config"), contents: "ignored")
         try writeFile(root.appendingPathComponent("dist/app.js"), contents: "ignored")
         try writeFile(root.appendingPathComponent("DerivedData/build.log"), contents: "ignored")
-        try writeFile(root.appendingPathComponent("Music/Music Library.musiclibrary/db"), contents: "ignored")
+        try writeFile(
+            root.appendingPathComponent("Music/Music Library.musiclibrary/db"), contents: "ignored")
         let threadID = UUID()
 
         let result = try BackgroundFileIndexer.buildIndex(
@@ -157,13 +176,18 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(result.metadata.rootPath, root.standardizedFileURL.path)
         XCTAssertEqual(result.metadata.fileCount, result.entries.count)
         XCTAssertEqual(result.metadata.ignoredDirectoryCount, 5)
-        XCTAssertTrue(result.entries.contains(FileBrowserEntry(relativePath: ".env", isDirectory: false)))
-        XCTAssertTrue(result.entries.contains(FileBrowserEntry(relativePath: "src", isDirectory: true)))
-        XCTAssertTrue(result.entries.contains(FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false)))
+        XCTAssertTrue(
+            result.entries.contains(FileBrowserEntry(relativePath: ".env", isDirectory: false)))
+        XCTAssertTrue(
+            result.entries.contains(FileBrowserEntry(relativePath: "src", isDirectory: true)))
+        XCTAssertTrue(
+            result.entries.contains(
+                FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false)))
         XCTAssertFalse(result.entries.contains { $0.relativePath.contains("node_modules") })
         XCTAssertFalse(result.entries.contains { $0.relativePath.contains(".git") })
         XCTAssertFalse(result.entries.contains { $0.relativePath.contains("Music") })
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".yaaw").path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: root.appendingPathComponent(".yaaw").path))
     }
 
     func testCacheKeyIncludesDirectoryBranchAndIgnoreRules() throws {
@@ -176,7 +200,8 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(mainKey.value, sameMainKey.value)
         XCTAssertEqual(mainKey.gitIdentity, "branch:refs/heads/main")
 
-        try writeFile(root.appendingPathComponent(".git/HEAD"), contents: "ref: refs/heads/feature\n")
+        try writeFile(
+            root.appendingPathComponent(".git/HEAD"), contents: "ref: refs/heads/feature\n")
         let featureKey = FileIndexCacheKey(root: root, ignoreRules: [".git", "node_modules"])
 
         XCTAssertNotEqual(mainKey.value, featureKey.value)
@@ -203,7 +228,8 @@ final class FileBrowserTests: XCTestCase {
         let coordinator = FileIndexCacheCoordinator(store: store, fileIndexer: indexer)
         let firstThreadID = UUID()
         let secondThreadID = UUID()
-        let cacheKey = coordinator.cacheKey(root: root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
+        let cacheKey = coordinator.cacheKey(
+            root: root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
         let entry = FileBrowserEntry(relativePath: "README.md", isDirectory: false)
         let firstResult = FileIndexResultBox()
         let secondResult = FileIndexResultBox()
@@ -250,13 +276,16 @@ final class FileBrowserTests: XCTestCase {
 
         XCTAssertEqual(model.selectedThreadID, fixture.secondThreadID)
         XCTAssertTrue(model.layoutState.isRightPanelCollapsed)
-        XCTAssertTrue(model.fileBrowserState.isIndexing == false || model.fileBrowserState.rootPath == fixture.secondRoot.path)
+        XCTAssertTrue(
+            model.fileBrowserState.isIndexing == false
+                || model.fileBrowserState.rootPath == fixture.secondRoot.path)
     }
 
     func testAppModelShowsSharedCachedEntriesWhileRefreshIsInProgress() throws {
         let fixture = AppModelFixtureForSharedFiles()
         let store = fixture.store
-        let cacheKey = FileIndexCacheKey(root: fixture.root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
+        let cacheKey = FileIndexCacheKey(
+            root: fixture.root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
         let cachedEntry = FileBrowserEntry(relativePath: "cached.swift", isDirectory: false)
         store.upsertCachedFileIndex(
             CachedFileIndex(
@@ -300,7 +329,10 @@ final class FileBrowserTests: XCTestCase {
 
         indexer.completeRequest(
             at: 0,
-            result: .success(indexer.result(threadID: fixture.firstThreadID, root: fixture.firstRoot, entries: [secondEntry]))
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot, entries: [secondEntry]
+                ))
         )
 
         XCTAssertEqual(model.fileBrowserState.entries, [secondEntry])
@@ -311,7 +343,8 @@ final class FileBrowserTests: XCTestCase {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
         let recorder = RecordingDiagnosticEventRecorder()
-        let model = AppModel(store: fixture.store, fileIndexer: indexer, diagnosticRecorder: recorder)
+        let model = AppModel(
+            store: fixture.store, fileIndexer: indexer, diagnosticRecorder: recorder)
         let entries = Self.largeSyntheticEntries(count: 150_000)
         let targetPath = "zz-special/needle-target.swift"
         let adjacentTargetPath = "zz-special/needle-target-next.swift"
@@ -319,19 +352,20 @@ final class FileBrowserTests: XCTestCase {
         model.refreshSelectedFileBrowser()
         indexer.completeRequest(
             at: 0,
-            result: .success(FileIndexResult(
-                entries: entries + [
-                    FileBrowserEntry(relativePath: targetPath, isDirectory: false),
-                    FileBrowserEntry(relativePath: adjacentTargetPath, isDirectory: false)
-                ],
-                metadata: FileIndexMetadata(
-                    threadID: fixture.firstThreadID,
-                    rootPath: fixture.firstRoot.path,
-                    indexedAt: Date(),
-                    fileCount: entries.count + 2,
-                    ignoredDirectoryCount: 0
-                )
-            ))
+            result: .success(
+                FileIndexResult(
+                    entries: entries + [
+                        FileBrowserEntry(relativePath: targetPath, isDirectory: false),
+                        FileBrowserEntry(relativePath: adjacentTargetPath, isDirectory: false),
+                    ],
+                    metadata: FileIndexMetadata(
+                        threadID: fixture.firstThreadID,
+                        rootPath: fixture.firstRoot.path,
+                        indexedAt: Date(),
+                        fileCount: entries.count + 2,
+                        ignoredDirectoryCount: 0
+                    )
+                ))
         )
 
         XCTAssertEqual(model.fileBrowserState.entries.count, 10_000)
@@ -340,7 +374,9 @@ final class FileBrowserTests: XCTestCase {
 
         model.updateFileSearchQuery("needle-target")
 
-        XCTAssertEqual(model.fileBrowserState.visibleEntries.map(\.relativePath), [targetPath, adjacentTargetPath])
+        XCTAssertEqual(
+            model.fileBrowserState.visibleEntries.map(\.relativePath),
+            [targetPath, adjacentTargetPath])
         model.selectFile(relativePath: targetPath)
         XCTAssertEqual(model.selectedFileRelativePath, targetPath)
         model.selectAdjacentFile(direction: .down)
@@ -360,16 +396,17 @@ final class FileBrowserTests: XCTestCase {
         model.refreshSelectedFileBrowser()
         indexer.completeRequest(
             at: 0,
-            result: .success(FileIndexResult(
-                entries: entries,
-                metadata: FileIndexMetadata(
-                    threadID: fixture.firstThreadID,
-                    rootPath: fixture.firstRoot.path,
-                    indexedAt: Date(),
-                    fileCount: entries.count,
-                    ignoredDirectoryCount: 0
-                )
-            ))
+            result: .success(
+                FileIndexResult(
+                    entries: entries,
+                    metadata: FileIndexMetadata(
+                        threadID: fixture.firstThreadID,
+                        rootPath: fixture.firstRoot.path,
+                        indexedAt: Date(),
+                        fileCount: entries.count,
+                        ignoredDirectoryCount: 0
+                    )
+                ))
         )
 
         model.updateFileSearchQuery("module_11")
@@ -390,16 +427,17 @@ final class FileBrowserTests: XCTestCase {
         model.refreshSelectedFileBrowser()
         indexer.completeRequest(
             at: 0,
-            result: .success(FileIndexResult(
-                entries: entries,
-                metadata: FileIndexMetadata(
-                    threadID: fixture.firstThreadID,
-                    rootPath: fixture.firstRoot.path,
-                    indexedAt: Date(),
-                    fileCount: entries.count,
-                    ignoredDirectoryCount: 0
-                )
-            ))
+            result: .success(
+                FileIndexResult(
+                    entries: entries,
+                    metadata: FileIndexMetadata(
+                        threadID: fixture.firstThreadID,
+                        rootPath: fixture.firstRoot.path,
+                        indexedAt: Date(),
+                        fileCount: entries.count,
+                        ignoredDirectoryCount: 0
+                    )
+                ))
         )
 
         XCTAssertEqual(model.fileBrowserState.entries.count, 10_000)
@@ -414,36 +452,42 @@ final class FileBrowserTests: XCTestCase {
             FileBrowserEntry(relativePath: "src", isDirectory: true),
             FileBrowserEntry(relativePath: "src/generated", isDirectory: true),
             FileBrowserEntry(relativePath: "tests", isDirectory: true),
-            FileBrowserEntry(relativePath: "tests/generated", isDirectory: true)
+            FileBrowserEntry(relativePath: "tests/generated", isDirectory: true),
         ]
         entries.reserveCapacity(count + entries.count)
         for index in 0..<count {
             let root = index.isMultiple(of: 2) ? "src/generated" : "tests/generated"
-            entries.append(FileBrowserEntry(relativePath: "\(root)/module_\(index).swift", isDirectory: false))
+            entries.append(
+                FileBrowserEntry(relativePath: "\(root)/module_\(index).swift", isDirectory: false))
         }
         return entries
     }
 
-    private static func directoryHeavyEntries(directoryCount: Int, fileCount: Int) -> [FileBrowserEntry] {
+    private static func directoryHeavyEntries(directoryCount: Int, fileCount: Int)
+        -> [FileBrowserEntry]
+    {
         var entries: [FileBrowserEntry] = []
         entries.reserveCapacity(directoryCount + fileCount)
         for index in 0..<directoryCount {
-            entries.append(FileBrowserEntry(
-                relativePath: String(format: "dir_%05d", index),
-                isDirectory: true
-            ))
+            entries.append(
+                FileBrowserEntry(
+                    relativePath: String(format: "dir_%05d", index),
+                    isDirectory: true
+                ))
         }
         for index in 0..<fileCount {
-            entries.append(FileBrowserEntry(
-                relativePath: String(format: "dir_%05d/file_%05d.swift", index, index),
-                isDirectory: false
-            ))
+            entries.append(
+                FileBrowserEntry(
+                    relativePath: String(format: "dir_%05d/file_%05d.swift", index, index),
+                    isDirectory: false
+                ))
         }
         return entries
     }
 
     private func writeFile(_ url: URL, contents: String) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
@@ -499,7 +543,8 @@ private final class FileIndexResultBox: @unchecked Sendable {
     var value: FileIndexResult?
 }
 
-private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable {
+private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable
+{
     private(set) var events: [DiagnosticEvent] = []
 
     func record(_ event: DiagnosticEvent) {
@@ -531,7 +576,7 @@ private struct AppModelFixtureForSharedFiles {
                         displayName: "Second",
                         projectID: projectID,
                         workingDirectory: root
-                    )
+                    ),
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: firstThreadID,
@@ -557,7 +602,9 @@ private struct AppModelFixtureForFiles {
         try? FileManager.default.createDirectory(at: secondRoot, withIntermediateDirectories: true)
         return InMemoryYAAWStore(
             snapshot: YAAWSnapshot(
-                projects: [Project(id: projectID, displayName: "Project", rootDirectory: firstRoot)],
+                projects: [
+                    Project(id: projectID, displayName: "Project", rootDirectory: firstRoot)
+                ],
                 threads: [
                     AgentThread(
                         id: firstThreadID,
@@ -570,7 +617,7 @@ private struct AppModelFixtureForFiles {
                         displayName: "Second",
                         projectID: projectID,
                         workingDirectory: secondRoot
-                    )
+                    ),
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: firstThreadID,

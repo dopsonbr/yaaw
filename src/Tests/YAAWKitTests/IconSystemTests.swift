@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import YAAWKit
 
 final class IconSystemTests: XCTestCase {
@@ -24,15 +25,20 @@ final class IconSystemTests: XCTestCase {
         let resolver = FileIconResolver(pack: .material)
 
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "src/App.test.ts", isDirectory: false)).bundledAssetID,
+            resolver.icon(
+                for: FileBrowserEntry(relativePath: "src/App.test.ts", isDirectory: false)
+            ).bundledAssetID,
             "material-file-icons/typescript"
         )
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "src/types.d.ts", isDirectory: false)).bundledAssetID,
+            resolver.icon(for: FileBrowserEntry(relativePath: "src/types.d.ts", isDirectory: false))
+                .bundledAssetID,
             "material-file-icons/typescript"
         )
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "src/App.module.css", isDirectory: false)).bundledAssetID,
+            resolver.icon(
+                for: FileBrowserEntry(relativePath: "src/App.module.css", isDirectory: false)
+            ).bundledAssetID,
             "material-file-icons/css"
         )
     }
@@ -41,11 +47,15 @@ final class IconSystemTests: XCTestCase {
         let resolver = FileIconResolver(pack: .material)
 
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false)).bundledAssetID,
+            resolver.icon(for: FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false))
+                .bundledAssetID,
             "material-file-icons/swift"
         )
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: ".github/workflows/build.yml", isDirectory: false)).bundledAssetID,
+            resolver.icon(
+                for: FileBrowserEntry(
+                    relativePath: ".github/workflows/build.yml", isDirectory: false)
+            ).bundledAssetID,
             "material-file-icons/yaml"
         )
     }
@@ -54,15 +64,22 @@ final class IconSystemTests: XCTestCase {
         let resolver = FileIconResolver(pack: .material)
 
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "src", isDirectory: true), isExpanded: false).bundledAssetID,
+            resolver.icon(
+                for: FileBrowserEntry(relativePath: "src", isDirectory: true), isExpanded: false
+            ).bundledAssetID,
             "material-file-icons/src-folder"
         )
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "Examples", isDirectory: true), isExpanded: true).bundledAssetID,
+            resolver.icon(
+                for: FileBrowserEntry(relativePath: "Examples", isDirectory: true), isExpanded: true
+            ).bundledAssetID,
             "material-file-icons/open-folder"
         )
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "Examples", isDirectory: true), isExpanded: false).bundledAssetID,
+            resolver.icon(
+                for: FileBrowserEntry(relativePath: "Examples", isDirectory: true),
+                isExpanded: false
+            ).bundledAssetID,
             "material-file-icons/folder"
         )
     }
@@ -71,7 +88,8 @@ final class IconSystemTests: XCTestCase {
         let resolver = FileIconResolver(pack: .material)
 
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "unknown.blob", isDirectory: false)).bundledAssetID,
+            resolver.icon(for: FileBrowserEntry(relativePath: "unknown.blob", isDirectory: false))
+                .bundledAssetID,
             "material-file-icons/file"
         )
     }
@@ -80,7 +98,8 @@ final class IconSystemTests: XCTestCase {
         let resolver = FileIconResolver(pack: .catppuccin)
 
         XCTAssertEqual(
-            resolver.icon(for: FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false)).bundledAssetID,
+            resolver.icon(for: FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false))
+                .bundledAssetID,
             "catppuccin-file-icons/swift"
         )
     }
@@ -93,7 +112,9 @@ final class IconSystemTests: XCTestCase {
         XCTAssertEqual(IconRole.rightPanelMode(.git).icon.systemSymbolName, "arrow.triangle.branch")
         XCTAssertEqual(IconRole.rightPanelMode(.nvim).icon.systemSymbolName, "square.and.pencil")
         XCTAssertEqual(IconRole.fileStateOverlay(.modified).icon.systemSymbolName, "circle.fill")
-        XCTAssertEqual(IconRole.fileStateOverlay(.conflicted).icon.systemSymbolName, "exclamationmark.triangle.fill")
+        XCTAssertEqual(
+            IconRole.fileStateOverlay(.conflicted).icon.systemSymbolName,
+            "exclamationmark.triangle.fill")
     }
 
     func testAgentCLIKindsExposeBrandIconResourceNamesAndFallbackSymbols() {
@@ -110,8 +131,8 @@ final class IconSystemTests: XCTestCase {
     }
 }
 
-private extension AppIcon {
-    var bundledAssetID: String? {
+extension AppIcon {
+    fileprivate var bundledAssetID: String? {
         if case .bundledAsset(let asset) = self {
             return asset.id
         }

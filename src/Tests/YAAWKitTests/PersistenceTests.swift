@@ -1,5 +1,6 @@
-import XCTest
 import SQLite3
+import XCTest
+
 @testable import YAAWKit
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -124,7 +125,8 @@ final class PersistenceTests: XCTestCase {
         XCTAssertThrowsError(try SQLiteYAAWStore(databasePath: path)) { error in
             XCTAssertEqual(
                 error as? SQLiteStoreError,
-                .executionFailed("Cannot migrate existing threads without explicit agent_cli choices")
+                .executionFailed(
+                    "Cannot migrate existing threads without explicit agent_cli choices")
             )
         }
     }
@@ -219,7 +221,7 @@ final class PersistenceTests: XCTestCase {
                     agentCLI: .claude,
                     createdAt: createdAt,
                     lastOpenedAt: createdAt
-                )
+                ),
             ],
             selectedProjectID: projectID,
             selectedThreadID: secondThreadID,
@@ -240,8 +242,11 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.selectedThreadID, secondThreadID)
         XCTAssertEqual(reloaded.rightPanelModesByThreadID[firstThreadID], .git)
         XCTAssertEqual(reloaded.rightPanelModesByThreadID[secondThreadID], .nvim)
-        XCTAssertEqual(reloaded.rightPanelStatesByThreadID[firstThreadID]?.selectedTabID, RightPanelTab.gitID)
-        XCTAssertEqual(reloaded.rightPanelStatesByThreadID[secondThreadID]?.selectedTabID, RightPanelTab.defaultNvimID)
+        XCTAssertEqual(
+            reloaded.rightPanelStatesByThreadID[firstThreadID]?.selectedTabID, RightPanelTab.gitID)
+        XCTAssertEqual(
+            reloaded.rightPanelStatesByThreadID[secondThreadID]?.selectedTabID,
+            RightPanelTab.defaultNvimID)
         XCTAssertTrue(reloaded.isGlobalTerminalExpanded)
     }
 
@@ -267,7 +272,9 @@ final class PersistenceTests: XCTestCase {
             YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
                 threads: [
-                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                    AgentThread(
+                        id: threadID, displayName: "Thread", projectID: projectID,
+                        workingDirectory: root)
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: threadID,
@@ -296,7 +303,9 @@ final class PersistenceTests: XCTestCase {
             YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
                 threads: [
-                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                    AgentThread(
+                        id: threadID, displayName: "Thread", projectID: projectID,
+                        workingDirectory: root)
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: threadID,
@@ -322,14 +331,18 @@ final class PersistenceTests: XCTestCase {
         let threadID = UUID()
         let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
         var state = RightPanelState.defaultState(selectedMode: .files)
-        let selectedTab = state.openBrowserTab(urlString: "https://example.com/docs", relativePath: nil)
-        _ = state.openBrowserTab(urlString: "file:///tmp/yaaw/index.html", relativePath: "index.html")
+        let selectedTab = state.openBrowserTab(
+            urlString: "https://example.com/docs", relativePath: nil)
+        _ = state.openBrowserTab(
+            urlString: "file:///tmp/yaaw/index.html", relativePath: "index.html")
 
         store.save(
             YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
                 threads: [
-                    AgentThread(id: threadID, displayName: "Thread", projectID: projectID, workingDirectory: root)
+                    AgentThread(
+                        id: threadID, displayName: "Thread", projectID: projectID,
+                        workingDirectory: root)
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: threadID,
@@ -424,12 +437,18 @@ final class PersistenceTests: XCTestCase {
         let reloaded = try SQLiteYAAWStore(databasePath: path).load()
 
         XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
-        XCTAssertTrue(try sqliteTableColumns(path: path, table: "right_panel_tabs").contains("tab_id"))
-        XCTAssertTrue(try sqliteTableColumns(path: path, table: "right_panel_tabs").contains("url_string"))
-        XCTAssertEqual(reloaded.rightPanelStatesByThreadID[threadID]?.selectedTabID, RightPanelTab.gitID)
+        XCTAssertTrue(
+            try sqliteTableColumns(path: path, table: "right_panel_tabs").contains("tab_id"))
+        XCTAssertTrue(
+            try sqliteTableColumns(path: path, table: "right_panel_tabs").contains("url_string"))
+        XCTAssertEqual(
+            reloaded.rightPanelStatesByThreadID[threadID]?.selectedTabID, RightPanelTab.gitID)
         XCTAssertEqual(
             reloaded.rightPanelStatesByThreadID[threadID]?.tabs.map(\.id),
-            [RightPanelTab.filesID, RightPanelTab.defaultBrowserID, RightPanelTab.gitID, RightPanelTab.defaultNvimID]
+            [
+                RightPanelTab.filesID, RightPanelTab.defaultBrowserID, RightPanelTab.gitID,
+                RightPanelTab.defaultNvimID,
+            ]
         )
     }
 
@@ -454,7 +473,8 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.layoutState.rightPanelWidth, layoutState.rightPanelWidth)
         XCTAssertEqual(reloaded.layoutState.globalTerminalHeight, layoutState.globalTerminalHeight)
         XCTAssertEqual(reloaded.layoutState.isSidebarCollapsed, layoutState.isSidebarCollapsed)
-        XCTAssertEqual(reloaded.layoutState.isRightPanelCollapsed, layoutState.isRightPanelCollapsed)
+        XCTAssertEqual(
+            reloaded.layoutState.isRightPanelCollapsed, layoutState.isRightPanelCollapsed)
         XCTAssertFalse(reloaded.layoutState.isGlobalTerminalExpanded)
     }
 
@@ -567,8 +587,12 @@ final class PersistenceTests: XCTestCase {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         _ = try SQLiteYAAWStore(databasePath: path)
 
-        XCTAssertTrue(try sqliteTableColumns(path: path, table: "file_index_cache_metadata").contains("cache_key"))
-        XCTAssertTrue(try sqliteTableColumns(path: path, table: "file_index_cache_entries").contains("relative_path"))
+        XCTAssertTrue(
+            try sqliteTableColumns(path: path, table: "file_index_cache_metadata").contains(
+                "cache_key"))
+        XCTAssertTrue(
+            try sqliteTableColumns(path: path, table: "file_index_cache_entries").contains(
+                "relative_path"))
         XCTAssertEqual(try sqliteUserVersion(path: path), SQLiteYAAWStore.schemaVersion)
     }
 
@@ -626,12 +650,13 @@ final class PersistenceTests: XCTestCase {
         )
         let entries = [
             FileBrowserEntry(relativePath: "src", isDirectory: true),
-            FileBrowserEntry(relativePath: "src/App.swift", isDirectory: false)
+            FileBrowserEntry(relativePath: "src/App.swift", isDirectory: false),
         ]
 
         store.upsertCachedFileIndex(CachedFileIndex(metadata: metadata, entries: entries))
 
-        let cached = try XCTUnwrap(SQLiteYAAWStore(databasePath: path).cachedFileIndex(cacheKey: "file-index:v1:test"))
+        let cached = try XCTUnwrap(
+            SQLiteYAAWStore(databasePath: path).cachedFileIndex(cacheKey: "file-index:v1:test"))
 
         XCTAssertEqual(cached.metadata.cacheKey, metadata.cacheKey)
         XCTAssertEqual(cached.metadata.rootPath, metadata.rootPath)
@@ -686,8 +711,12 @@ final class PersistenceTests: XCTestCase {
             YAAWSnapshot(
                 projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
                 threads: [
-                    AgentThread(id: firstThreadID, displayName: "First", projectID: projectID, workingDirectory: root),
-                    AgentThread(id: secondThreadID, displayName: "Second", projectID: projectID, workingDirectory: root)
+                    AgentThread(
+                        id: firstThreadID, displayName: "First", projectID: projectID,
+                        workingDirectory: root),
+                    AgentThread(
+                        id: secondThreadID, displayName: "Second", projectID: projectID,
+                        workingDirectory: root),
                 ],
                 selectedProjectID: projectID,
                 selectedThreadID: firstThreadID,
@@ -715,18 +744,24 @@ final class PersistenceTests: XCTestCase {
         store.save(
             YAAWSnapshot(
                 projects: [
-                    Project(id: firstProjectID, displayName: "First", rootDirectory: root, isPinned: false, sortOrder: 0),
-                    Project(id: secondProjectID, displayName: "Second", rootDirectory: root, isPinned: true, sortOrder: 0)
+                    Project(
+                        id: firstProjectID, displayName: "First", rootDirectory: root,
+                        isPinned: false, sortOrder: 0),
+                    Project(
+                        id: secondProjectID, displayName: "Second", rootDirectory: root,
+                        isPinned: true, sortOrder: 0),
                 ],
                 threads: [
-                    AgentThread(id: firstThreadID, displayName: "First", projectID: firstProjectID, workingDirectory: root),
+                    AgentThread(
+                        id: firstThreadID, displayName: "First", projectID: firstProjectID,
+                        workingDirectory: root),
                     AgentThread(
                         id: secondThreadID,
                         displayName: "Second",
                         projectID: secondProjectID,
                         workingDirectory: root,
                         isPinned: true
-                    )
+                    ),
                 ],
                 selectedProjectID: secondProjectID,
                 selectedThreadID: secondThreadID,
@@ -817,7 +852,8 @@ final class PersistenceTests: XCTestCase {
 
         XCTAssertEqual(reloaded.layoutState.sidebarWidth, 333)
         XCTAssertEqual(reloaded.layoutState.rightPanelWidth, LayoutState.defaultRightPanelWidth)
-        XCTAssertEqual(reloaded.layoutState.globalTerminalHeight, LayoutState.defaultGlobalTerminalHeight)
+        XCTAssertEqual(
+            reloaded.layoutState.globalTerminalHeight, LayoutState.defaultGlobalTerminalHeight)
         XCTAssertFalse(reloaded.layoutState.isSidebarCollapsed)
         XCTAssertFalse(reloaded.layoutState.isRightPanelCollapsed)
         XCTAssertFalse(reloaded.layoutState.isGlobalTerminalExpanded)
@@ -833,7 +869,11 @@ final class PersistenceTests: XCTestCase {
             workingDirectory: URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
         )
         let snapshot = YAAWSnapshot(
-            projects: [Project(id: projectID, displayName: "Project", rootDirectory: invalidThread.workingDirectory)],
+            projects: [
+                Project(
+                    id: projectID, displayName: "Project",
+                    rootDirectory: invalidThread.workingDirectory)
+            ],
             threads: [invalidThread],
             selectedProjectID: projectID,
             selectedThreadID: invalidThread.id,
@@ -895,7 +935,9 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(template.contains("interfaceFamily: system"))
         XCTAssertTrue(template.contains("editorFamily: system-monospace"))
         XCTAssertTrue(template.contains("terminalSize: 12"))
-        XCTAssertTrue(template.contains("# not changeable yet: custom palettes are reserved for future expansion."))
+        XCTAssertTrue(
+            template.contains(
+                "# not changeable yet: custom palettes are reserved for future expansion."))
     }
 
     func testYAMLConfigurationRawTextLoadSeedsDefaultFile() throws {
@@ -915,19 +957,19 @@ final class PersistenceTests: XCTestCase {
 
         let configuration = try store.validate(
             text: """
-            version: 1
-            agent:
-              default: claude
-            icons:
-              fileBrowserPack: catppuccin-file-icons
-            fonts:
-              interfaceFamily: Avenir Next
-              interfaceSize: 14.5
-              editorFamily: SF Mono
-              editorSize: 15
-              terminalFamily: JetBrains Mono
-              terminalSize: 16
-            """
+                version: 1
+                agent:
+                  default: claude
+                icons:
+                  fileBrowserPack: catppuccin-file-icons
+                fonts:
+                  interfaceFamily: Avenir Next
+                  interfaceSize: 14.5
+                  editorFamily: SF Mono
+                  editorSize: 15
+                  terminalFamily: JetBrains Mono
+                  terminalSize: 16
+                """
         )
 
         XCTAssertEqual(configuration.defaultAgentCLI, .claude)
@@ -946,10 +988,10 @@ final class PersistenceTests: XCTestCase {
 
         let configuration = try store.validate(
             text: """
-            version: 1
-            theme:
-              active: dark-plus
-            """
+                version: 1
+                theme:
+                  active: dark-plus
+                """
         )
 
         XCTAssertEqual(configuration.themeName, "dark-plus")
@@ -960,11 +1002,11 @@ final class PersistenceTests: XCTestCase {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         let store = YAMLConfigurationStore(path: path)
         let text = """
-        # custom settings comment
-        version: 1
-        agent:
-          default: claude
-        """
+            # custom settings comment
+            version: 1
+            agent:
+              default: claude
+            """
 
         try store.saveText(text)
 
@@ -976,11 +1018,11 @@ final class PersistenceTests: XCTestCase {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         let store = YAMLConfigurationStore(path: path)
         let original = """
-        # keep me
-        version: 1
-        agent:
-          default: codex
-        """
+            # keep me
+            version: 1
+            agent:
+              default: codex
+            """
         try store.saveText(original)
 
         XCTAssertThrowsError(try store.saveText("{ nope"))
@@ -991,7 +1033,8 @@ final class PersistenceTests: XCTestCase {
 
     func testYAMLConfigurationLoadsOverridesAndUnknownKeys() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
-        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(
             """
             version: 1
@@ -1045,7 +1088,8 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.fonts.terminalFamily, "JetBrains Mono")
         XCTAssertEqual(reloaded.fonts.terminalSize, 16)
         XCTAssertEqual(reloaded.shortcut(for: .toggleBottomTerminal).key, "k")
-        XCTAssertEqual(reloaded.shortcut(for: .toggleBottomTerminal).modifiers, [.command, .option])
+        XCTAssertEqual(
+            reloaded.shortcut(for: .toggleBottomTerminal).modifiers, [.command, .option])
         XCTAssertEqual(reloaded.tools.editors.preferred, ["zed", "nvim"])
         XCTAssertEqual(reloaded.tools.externalOpen.defaultToolID, .vscode)
         XCTAssertEqual(reloaded.tools.externalOpen.preferredToolIDs, [.webstorm, .vscode, .finder])
@@ -1065,48 +1109,53 @@ final class PersistenceTests: XCTestCase {
     }
 
     func testYAMLConfigurationAllowsUnboundKeyboardShortcuts() throws {
-        let store = YAMLConfigurationStore(path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
+        let store = YAMLConfigurationStore(
+            path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
 
         let configuration = try store.validate(
             text: """
-            keyboardShortcuts:
-              archiveSelectedThread:
-                key: ""
-                modifiers: []
-            """
+                keyboardShortcuts:
+                  archiveSelectedThread:
+                    key: ""
+                    modifiers: []
+                """
         )
 
         XCTAssertTrue(configuration.shortcut(for: .archiveSelectedThread).isUnbound)
     }
 
     func testYAMLConfigurationFallsBackInvalidKeyboardShortcutToDefault() throws {
-        let store = YAMLConfigurationStore(path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
+        let store = YAMLConfigurationStore(
+            path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
 
         let configuration = try store.validate(
             text: """
-            keyboardShortcuts:
-              toggleBottomTerminal:
-                key: too-long
-                modifiers: []
-            """
+                keyboardShortcuts:
+                  toggleBottomTerminal:
+                    key: too-long
+                    modifiers: []
+                """
         )
 
-        XCTAssertEqual(configuration.shortcut(for: .toggleBottomTerminal), KeyboardShortcutAction.toggleBottomTerminal.defaultShortcut)
+        XCTAssertEqual(
+            configuration.shortcut(for: .toggleBottomTerminal),
+            KeyboardShortcutAction.toggleBottomTerminal.defaultShortcut)
     }
 
     func testYAMLConfigurationDetectsDuplicateKeyboardShortcutsWithinScope() throws {
-        let store = YAMLConfigurationStore(path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
+        let store = YAMLConfigurationStore(
+            path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
 
         let configuration = try store.validate(
             text: """
-            keyboardShortcuts:
-              selectFilesRightPanelMode:
-                key: "7"
-                modifiers: [command]
-              selectGitRightPanelMode:
-                key: "7"
-                modifiers: [command]
-            """
+                keyboardShortcuts:
+                  selectFilesRightPanelMode:
+                    key: "7"
+                    modifiers: [command]
+                  selectGitRightPanelMode:
+                    key: "7"
+                    modifiers: [command]
+                """
         )
 
         XCTAssertEqual(
@@ -1120,15 +1169,16 @@ final class PersistenceTests: XCTestCase {
     }
 
     func testYAMLConfigurationDetectsDuplicateKeyboardShortcutsAcrossCommandScopes() throws {
-        let store = YAMLConfigurationStore(path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
+        let store = YAMLConfigurationStore(
+            path: try temporaryDirectory().appendingPathComponent("settings.yaml"))
 
         let configuration = try store.validate(
             text: """
-            keyboardShortcuts:
-              reloadSettings:
-                key: "r"
-                modifiers: [command]
-            """
+                keyboardShortcuts:
+                  reloadSettings:
+                    key: "r"
+                    modifiers: [command]
+                """
         )
 
         XCTAssertEqual(
@@ -1139,7 +1189,8 @@ final class PersistenceTests: XCTestCase {
 
     func testYAMLConfigurationMergesMissingDefaults() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
-        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(
             """
             fileIndexing:
@@ -1155,7 +1206,8 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.defaultAgentCLI, .codex)
         XCTAssertEqual(reloaded.tools.editors.preferred, ["nvim", "vim", "vi"])
         XCTAssertEqual(reloaded.tools.externalOpen.defaultToolID, .zed)
-        XCTAssertEqual(reloaded.tools.externalOpen.preferredToolIDs, ExternalOpenSettings.defaultPreferred)
+        XCTAssertEqual(
+            reloaded.tools.externalOpen.preferredToolIDs, ExternalOpenSettings.defaultPreferred)
         XCTAssertTrue(reloaded.ignoreRules.contains(".git"))
         XCTAssertTrue(reloaded.ignoreRules.contains("node_modules"))
         XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
@@ -1166,7 +1218,8 @@ final class PersistenceTests: XCTestCase {
 
     func testYAMLConfigurationClampsFontSizesAndFallbacksBlankFamilies() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
-        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(
             """
             fonts:
@@ -1193,7 +1246,8 @@ final class PersistenceTests: XCTestCase {
     func testYAMLConfigurationFallsBackForUnknownIconPackAndRecordsDiagnostic() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         let recorder = RecordingDiagnosticEventRecorder()
-        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(
             """
             icons:
@@ -1218,7 +1272,8 @@ final class PersistenceTests: XCTestCase {
     func testYAMLConfigurationFallsBackForUnknownThemeAndRecordsDiagnostic() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         let recorder = RecordingDiagnosticEventRecorder()
-        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(
             """
             theme:
@@ -1243,7 +1298,8 @@ final class PersistenceTests: XCTestCase {
     func testYAMLConfigurationRecoversMalformedFileAndRecordsDiagnostic() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         let recorder = RecordingDiagnosticEventRecorder()
-        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("{ nope".utf8).write(to: path)
 
         let recovered = YAMLConfigurationStore(path: path, diagnosticRecorder: recorder).load()
@@ -1265,10 +1321,11 @@ final class PersistenceTests: XCTestCase {
         return url
     }
 
-private func sqliteUserVersion(path: URL) throws -> Int {
+    private func sqliteUserVersion(path: URL) throws -> Int {
         try withSQLiteDatabase(path: path) { database in
             var statement: OpaquePointer?
-            XCTAssertEqual(sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil), SQLITE_OK)
+            XCTAssertEqual(
+                sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil), SQLITE_OK)
             defer { sqlite3_finalize(statement) }
             XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
             return Int(sqlite3_column_int(statement, 0))
@@ -1278,7 +1335,9 @@ private func sqliteUserVersion(path: URL) throws -> Int {
     private func sqliteTableColumns(path: URL, table: String) throws -> Set<String> {
         try withSQLiteDatabase(path: path) { database in
             var statement: OpaquePointer?
-            XCTAssertEqual(sqlite3_prepare_v2(database, "PRAGMA table_info(\(table))", -1, &statement, nil), SQLITE_OK)
+            XCTAssertEqual(
+                sqlite3_prepare_v2(database, "PRAGMA table_info(\(table))", -1, &statement, nil),
+                SQLITE_OK)
             defer { sqlite3_finalize(statement) }
             var columns = Set<String>()
             while sqlite3_step(statement) == SQLITE_ROW {
@@ -1308,7 +1367,8 @@ private func sqliteUserVersion(path: URL) throws -> Int {
         }
     }
 
-    private func withSQLiteDatabase<T>(path: URL, _ work: (OpaquePointer?) throws -> T) throws -> T {
+    private func withSQLiteDatabase<T>(path: URL, _ work: (OpaquePointer?) throws -> T) throws -> T
+    {
         var database: OpaquePointer?
         XCTAssertEqual(sqlite3_open(path.path, &database), SQLITE_OK)
         defer { sqlite3_close(database) }
@@ -1323,7 +1383,8 @@ private func sqliteUserVersion(path: URL) throws -> Int {
     }
 }
 
-private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable {
+private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable
+{
     private(set) var events: [DiagnosticEvent] = []
 
     func record(_ event: DiagnosticEvent) {

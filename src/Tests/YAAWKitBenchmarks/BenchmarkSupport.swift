@@ -7,7 +7,8 @@ enum BenchmarkSupport {
     }()
 
     static func skipUnlessEnabled(file: StaticString = #filePath, line: UInt = #line) throws {
-        try XCTSkipUnless(isEnabled, "set RUN_BENCHMARKS=1 to run benchmarks", file: file, line: line)
+        try XCTSkipUnless(
+            isEnabled, "set RUN_BENCHMARKS=1 to run benchmarks", file: file, line: line)
     }
 
     static func temporaryDirectory(named name: String) throws -> URL {

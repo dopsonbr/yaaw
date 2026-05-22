@@ -34,7 +34,9 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func startInputReader() {
         Thread.detachNewThread { [weak self] in
             while let line = readLine() {
-                guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    continue
+                }
                 Task { @MainActor in
                     self?.handleLine(line)
                 }
@@ -50,7 +52,11 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             let data = Data(line.utf8)
             let envelope = try decoder.decode(IsolatedToolEnvelope.self, from: data).validated()
             guard envelope.toolKind == cliToolKind, envelope.instanceID == cliInstanceID else {
-                send(type: "error", payload: ["message": "Tool host received a command for the wrong tool instance."])
+                send(
+                    type: "error",
+                    payload: [
+                        "message": "Tool host received a command for the wrong tool instance."
+                    ])
                 return
             }
             handle(envelope)
@@ -87,7 +93,9 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case "crashForTesting":
             Darwin.exit(88)
         default:
-            send(type: "error", payload: ["message": "Unsupported tool host command: \(envelope.type)"])
+            send(
+                type: "error",
+                payload: ["message": "Unsupported tool host command: \(envelope.type)"])
         }
     }
 
@@ -128,10 +136,10 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     private func setViewport(payload: [String: String]) {
         guard let window,
-              let x = payload["x"].flatMap(Double.init),
-              let y = payload["y"].flatMap(Double.init),
-              let width = payload["width"].flatMap(Double.init),
-              let height = payload["height"].flatMap(Double.init)
+            let x = payload["x"].flatMap(Double.init),
+            let y = payload["y"].flatMap(Double.init),
+            let width = payload["width"].flatMap(Double.init),
+            let height = payload["height"].flatMap(Double.init)
         else { return }
 
         window.setFrame(
@@ -209,7 +217,12 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             isLoadingMarkdownPreview = true
             webView.loadHTMLString(html, baseURL: url.deletingLastPathComponent())
         } catch {
-            send(type: "error", payload: ["message": "Markdown preview could not read this file: \(error.localizedDescription)"])
+            send(
+                type: "error",
+                payload: [
+                    "message":
+                        "Markdown preview could not read this file: \(error.localizedDescription)"
+                ])
         }
     }
 
@@ -228,7 +241,7 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             "urlString": webView?.url?.absoluteString ?? currentURLString ?? "",
             "isLoading": String(webView?.isLoading ?? false),
             "canGoBack": String(webView?.canGoBack ?? false),
-            "canGoForward": String(webView?.canGoForward ?? false)
+            "canGoForward": String(webView?.canGoForward ?? false),
         ]
         send(type: "stateChanged", payload: payload)
     }
@@ -255,8 +268,9 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
         if let url = navigationAction.request.url,
-           MarkdownPreviewRenderer.isMarkdownURL(url),
-           url.absoluteString != currentURLString {
+            MarkdownPreviewRenderer.isMarkdownURL(url),
+            url.absoluteString != currentURLString
+        {
             currentURLString = url.absoluteString
             loadMarkdownFile(url)
             decisionHandler(.cancel)
@@ -285,7 +299,10 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         publishState()
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+    func webView(
+        _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
         isLoadingMarkdownPreview = false
         guard !Self.isCancelled(error) else {
             publishState()
@@ -296,7 +313,12 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        send(type: "error", payload: ["message": "WebKit stopped rendering this page. Press reload to start a fresh renderer."])
+        send(
+            type: "error",
+            payload: [
+                "message":
+                    "WebKit stopped rendering this page. Press reload to start a fresh renderer."
+            ])
         publishState()
         Darwin.exit(89)
     }
@@ -308,7 +330,8 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         if navigationAction.targetFrame == nil,
-           let urlString = navigationAction.request.url?.absoluteString {
+            let urlString = navigationAction.request.url?.absoluteString
+        {
             send(type: "newSurfaceRequested", payload: ["urlString": urlString])
         }
         return nil
@@ -336,7 +359,8 @@ private func argumentValue(after flag: String) -> String? {
     return arguments[index + 1]
 }
 
-let toolKind = argumentValue(after: "--tool-kind").flatMap(IsolatedToolKind.init(rawValue:)) ?? .browser
+let toolKind =
+    argumentValue(after: "--tool-kind").flatMap(IsolatedToolKind.init(rawValue:)) ?? .browser
 let instanceID = argumentValue(after: "--instance-id") ?? UUID().uuidString
 let delegate = ToolHostApp(toolKind: toolKind, instanceID: instanceID)
 NSApplication.shared.delegate = delegate

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import YAAWKit
 
 final class AgentCLIAdapterTests: XCTestCase {
@@ -62,10 +63,12 @@ final class AgentCLIAdapterTests: XCTestCase {
         try FileManager.default.createDirectory(at: fallbackBin, withIntermediateDirectories: true)
         let pathTool = pathBin.appendingPathComponent("lazygit")
         try writeExecutable(at: pathTool, contents: "#!/bin/sh\n")
-        try writeExecutable(at: fallbackBin.appendingPathComponent("lazygit"), contents: "#!/bin/sh\n")
+        try writeExecutable(
+            at: fallbackBin.appendingPathComponent("lazygit"), contents: "#!/bin/sh\n")
         let resolver = PATHAgentCLIExecutableResolver(fallbackSearchPaths: [fallbackBin.path])
 
-        let resolved = resolver.executablePath(named: "lazygit", environment: ["PATH": pathBin.path])
+        let resolved = resolver.executablePath(
+            named: "lazygit", environment: ["PATH": pathBin.path])
 
         XCTAssertEqual(resolved, pathTool.path)
     }
@@ -131,10 +134,10 @@ final class AgentCLIAdapterTests: XCTestCase {
             service.metadata(
                 for: .codex,
                 output: """
-                YAAW_SESSION_ID=codex-123
-                YAAW_SESSION_NAME=Refactor Session
-                YAAW_SESSION_TITLE=Terminal Title
-                """
+                    YAAW_SESSION_ID=codex-123
+                    YAAW_SESSION_NAME=Refactor Session
+                    YAAW_SESSION_TITLE=Terminal Title
+                    """
             )
         )
         XCTAssertEqual(named.canonicalName, "Refactor Session")
@@ -143,9 +146,9 @@ final class AgentCLIAdapterTests: XCTestCase {
             service.metadata(
                 for: .claude,
                 output: """
-                session id: claude-123
-                title: Claude Terminal Title
-                """
+                    session id: claude-123
+                    title: Claude Terminal Title
+                    """
             )
         )
         XCTAssertEqual(titled.canonicalName, "Claude Terminal Title")
@@ -172,7 +175,8 @@ final class AgentCLIAdapterTests: XCTestCase {
         let metadata = try XCTUnwrap(
             service.metadata(
                 for: .codex,
-                output: "\u{04}\u{08}\u{08}YAAW_SESSION_ID=codex-script-123\nYAAW_SESSION_NAME=Script Capture"
+                output:
+                    "\u{04}\u{08}\u{08}YAAW_SESSION_ID=codex-script-123\nYAAW_SESSION_NAME=Script Capture"
             )
         )
 
@@ -187,15 +191,15 @@ final class AgentCLIAdapterTests: XCTestCase {
         try writeExecutable(
             at: bin.appendingPathComponent("codex"),
             contents: """
-            #!/bin/sh
-            if [ "$1" = "resume" ]; then
-              printf 'YAAW_SESSION_ID=%s\\n' "$2"
-              printf 'YAAW_SESSION_NAME=Codex Resumed\\n'
-            else
-              printf 'YAAW_SESSION_ID=codex-new-123\\n'
-              printf 'YAAW_SESSION_NAME=Codex New\\n'
-            fi
-            """
+                #!/bin/sh
+                if [ "$1" = "resume" ]; then
+                  printf 'YAAW_SESSION_ID=%s\\n' "$2"
+                  printf 'YAAW_SESSION_NAME=Codex Resumed\\n'
+                else
+                  printf 'YAAW_SESSION_ID=codex-new-123\\n'
+                  printf 'YAAW_SESSION_NAME=Codex New\\n'
+                fi
+                """
         )
         let service = AgentCLISessionBindingService(captureDirectory: nil)
         let environment = ["PATH": bin.path]
@@ -243,10 +247,12 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(command[0], "/bin/zsh")
         XCTAssertEqual(command[1], "-lic")
         XCTAssertTrue(command[2].contains("/usr/bin/script -q"))
-        XCTAssertTrue(command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).log").path))
+        XCTAssertTrue(
+            command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).log").path))
         XCTAssertTrue(command[2].contains("YAAW_THREAD_ID=\(thread.id.uuidString)"))
         XCTAssertTrue(command[2].contains("YAAW_PROJECT_ID=\(thread.projectID.uuidString)"))
-        XCTAssertTrue(command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).ndjson").path))
+        XCTAssertTrue(
+            command[2].contains(root.appendingPathComponent("\(thread.id.uuidString).ndjson").path))
         XCTAssertTrue(command[2].contains(helperBin.path))
         XCTAssertTrue(command[2].contains("/tmp/bin/claude"))
         XCTAssertTrue(command[2].contains("yaaw_exit_status=$?"))
@@ -333,23 +339,25 @@ final class AgentCLIAdapterTests: XCTestCase {
         process.arguments = [
             "--status", "needs-input",
             "--title", "Needs \"quote\"",
-            "--body", "Approve command"
+            "--body", "Approve command",
         ]
         process.environment = [
             "YAAW_THREAD_ID": thread.id.uuidString,
-            "YAAW_EVENT_LOG": eventLogURL.path
+            "YAAW_EVENT_LOG": eventLogURL.path,
         ]
         process.standardOutput = stdout
 
         try process.run()
         process.waitUntilExit()
 
-        let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let output = String(
+            decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         let log = try String(contentsOf: eventLogURL, encoding: .utf8)
         let event = try XCTUnwrap(ThreadActivityEvent.helperEvents(from: log).first)
 
         XCTAssertEqual(process.terminationStatus, 0)
-        XCTAssertTrue(output.contains("\u{001B}]777;notify;Needs \"quote\";Approve command\u{0007}"))
+        XCTAssertTrue(
+            output.contains("\u{001B}]777;notify;Needs \"quote\";Approve command\u{0007}"))
         XCTAssertEqual(event.threadID, thread.id)
         XCTAssertEqual(event.status, .needsInput)
         XCTAssertEqual(event.title, "Needs \"quote\"")
@@ -421,8 +429,8 @@ private struct StaticExecutableResolver: AgentCLIExecutableResolving {
     }
 }
 
-private extension FileHandle {
-    func closeAfterAppending(_ text: String) throws {
+extension FileHandle {
+    fileprivate func closeAfterAppending(_ text: String) throws {
         defer { try? close() }
         try seekToEnd()
         try write(contentsOf: Data(text.utf8))
