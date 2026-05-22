@@ -19,11 +19,13 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
         var onViewportChanged: ((CGRect, Bool) -> Void)?
 
         deinit {
+            NotificationCenter.default.removeObserver(self)
             NSObject.cancelPreviousPerformRequests(withTarget: self)
         }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            configureNotificationObservers()
             updateReportTimer()
             report()
         }
@@ -49,6 +51,46 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
             perform(#selector(reportFromTimer), with: nil, afterDelay: 0.15, inModes: [.common])
         }
 
+        private func configureNotificationObservers() {
+            NotificationCenter.default.removeObserver(self)
+
+            let center = NotificationCenter.default
+            center.addObserver(
+                self,
+                selector: #selector(reportFromNotification),
+                name: NSApplication.didBecomeActiveNotification,
+                object: NSApp
+            )
+            center.addObserver(
+                self,
+                selector: #selector(reportFromNotification),
+                name: NSApplication.didResignActiveNotification,
+                object: NSApp
+            )
+
+            guard let window else { return }
+            [
+                NSWindow.didMoveNotification,
+                NSWindow.didResizeNotification,
+                NSWindow.didBecomeKeyNotification,
+                NSWindow.didResignKeyNotification,
+                NSWindow.didMiniaturizeNotification,
+                NSWindow.didDeminiaturizeNotification,
+                NSWindow.didChangeOcclusionStateNotification
+            ].forEach { name in
+                center.addObserver(
+                    self,
+                    selector: #selector(reportFromNotification),
+                    name: name,
+                    object: window
+                )
+            }
+        }
+
+        @objc private func reportFromNotification(_ notification: Notification) {
+            report()
+        }
+
         @objc private func reportFromTimer() {
             guard window != nil else {
                 updateReportTimer()
@@ -66,7 +108,12 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
             }
             let windowRect = convert(bounds, to: nil)
             let screenRect = window.convertToScreen(windowRect)
-            onViewportChanged?(screenRect, !isHidden && window.isVisible && screenRect.width > 1 && screenRect.height > 1)
+            let visible = !isHiddenOrHasHiddenAncestor
+                && window.isVisible
+                && NSApp.isActive
+                && screenRect.width > 1
+                && screenRect.height > 1
+            onViewportChanged?(screenRect, visible)
         }
     }
 }

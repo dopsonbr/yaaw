@@ -1851,6 +1851,12 @@ private struct RightPanelView: View {
         .onChange(of: model.selectedThreadID) {
             syncIsolatedToolVisibility()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            isolatedToolRuntime.hideAll()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            syncIsolatedToolVisibility()
+        }
         .onDisappear {
             isolatedToolRuntime.shutdownAll()
         }
