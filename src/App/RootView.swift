@@ -470,11 +470,13 @@ private struct AgentCLIIcon: View {
         fileExtension: String,
         subdirectory: String?
     ) -> NSImage? {
-        guard let url = bundle.url(
-            forResource: agentCLI.brandIconResourceName,
-            withExtension: fileExtension,
-            subdirectory: subdirectory
-        ) else {
+        guard
+            let url = bundle.url(
+                forResource: agentCLI.brandIconResourceName,
+                withExtension: fileExtension,
+                subdirectory: subdirectory
+            )
+        else {
             return nil
         }
         return NSImage(contentsOf: url)
