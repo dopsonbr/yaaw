@@ -1,0 +1,55 @@
+included:
+  - src
+
+excluded:
+  - .build
+  - Vendor
+
+disabled_rules:
+  # Matches swift-format config (NeverForceUnwrap/NeverUseForceTry/NeverUseImplicitlyUnwrappedOptionals: false)
+  - force_cast
+  - force_try
+  - force_unwrapping
+  - todo
+  # Conflicts with swift-format: it requires trailing commas (multiElementCollectionTrailingCommas: true)
+  - trailing_comma
+  # Conflicts with swift-format: redundant, and swift-format formats multiline declarations differently
+  - opening_brace
+  - closure_parameter_position
+  # swift-format enforces 100-char lines on real code; long lines in embedded string literals are intentional
+  - line_length
+  # file_length covers size concerns; project has intentionally large types (AppModel, RootView, test classes)
+  - type_body_length
+  # Intentional design: DraculaTheme factory (14 params), GhosttyTerminalSurfaceView init (9 params)
+  - function_parameter_count
+  - trailing_whitespace
+
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - weak_delegate
+  - first_where
+  - last_where
+  - redundant_nil_coalescing
+  - contains_over_filter_count
+  - explicit_init
+  - closure_spacing
+
+file_length:
+  warning: 500    # informational; large files will warn but not block CI
+  error: 3000     # hard ceiling — largest current file is RootView.swift at 2,864 lines
+
+cyclomatic_complexity:
+  warning: 10
+  error: 20
+
+function_body_length:
+  warning: 60
+  error: 350      # above YAAWE2E.swift's 310-line E2E orchestrator function
+
+identifier_name:
+  excluded:
+    - id          # standard Identifiable protocol property
+    - up          # conventional enum case name
+    - x           # conventional coordinate variable
+    - y
