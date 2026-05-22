@@ -2447,11 +2447,19 @@ private struct FileBrowserPanel: View {
         let ignored =
             metadata.ignoredDirectoryCount == 1
             ? "1 ignored directory" : "\(metadata.ignoredDirectoryCount) ignored directories"
-        if state.isVisibleEntryLimitApplied {
-            return
-                "Showing \(state.visibleEntries.count) of \(metadata.fileCount) items, \(ignored)"
+        let isSearching = !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isSearching {
+            if state.isVisibleEntryLimitApplied {
+                return
+                    "Showing \(state.visibleEntries.count) of \(metadata.fileCount) matches, \(ignored)"
+            }
+            return "\(state.visibleEntries.count) matches of \(metadata.fileCount) items, \(ignored)"
         }
-        return "\(state.visibleEntries.count) of \(metadata.fileCount) items, \(ignored)"
+        if treeRows.count >= FileBrowserPanelConstants.maxVisibleTreeRows {
+            return
+                "Tree truncated at \(FileBrowserPanelConstants.maxVisibleTreeRows) rows — collapse folders to see more"
+        }
+        return "\(metadata.fileCount) items, \(ignored)"
     }
 
     private func rebuildVisibleTreeRows() {
@@ -2469,7 +2477,10 @@ private struct FileBrowserPanel: View {
 }
 
 private enum FileBrowserPanelConstants {
-    static let maxVisibleTreeRows = 10_000
+    // Defensive ceiling. Normal use stays well below this — even a 145k-file repo
+    // only renders rows for paths whose ancestors are all expanded. If a user ever
+    // hits this, the status line tells them so they're not silently truncated.
+    static let maxVisibleTreeRows = 50_000
 }
 
 private struct FileBrowserTreeRowView: View {

@@ -84,14 +84,6 @@ public enum FileBrowserTreeBuilder {
         guard limit > 0 else { return [] }
         guard entries.count > limit else { return entries }
 
-        let prefix = Array(entries.prefix(limit))
-        let visibleFileFloor = min(minimumBalancedFileRows, max(1, limit / 10))
-        if prefix.lazy.filter({ !$0.isDirectory }).prefix(visibleFileFloor).count
-            >= visibleFileFloor
-        {
-            return prefix
-        }
-
         var selectedByPath: [String: FileBrowserEntry] = [:]
         var selected: [FileBrowserEntry] = []
         selected.reserveCapacity(limit)
@@ -102,16 +94,35 @@ public enum FileBrowserTreeBuilder {
             selected.append(entry)
         }
 
+        let visibleFileFloor = min(minimumBalancedFileRows, max(1, limit / 10))
+        let rootEntryBudget = max(1, limit - visibleFileFloor)
+        // Keep the collapsed tree useful when one early branch exceeds the cap.
+        for entry in entries where isRootEntry(entry) {
+            guard selected.count < rootEntryBudget else { break }
+            append(entry)
+        }
+
         let directoryBudget = max(1, limit * 2 / 3)
         for entry in entries where entry.isDirectory {
             guard selected.count < directoryBudget else { break }
             append(entry)
         }
 
+        var visibleFileCount = selected.lazy.filter { !$0.isDirectory }.prefix(visibleFileFloor)
+            .count
         for entry in entries where !entry.isDirectory {
             for ancestor in ancestorEntries(for: entry.relativePath) {
                 append(ancestor)
             }
+            let previousCount = selected.count
+            append(entry)
+            if selected.count > previousCount {
+                visibleFileCount += 1
+            }
+            if selected.count >= limit && visibleFileCount >= visibleFileFloor { break }
+        }
+
+        for entry in entries {
             append(entry)
             if selected.count >= limit { break }
         }
@@ -169,6 +180,11 @@ public enum FileBrowserTreeBuilder {
     private static func sortBoxes(_ left: FileBrowserTreeNodeBox, _ right: FileBrowserTreeNodeBox)
         -> Bool
     {
+        let leftHidden = isHiddenName(left.name)
+        let rightHidden = isHiddenName(right.name)
+        if leftHidden != rightHidden {
+            return !leftHidden
+        }
         if left.entry.isDirectory != right.entry.isDirectory {
             return left.entry.isDirectory && !right.entry.isDirectory
         }
@@ -183,12 +199,19 @@ public enum FileBrowserTreeBuilder {
         let sharedCount = min(leftComponents.count, rightComponents.count)
 
         for index in 0..<sharedCount where leftComponents[index] != rightComponents[index] {
-            let sameParent =
-                leftComponents.prefix(index) == rightComponents.prefix(index)
-                && leftComponents.count == index + 1
-                && rightComponents.count == index + 1
-            if sameParent, left.isDirectory != right.isDirectory {
-                return left.isDirectory && !right.isDirectory
+            // At the first diverging component, all prior components matched — so the
+            // entries share a parent at depth `index`. Decide order at that level by
+            // whether each side is a directory there: a directory at level `index` either
+            // has more components below (count > index+1) or is itself a directory leaf.
+            let leftIsDirAtLevel = leftComponents.count > index + 1 || left.isDirectory
+            let rightIsDirAtLevel = rightComponents.count > index + 1 || right.isDirectory
+            let leftHidden = isHiddenName(leftComponents[index])
+            let rightHidden = isHiddenName(rightComponents[index])
+            if leftHidden != rightHidden {
+                return !leftHidden
+            }
+            if leftIsDirAtLevel != rightIsDirAtLevel {
+                return leftIsDirAtLevel && !rightIsDirAtLevel
             }
             return leftComponents[index].localizedStandardCompare(rightComponents[index])
                 == .orderedAscending
@@ -201,6 +224,14 @@ public enum FileBrowserTreeBuilder {
             return left.isDirectory && !right.isDirectory
         }
         return left.relativePath.localizedStandardCompare(right.relativePath) == .orderedAscending
+    }
+
+    private static func isRootEntry(_ entry: FileBrowserEntry) -> Bool {
+        !entry.relativePath.contains("/")
+    }
+
+    private static func isHiddenName(_ name: String) -> Bool {
+        name.hasPrefix(".")
     }
 
     private static func ancestorEntries(for relativePath: String) -> [FileBrowserEntry] {

@@ -11,11 +11,12 @@ public enum AppModelError: Error, Equatable {
 }
 
 private enum FileBrowserPresentationLimits {
-    static let maxPublishedEntries = 10_000
     static let maxSearchResults = 1_000
     static let largeIndexDiagnosticThreshold = 50_000
     static let slowSearchDiagnosticThresholdMS = 100
     static let slowTreeBuildDiagnosticThresholdMS = 50
+    // Defensive ceiling for the diagnostic "limited" flag — see RootView.FileBrowserPanelConstants.
+    static let treeRowDiagnosticThreshold = 50_000
 }
 
 public final class AppModel: ObservableObject, @unchecked Sendable {
@@ -56,7 +57,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var nvimRelativePathsByThreadID: [UUID: String] = [:]
     private var nvimRelaunchTokensByThreadID: [UUID: UUID] = [:]
     private var nvimRelaunchTokensByTabKey: [String: UUID] = [:]
-    private var activeProjectLaunchCommandsByThreadID: [UUID: [String]] = [:]
+    private var activeProjectLaunchDescriptorsByThreadID:
+        [UUID: AgentTerminalLaunchDescriptor] = [:]
     private var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
     private var activityReadOffsetsByThreadID: [UUID: UInt64] = [:]
     private var activityPartialLinesByThreadID: [UUID: String] = [:]
@@ -358,7 +360,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func reloadConfiguration(_ configuration: YAAWConfiguration) {
         self.configuration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
-        activeProjectLaunchCommandsByThreadID.removeAll()
+        activeProjectLaunchDescriptorsByThreadID.removeAll()
         activityPartialLinesByThreadID.removeAll()
         recordDiagnostic(
             category: "Configuration",
@@ -678,22 +680,23 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 )
                 return nil
             }
-            let command: [String]
-            if let activeCommand = activeProjectLaunchCommandsByThreadID[threadID] {
-                command = activeCommand
+            let launchDescriptor: AgentTerminalLaunchDescriptor
+            if let activeLaunchDescriptor = activeProjectLaunchDescriptorsByThreadID[threadID] {
+                launchDescriptor = activeLaunchDescriptor
             } else {
                 captureReadOffsetsByThreadID.removeValue(forKey: threadID)
-                command = agentCLIBindings.terminalCommand(
+                launchDescriptor = agentCLIBindings.terminalLaunchDescriptor(
                     for: thread,
                     executableNameOverride: configuration.agentExecutableName(for: thread.agentCLI)
                 )
             }
-            activeProjectLaunchCommandsByThreadID[threadID] = command
+            activeProjectLaunchDescriptorsByThreadID[threadID] = launchDescriptor
             return TerminalLaunchRequest(
                 role: role,
                 title: "\(thread.agentCLI.displayName) Terminal",
                 workingDirectory: thread.workingDirectory,
-                command: command,
+                command: launchDescriptor.command,
+                backend: .agentPTY(launchDescriptor),
                 agentCLI: thread.agentCLI
             )
         case .nvim(let threadID):
@@ -815,7 +818,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public func terminateTerminal(role: TerminalRole) {
         terminalManager.terminate(role: role)
         if case .project(let threadID) = role {
-            activeProjectLaunchCommandsByThreadID.removeValue(forKey: threadID)
+            activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
             captureReadOffsetsByThreadID.removeValue(forKey: threadID)
             activityReadOffsetsByThreadID.removeValue(forKey: threadID)
             activityPartialLinesByThreadID.removeValue(forKey: threadID)
@@ -909,7 +912,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func recordAgentTerminalClosed(threadID: UUID) {
-        activeProjectLaunchCommandsByThreadID.removeValue(forKey: threadID)
+        activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
         captureReadOffsetsByThreadID.removeValue(forKey: threadID)
         activityReadOffsetsByThreadID.removeValue(forKey: threadID)
         activityPartialLinesByThreadID.removeValue(forKey: threadID)
@@ -996,7 +999,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
         append(selectedThreadID)
         append(focusedProjectTerminalThreadID)
-        for threadID in activeProjectLaunchCommandsByThreadID.keys.sorted(by: {
+        for threadID in activeProjectLaunchDescriptorsByThreadID.keys.sorted(by: {
             $0.uuidString < $1.uuidString
         }) {
             append(threadID)
@@ -1057,11 +1060,22 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let fullEntries =
             selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] }
             ?? fileBrowserState.entries
-        let result = Self.visibleFileEntries(
-            from: fullEntries,
-            query: query,
-            limit: Self.fileBrowserVisibleLimit(for: query)
-        )
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result: FuzzyFileMatcher.Result
+        if trimmed.isEmpty {
+            // Empty query: reuse the already-sorted state.entries instead of resorting.
+            result = FuzzyFileMatcher.Result(
+                entries: fileBrowserState.entries,
+                totalMatches: fullEntries.count,
+                isLimitApplied: false
+            )
+        } else {
+            result = FuzzyFileMatcher.rankedResult(
+                fullEntries,
+                query: query,
+                limit: Self.fileBrowserVisibleLimit(for: query)
+            )
+        }
         fileBrowserState.searchQuery = query
         fileBrowserState.visibleEntries = result.entries
         fileBrowserState.isVisibleEntryLimitApplied = result.isLimitApplied
@@ -1100,7 +1114,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "entry_count": "\(entryCount)",
                 "visible_row_count": "\(rowCount)",
                 "duration_ms": "\(durationMS)",
-                "limited": "\(rowCount >= FileBrowserPresentationLimits.maxPublishedEntries)",
+                "limited": "\(rowCount >= FileBrowserPresentationLimits.treeRowDiagnosticThreshold)",
             ]
         )
     }
@@ -1586,8 +1600,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             ?? (fileBrowserState.rootPath == thread.workingDirectory.path
                 ? fileBrowserState.entries : [])
         fileBrowserEntriesByThreadID[thread.id] = entries
+        let sortedEntries = Self.publishedTreeEntries(from: entries)
         let visibleResult = Self.visibleFileEntries(
-            from: entries,
+            sortedEntries: sortedEntries,
+            originalEntries: entries,
             query: fileBrowserState.searchQuery,
             limit: Self.fileBrowserVisibleLimit(for: fileBrowserState.searchQuery)
         )
@@ -1595,7 +1611,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         fileBrowserState = FileBrowserState(
             rootPath: thread.workingDirectory.path,
             searchQuery: fileBrowserState.searchQuery,
-            entries: Self.publishedTreeEntries(from: entries),
+            entries: sortedEntries,
             visibleEntries: visibleResult.entries,
             isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
             isIndexing: true,
@@ -1624,8 +1640,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         case .success(let result):
             fileIndexMetadataByThreadID[threadID] = result.metadata
             fileBrowserEntriesByThreadID[threadID] = result.entries
+            let sortedEntries = Self.publishedTreeEntries(from: result.entries)
             let visibleResult = Self.visibleFileEntries(
-                from: result.entries,
+                sortedEntries: sortedEntries,
+                originalEntries: result.entries,
                 query: fileBrowserState.searchQuery,
                 limit: Self.fileBrowserVisibleLimit(for: fileBrowserState.searchQuery)
             )
@@ -1633,7 +1651,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 fileBrowserState = FileBrowserState(
                     rootPath: result.metadata.rootPath,
                     searchQuery: fileBrowserState.searchQuery,
-                    entries: Self.publishedTreeEntries(from: result.entries),
+                    entries: sortedEntries,
                     visibleEntries: visibleResult.entries,
                     isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
                     isIndexing: false,
@@ -1680,15 +1698,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
         let entries = cachedResult?.entries ?? fileBrowserEntriesByThreadID[selectedThread.id] ?? []
         fileBrowserEntriesByThreadID[selectedThread.id] = entries
+        let sortedEntries = Self.publishedTreeEntries(from: entries)
         let visibleResult = Self.visibleFileEntries(
-            from: entries,
+            sortedEntries: sortedEntries,
+            originalEntries: entries,
             query: "",
-            limit: FileBrowserPresentationLimits.maxPublishedEntries
+            limit: .max
         )
         fileBrowserState = FileBrowserState(
             rootPath: selectedThread.workingDirectory.path,
             searchQuery: "",
-            entries: Self.publishedTreeEntries(from: entries),
+            entries: sortedEntries,
             visibleEntries: visibleResult.entries,
             isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
             metadata: cachedResult?.metadata ?? fileIndexMetadataByThreadID[selectedThread.id]
@@ -1712,33 +1732,29 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     private static func publishedTreeEntries(from entries: [FileBrowserEntry]) -> [FileBrowserEntry]
     {
-        FileBrowserTreeBuilder.presentationEntries(
-            from: entries,
-            limit: FileBrowserPresentationLimits.maxPublishedEntries
-        )
+        entries.sorted(by: FileBrowserTreeBuilder.sortEntriesForTree)
     }
 
     private static func fileBrowserVisibleLimit(for query: String) -> Int {
         query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? FileBrowserPresentationLimits.maxPublishedEntries
+            ? .max
             : FileBrowserPresentationLimits.maxSearchResults
     }
 
     private static func visibleFileEntries(
-        from entries: [FileBrowserEntry],
+        sortedEntries: [FileBrowserEntry],
+        originalEntries: [FileBrowserEntry],
         query: String,
         limit: Int
     ) -> FuzzyFileMatcher.Result {
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let visibleEntries = FileBrowserTreeBuilder.presentationEntries(
-                from: entries, limit: limit)
             return FuzzyFileMatcher.Result(
-                entries: visibleEntries,
-                totalMatches: entries.count,
-                isLimitApplied: visibleEntries.count < entries.count
+                entries: sortedEntries,
+                totalMatches: originalEntries.count,
+                isLimitApplied: false
             )
         }
-        return FuzzyFileMatcher.rankedResult(entries, query: query, limit: limit)
+        return FuzzyFileMatcher.rankedResult(originalEntries, query: query, limit: limit)
     }
 
     private func recordSearchDiagnosticIfNeeded(
