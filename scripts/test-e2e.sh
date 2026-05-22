@@ -386,9 +386,12 @@ tell application "System Events"
 
     set replacementText to "version: 1" & linefeed & "agent:" & linefeed & "  default: claude" & linefeed
     click editorArea
+    set focused of editorArea to true
+    delay 0.2
     keystroke "a" using command down
     delay 0.1
-    keystroke replacementText
+    set the clipboard to replacementText
+    keystroke "v" using command down
     delay 0.4
     set updatedText to value of editorArea as text
     if updatedText does not contain "default: claude" then error "settings YAML editor did not accept edited text"
