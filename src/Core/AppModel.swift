@@ -10,6 +10,14 @@ public enum AppModelError: Error, Equatable {
     case agentCLIChangeNotAllowed
 }
 
+private enum FileBrowserPresentationLimits {
+    static let maxPublishedEntries = 10_000
+    static let maxSearchResults = 1_000
+    static let largeIndexDiagnosticThreshold = 50_000
+    static let slowSearchDiagnosticThresholdMS = 100
+    static let slowTreeBuildDiagnosticThresholdMS = 50
+}
+
 public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var projects: [Project]
     @Published public private(set) var threads: [AgentThread]
@@ -43,6 +51,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private let environment: [String: String]
     private let homeDirectory: URL
     private var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
+    private var fileBrowserEntriesByThreadID: [UUID: [FileBrowserEntry]] = [:]
     private var latestFileBrowserRequestIDByThreadID: [UUID: UUID] = [:]
     private var nvimRelativePathsByThreadID: [UUID: String] = [:]
     private var nvimRelaunchTokensByThreadID: [UUID: UUID] = [:]
@@ -985,12 +994,24 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func updateFileSearchQuery(_ query: String) {
-        fileBrowserState.searchQuery = query
-        fileBrowserState.visibleEntries = FuzzyFileMatcher.rankedEntries(
-            fileBrowserState.entries,
-            query: query
+        let startedAt = Date()
+        let fullEntries = selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] } ?? fileBrowserState.entries
+        let result = Self.visibleFileEntries(
+            from: fullEntries,
+            query: query,
+            limit: Self.fileBrowserVisibleLimit(for: query)
         )
+        fileBrowserState.searchQuery = query
+        fileBrowserState.visibleEntries = result.entries
+        fileBrowserState.isVisibleEntryLimitApplied = result.isLimitApplied
         updateSelectedFileAfterVisibleEntriesChanged()
+        recordSearchDiagnosticIfNeeded(
+            query: query,
+            sourceCount: fullEntries.count,
+            matchCount: result.totalMatches,
+            visibleCount: result.entries.count,
+            durationMS: Self.elapsedMilliseconds(since: startedAt)
+        )
     }
 
     public func selectFile(relativePath: String?) {
@@ -999,8 +1020,24 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return
         }
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
-        guard fileBrowserState.entries.contains(where: { $0.relativePath == normalizedPath }) else { return }
+        let fullEntries = selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] } ?? fileBrowserState.entries
+        guard fullEntries.contains(where: { $0.relativePath == normalizedPath }) else { return }
         selectedFileRelativePath = normalizedPath
+    }
+
+    public func recordFileBrowserTreeBuilt(entryCount: Int, rowCount: Int, durationMS: Int) {
+        guard entryCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
+            || durationMS >= FileBrowserPresentationLimits.slowTreeBuildDiagnosticThresholdMS else { return }
+        recordDiagnostic(
+            category: "Indexing",
+            name: "file_browser_tree_built",
+            metadata: [
+                "entry_count": "\(entryCount)",
+                "visible_row_count": "\(rowCount)",
+                "duration_ms": "\(durationMS)",
+                "limited": "\(rowCount >= FileBrowserPresentationLimits.maxPublishedEntries)"
+            ]
+        )
     }
 
     public func selectAdjacentFile(direction: ProjectMoveDirection) {
@@ -1460,16 +1497,21 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         )
         let cachedResult = fileIndexCacheCoordinator.cachedIndex(threadID: thread.id, key: cacheKey)
         let entries = cachedResult?.entries
+            ?? fileBrowserEntriesByThreadID[thread.id]
             ?? (fileBrowserState.rootPath == thread.workingDirectory.path ? fileBrowserState.entries : [])
+        fileBrowserEntriesByThreadID[thread.id] = entries
+        let visibleResult = Self.visibleFileEntries(
+            from: entries,
+            query: fileBrowserState.searchQuery,
+            limit: Self.fileBrowserVisibleLimit(for: fileBrowserState.searchQuery)
+        )
         let metadata = cachedResult?.metadata ?? fileIndexMetadataByThreadID[thread.id]
         fileBrowserState = FileBrowserState(
             rootPath: thread.workingDirectory.path,
             searchQuery: fileBrowserState.searchQuery,
-            entries: entries,
-            visibleEntries: FuzzyFileMatcher.rankedEntries(
-                entries,
-                query: fileBrowserState.searchQuery
-            ),
+            entries: Self.publishedTreeEntries(from: entries),
+            visibleEntries: visibleResult.entries,
+            isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
             isIndexing: true,
             metadata: metadata,
             errorMessage: nil
@@ -1494,21 +1536,26 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         switch result {
         case .success(let result):
             fileIndexMetadataByThreadID[threadID] = result.metadata
+            fileBrowserEntriesByThreadID[threadID] = result.entries
+            let visibleResult = Self.visibleFileEntries(
+                from: result.entries,
+                query: fileBrowserState.searchQuery,
+                limit: Self.fileBrowserVisibleLimit(for: fileBrowserState.searchQuery)
+            )
             if selectedThreadID == threadID {
                 fileBrowserState = FileBrowserState(
                     rootPath: result.metadata.rootPath,
                     searchQuery: fileBrowserState.searchQuery,
-                    entries: result.entries,
-                    visibleEntries: FuzzyFileMatcher.rankedEntries(
-                        result.entries,
-                        query: fileBrowserState.searchQuery
-                    ),
+                    entries: Self.publishedTreeEntries(from: result.entries),
+                    visibleEntries: visibleResult.entries,
+                    isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
                     isIndexing: false,
                     metadata: result.metadata,
                     errorMessage: nil
                 )
                 updateSelectedFileAfterVisibleEntriesChanged()
             }
+            recordIndexDiagnosticIfNeeded(result: result)
             persistFileIndexMetadata(result.metadata)
         case .failure(let error):
             if selectedThreadID == threadID {
@@ -1543,11 +1590,19 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         } else {
             cachedResult = nil
         }
+        let entries = cachedResult?.entries ?? fileBrowserEntriesByThreadID[selectedThread.id] ?? []
+        fileBrowserEntriesByThreadID[selectedThread.id] = entries
+        let visibleResult = Self.visibleFileEntries(
+            from: entries,
+            query: "",
+            limit: FileBrowserPresentationLimits.maxPublishedEntries
+        )
         fileBrowserState = FileBrowserState(
             rootPath: selectedThread.workingDirectory.path,
             searchQuery: "",
-            entries: cachedResult?.entries ?? [],
-            visibleEntries: cachedResult?.entries ?? [],
+            entries: Self.publishedTreeEntries(from: entries),
+            visibleEntries: visibleResult.entries,
+            isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
             metadata: cachedResult?.metadata ?? fileIndexMetadataByThreadID[selectedThread.id]
         )
         updateSelectedFileAfterVisibleEntriesChanged()
@@ -1564,6 +1619,78 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return
         }
         selectedFileRelativePath = fileEntries.first?.relativePath
+    }
+
+    private static func publishedTreeEntries(from entries: [FileBrowserEntry]) -> [FileBrowserEntry] {
+        FileBrowserTreeBuilder.presentationEntries(
+            from: entries,
+            limit: FileBrowserPresentationLimits.maxPublishedEntries
+        )
+    }
+
+    private static func fileBrowserVisibleLimit(for query: String) -> Int {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? FileBrowserPresentationLimits.maxPublishedEntries
+            : FileBrowserPresentationLimits.maxSearchResults
+    }
+
+    private static func visibleFileEntries(
+        from entries: [FileBrowserEntry],
+        query: String,
+        limit: Int
+    ) -> FuzzyFileMatcher.Result {
+        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let visibleEntries = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: limit)
+            return FuzzyFileMatcher.Result(
+                entries: visibleEntries,
+                totalMatches: entries.count,
+                isLimitApplied: visibleEntries.count < entries.count
+            )
+        }
+        return FuzzyFileMatcher.rankedResult(entries, query: query, limit: limit)
+    }
+
+    private func recordSearchDiagnosticIfNeeded(
+        query: String,
+        sourceCount: Int,
+        matchCount: Int,
+        visibleCount: Int,
+        durationMS: Int
+    ) {
+        guard sourceCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
+            || durationMS >= FileBrowserPresentationLimits.slowSearchDiagnosticThresholdMS else { return }
+        recordDiagnostic(
+            category: "Indexing",
+            name: "file_browser_search_completed",
+            metadata: [
+                "query_length": "\(query.count)",
+                "source_count": "\(sourceCount)",
+                "match_count": "\(matchCount)",
+                "visible_count": "\(visibleCount)",
+                "duration_ms": "\(durationMS)",
+                "limited": "\(visibleCount < matchCount)"
+            ]
+        )
+    }
+
+    private func recordIndexDiagnosticIfNeeded(result: FileIndexResult) {
+        let durationMS = Self.elapsedMilliseconds(since: result.metadata.indexedAt)
+        guard result.metadata.fileCount >= FileBrowserPresentationLimits.largeIndexDiagnosticThreshold
+            || durationMS >= FileBrowserPresentationLimits.slowSearchDiagnosticThresholdMS else { return }
+        recordDiagnostic(
+            category: "Indexing",
+            name: "file_index_completed",
+            metadata: [
+                "root": sanitizedDiagnosticValue(result.metadata.rootPath),
+                "file_count": "\(result.metadata.fileCount)",
+                "ignored_directory_count": "\(result.metadata.ignoredDirectoryCount)",
+                "duration_ms": "\(durationMS)"
+            ]
+        )
+    }
+
+    private static func elapsedMilliseconds(since start: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(start) * 1_000))
     }
 
     private func directoryState(for url: URL) -> ProjectDirectoryState {

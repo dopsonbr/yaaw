@@ -102,7 +102,7 @@ public enum IconRole: Equatable, Sendable {
         case .moveDown:
             .systemSymbol("arrow.down")
         case .newThread:
-            .systemSymbol("plus.message")
+            .systemSymbol("text.badge.plus")
         case .archive:
             .systemSymbol("archivebox")
         case .unarchive:

@@ -1796,7 +1796,8 @@ private struct RightPanelView: View {
                     },
                     defaultExternalEditorTool: defaultExternalEditorTool,
                     onOpenExternally: onOpenFileExternally,
-                    onCopyPath: onCopyPath
+                    onCopyPath: onCopyPath,
+                    onTreeBuilt: model.recordFileBrowserTreeBuilt(entryCount:rowCount:durationMS:)
                 )
                 .onAppear {
                     model.refreshSelectedFileBrowser()
@@ -2211,10 +2212,11 @@ private struct FileBrowserPanel: View {
     let defaultExternalEditorTool: ExternalOpenToolID?
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
     let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
+    let onTreeBuilt: (Int, Int, Int) -> Void
     @State private var expandedFolders: Set<String> = []
     @State private var typedQuery: String = ""
     @State private var debounceTask: Task<Void, Never>?
-    @State private var treeRoots: [FileBrowserTreeNode] = []
+    @State private var treeRows: [FileBrowserVisibleTreeRow] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -2275,10 +2277,9 @@ private struct FileBrowserPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        ForEach(treeRoots) { node in
-                            FileBrowserTreeRow(
-                                node: node,
-                                depth: 0,
+                        ForEach(treeRows) { row in
+                            FileBrowserTreeRowView(
+                                row: row,
                                 selectedRelativePath: selectedRelativePath,
                                 expandedFolders: $expandedFolders,
                                 fileIconPack: fileIconPack,
@@ -2309,14 +2310,17 @@ private struct FileBrowserPanel: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .onChange(of: state.entries) {
-                treeRoots = FileBrowserTreeBuilder.roots(from: state.entries)
+                rebuildVisibleTreeRows()
             }
             .onChange(of: state.rootPath) {
                 expandedFolders.removeAll()
-                treeRoots = FileBrowserTreeBuilder.roots(from: state.entries)
+                rebuildVisibleTreeRows()
+            }
+            .onChange(of: expandedFolders) {
+                rebuildVisibleTreeRows()
             }
             .onAppear {
-                treeRoots = FileBrowserTreeBuilder.roots(from: state.entries)
+                rebuildVisibleTreeRows()
             }
         }
         .padding(.horizontal, 8)
@@ -2328,14 +2332,30 @@ private struct FileBrowserPanel: View {
             return state.isIndexing ? "Indexing..." : "No index yet"
         }
         let ignored = metadata.ignoredDirectoryCount == 1 ? "1 ignored directory" : "\(metadata.ignoredDirectoryCount) ignored directories"
+        if state.isVisibleEntryLimitApplied {
+            return "Showing \(state.visibleEntries.count) of \(metadata.fileCount) items, \(ignored)"
+        }
         return "\(state.visibleEntries.count) of \(metadata.fileCount) items, \(ignored)"
     }
 
+    private func rebuildVisibleTreeRows() {
+        let startedAt = Date()
+        let rows = FileBrowserTreeBuilder.visibleRows(
+            from: state.entries,
+            expandedFolders: expandedFolders,
+            limit: FileBrowserPanelConstants.maxVisibleTreeRows
+        )
+        treeRows = rows
+        onTreeBuilt(state.entries.count, rows.count, max(0, Int(Date().timeIntervalSince(startedAt) * 1_000)))
+    }
 }
 
-private struct FileBrowserTreeRow: View {
-    let node: FileBrowserTreeNode
-    let depth: Int
+private enum FileBrowserPanelConstants {
+    static let maxVisibleTreeRows = 10_000
+}
+
+private struct FileBrowserTreeRowView: View {
+    let row: FileBrowserVisibleTreeRow
     let selectedRelativePath: String?
     @Binding var expandedFolders: Set<String>
     let fileIconPack: FileIconPack
@@ -2347,59 +2367,39 @@ private struct FileBrowserTreeRow: View {
     let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                onSelectFile(node.entry)
-                if node.entry.isDirectory {
-                    toggleExpanded()
-                } else {
-                    onOpenFile(node.entry)
-                }
-            } label: {
-                FileBrowserRowContent(
-                    entry: node.entry,
-                    displayName: node.displayName,
-                    depth: depth,
-                    fileIconPack: fileIconPack,
-                    isExpanded: isExpanded
-                )
+        Button {
+            onSelectFile(row.entry)
+            if row.entry.isDirectory {
+                toggleExpanded()
+            } else {
+                onOpenFile(row.entry)
             }
-            .buttonStyle(.plain)
-            .help(node.entry.isDirectory ? node.entry.relativePath : "Open in nvim")
-            .contextMenu {
-                externalOpenMenuItems(for: node.entry)
-            }
-            .background(selectedRelativePath == node.entry.relativePath ? dracula(.currentLine) : dracula(.background))
-
-            if node.entry.isDirectory && isExpanded {
-                ForEach(node.children) { child in
-                    FileBrowserTreeRow(
-                        node: child,
-                        depth: depth + 1,
-                        selectedRelativePath: selectedRelativePath,
-                        expandedFolders: $expandedFolders,
-                        fileIconPack: fileIconPack,
-                        onSelectFile: onSelectFile,
-                        onOpenFile: onOpenFile,
-                        onOpenInBrowser: onOpenInBrowser,
-                        defaultExternalEditorTool: defaultExternalEditorTool,
-                        onOpenExternally: onOpenExternally,
-                        onCopyPath: onCopyPath
-                    )
-                }
-            }
+        } label: {
+            FileBrowserRowContent(
+                entry: row.entry,
+                displayName: row.displayName,
+                depth: row.depth,
+                fileIconPack: fileIconPack,
+                isExpanded: isExpanded
+            )
         }
+        .buttonStyle(.plain)
+        .help(row.entry.isDirectory ? row.entry.relativePath : "Open in nvim")
+        .contextMenu {
+            externalOpenMenuItems(for: row.entry)
+        }
+        .background(selectedRelativePath == row.entry.relativePath ? dracula(.currentLine) : dracula(.background))
     }
 
     private var isExpanded: Bool {
-        expandedFolders.contains(node.entry.relativePath)
+        expandedFolders.contains(row.entry.relativePath)
     }
 
     private func toggleExpanded() {
         if isExpanded {
-            expandedFolders.remove(node.entry.relativePath)
+            expandedFolders.remove(row.entry.relativePath)
         } else {
-            expandedFolders.insert(node.entry.relativePath)
+            expandedFolders.insert(row.entry.relativePath)
         }
     }
 

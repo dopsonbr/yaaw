@@ -6,7 +6,7 @@ final class AppModelBenchmarks: BenchmarkCase {
     func test_bench_activeThreadsForSelectedProject_1k() throws {
         let model = try makeModel(threadCount: 1_000)
         measure {
-            for _ in 0..<100 {
+            for _ in 0..<100_000 {
                 _ = model.activeThreadsForSelectedProject
             }
         }
@@ -15,7 +15,7 @@ final class AppModelBenchmarks: BenchmarkCase {
     func test_bench_activeThreadsForSelectedProject_10k() throws {
         let model = try makeModel(threadCount: 10_000)
         measure {
-            for _ in 0..<100 {
+            for _ in 0..<100_000 {
                 _ = model.activeThreadsForSelectedProject
             }
         }
@@ -24,7 +24,7 @@ final class AppModelBenchmarks: BenchmarkCase {
     func test_bench_selectedThread_lookup_10k() throws {
         let model = try makeModel(threadCount: 10_000)
         measure {
-            for _ in 0..<1_000 {
+            for _ in 0..<100_000 {
                 _ = model.selectedThread
             }
         }

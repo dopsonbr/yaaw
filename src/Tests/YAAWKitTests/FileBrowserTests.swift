@@ -44,6 +44,96 @@ final class FileBrowserTests: XCTestCase {
         ])
     }
 
+    func testFuzzyRankingLimitedResultKeepsBestMatchesAndCountsAllMatches() {
+        let entries = [
+            FileBrowserEntry(relativePath: "src/generated/z-target.swift", isDirectory: false),
+            FileBrowserEntry(relativePath: "Target.swift", isDirectory: false),
+            FileBrowserEntry(relativePath: "docs/target-notes.md", isDirectory: false),
+            FileBrowserEntry(relativePath: "src/t/a/r/g/e/t.swift", isDirectory: false),
+            FileBrowserEntry(relativePath: "src/unrelated.swift", isDirectory: false)
+        ]
+
+        let result = FuzzyFileMatcher.rankedResult(entries, query: "target", limit: 2)
+
+        XCTAssertEqual(result.entries.map(\.relativePath), ["Target.swift", "docs/target-notes.md"])
+        XCTAssertEqual(result.totalMatches, 4)
+        XCTAssertTrue(result.isLimitApplied)
+    }
+
+    func testVisibleTreeRowsOnlyIncludeExpandedBranchesAndHonorLimit() {
+        let entries = [
+            FileBrowserEntry(relativePath: "docs", isDirectory: true),
+            FileBrowserEntry(relativePath: "docs/README.md", isDirectory: false),
+            FileBrowserEntry(relativePath: "src", isDirectory: true),
+            FileBrowserEntry(relativePath: "src/App.swift", isDirectory: false),
+            FileBrowserEntry(relativePath: "src/Core", isDirectory: true),
+            FileBrowserEntry(relativePath: "src/Core/AppModel.swift", isDirectory: false)
+        ]
+
+        let collapsed = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: [], limit: 10)
+        XCTAssertEqual(collapsed.map(\.entry.relativePath), ["docs", "src"])
+
+        let expanded = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: ["src"], limit: 10)
+        XCTAssertEqual(expanded.map(\.entry.relativePath), ["docs", "src", "src/App.swift", "src/Core"])
+
+        let limited = FileBrowserTreeBuilder.visibleRows(from: entries, expandedFolders: ["src"], limit: 2)
+        XCTAssertEqual(limited.map(\.entry.relativePath), ["docs", "src"])
+    }
+
+    func testVisibleTreeRowsCapsExpandedLargeBranch() {
+        let rows = FileBrowserTreeBuilder.visibleRows(
+            from: Self.largeSyntheticEntries(count: 25_000),
+            expandedFolders: ["src", "src/generated"],
+            limit: 10_000
+        )
+
+        XCTAssertEqual(rows.count, 10_000)
+        XCTAssertEqual(rows.first?.entry.relativePath, "src")
+        XCTAssertTrue(rows.contains { $0.entry.relativePath == "src/generated" })
+    }
+
+    func testPresentationEntriesIncludeFilesWhenLargeIndexStartsWithDirectories() {
+        let entries = Self.directoryHeavyEntries(directoryCount: 12_000, fileCount: 4_000)
+
+        let presented = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
+        let rows = FileBrowserTreeBuilder.visibleRows(
+            from: presented,
+            expandedFolders: ["dir_00000"],
+            limit: 10_000
+        )
+
+        XCTAssertEqual(presented.count, 10_000)
+        XCTAssertTrue(presented.contains { !$0.isDirectory })
+        XCTAssertTrue(rows.contains(FileBrowserVisibleTreeRow(
+            entry: FileBrowserEntry(relativePath: "dir_00000/file_00000.swift", isDirectory: false),
+            displayName: "file_00000.swift",
+            depth: 1
+        )))
+    }
+
+    func testTemporaryDirectoryIndexUsesTreeOrderWithFilesNearParents() throws {
+        let root = try temporaryDirectory()
+        try writeFile(root.appendingPathComponent("a-dir/file.swift"), contents: "print(\"a\")")
+        try writeFile(root.appendingPathComponent("b-dir/file.swift"), contents: "print(\"b\")")
+        try writeFile(root.appendingPathComponent("root-file.swift"), contents: "print(\"root\")")
+        let threadID = UUID()
+
+        let result = try BackgroundFileIndexer.buildIndex(
+            threadID: threadID,
+            root: root,
+            ignoreRules: [],
+            indexedAt: Date(timeIntervalSince1970: 123)
+        )
+
+        XCTAssertEqual(result.entries.map(\.relativePath), [
+            "a-dir",
+            "a-dir/file.swift",
+            "b-dir",
+            "b-dir/file.swift",
+            "root-file.swift"
+        ])
+    }
+
     func testTemporaryDirectoryIndexIncludesHiddenFilesAndSkipsIgnoredDirectories() throws {
         let root = try temporaryDirectory()
         try writeFile(root.appendingPathComponent(".env"), contents: "TOKEN=example")
@@ -217,6 +307,141 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(model.fileBrowserState.metadata?.fileCount, 1)
     }
 
+    func testAppModelCapsLargeIndexButSearchesAndSelectsFullIndex() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let recorder = RecordingDiagnosticEventRecorder()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer, diagnosticRecorder: recorder)
+        let entries = Self.largeSyntheticEntries(count: 150_000)
+        let targetPath = "zz-special/needle-target.swift"
+        let adjacentTargetPath = "zz-special/needle-target-next.swift"
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(FileIndexResult(
+                entries: entries + [
+                    FileBrowserEntry(relativePath: targetPath, isDirectory: false),
+                    FileBrowserEntry(relativePath: adjacentTargetPath, isDirectory: false)
+                ],
+                metadata: FileIndexMetadata(
+                    threadID: fixture.firstThreadID,
+                    rootPath: fixture.firstRoot.path,
+                    indexedAt: Date(),
+                    fileCount: entries.count + 2,
+                    ignoredDirectoryCount: 0
+                )
+            ))
+        )
+
+        XCTAssertEqual(model.fileBrowserState.entries.count, 10_000)
+        XCTAssertFalse(model.fileBrowserState.entries.contains { $0.relativePath == targetPath })
+        XCTAssertTrue(model.fileBrowserState.isVisibleEntryLimitApplied)
+
+        model.updateFileSearchQuery("needle-target")
+
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.map(\.relativePath), [targetPath, adjacentTargetPath])
+        model.selectFile(relativePath: targetPath)
+        XCTAssertEqual(model.selectedFileRelativePath, targetPath)
+        model.selectAdjacentFile(direction: .down)
+        XCTAssertEqual(model.selectedFileRelativePath, adjacentTargetPath)
+        model.updateFileSearchQuery("")
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, 10_000)
+        XCTAssertTrue(recorder.events.contains { $0.name == "file_index_completed" })
+        XCTAssertTrue(recorder.events.contains { $0.name == "file_browser_search_completed" })
+    }
+
+    func testClearingLargeIndexSearchRestoresBrowseCap() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let entries = Self.largeSyntheticEntries(count: 12_000)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(FileIndexResult(
+                entries: entries,
+                metadata: FileIndexMetadata(
+                    threadID: fixture.firstThreadID,
+                    rootPath: fixture.firstRoot.path,
+                    indexedAt: Date(),
+                    fileCount: entries.count,
+                    ignoredDirectoryCount: 0
+                )
+            ))
+        )
+
+        model.updateFileSearchQuery("module_11")
+        XCTAssertLessThanOrEqual(model.fileBrowserState.visibleEntries.count, 1_000)
+
+        model.updateFileSearchQuery("")
+
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, 10_000)
+        XCTAssertTrue(model.fileBrowserState.isVisibleEntryLimitApplied)
+    }
+
+    func testAppModelPublishesFilesWhenLargeCachedIndexStartsWithDirectories() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let entries = Self.directoryHeavyEntries(directoryCount: 12_000, fileCount: 4_000)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(FileIndexResult(
+                entries: entries,
+                metadata: FileIndexMetadata(
+                    threadID: fixture.firstThreadID,
+                    rootPath: fixture.firstRoot.path,
+                    indexedAt: Date(),
+                    fileCount: entries.count,
+                    ignoredDirectoryCount: 0
+                )
+            ))
+        )
+
+        XCTAssertEqual(model.fileBrowserState.entries.count, 10_000)
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, 10_000)
+        XCTAssertTrue(model.fileBrowserState.entries.contains { !$0.isDirectory })
+        XCTAssertTrue(model.fileBrowserState.visibleEntries.contains { !$0.isDirectory })
+        XCTAssertNotNil(model.selectedFileRelativePath)
+    }
+
+    private static func largeSyntheticEntries(count: Int) -> [FileBrowserEntry] {
+        var entries = [
+            FileBrowserEntry(relativePath: "src", isDirectory: true),
+            FileBrowserEntry(relativePath: "src/generated", isDirectory: true),
+            FileBrowserEntry(relativePath: "tests", isDirectory: true),
+            FileBrowserEntry(relativePath: "tests/generated", isDirectory: true)
+        ]
+        entries.reserveCapacity(count + entries.count)
+        for index in 0..<count {
+            let root = index.isMultiple(of: 2) ? "src/generated" : "tests/generated"
+            entries.append(FileBrowserEntry(relativePath: "\(root)/module_\(index).swift", isDirectory: false))
+        }
+        return entries
+    }
+
+    private static func directoryHeavyEntries(directoryCount: Int, fileCount: Int) -> [FileBrowserEntry] {
+        var entries: [FileBrowserEntry] = []
+        entries.reserveCapacity(directoryCount + fileCount)
+        for index in 0..<directoryCount {
+            entries.append(FileBrowserEntry(
+                relativePath: String(format: "dir_%05d", index),
+                isDirectory: true
+            ))
+        }
+        for index in 0..<fileCount {
+            entries.append(FileBrowserEntry(
+                relativePath: String(format: "dir_%05d/file_%05d.swift", index, index),
+                isDirectory: false
+            ))
+        }
+        return entries
+    }
+
     private func writeFile(_ url: URL, contents: String) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try contents.write(to: url, atomically: true, encoding: .utf8)
@@ -272,6 +497,14 @@ private final class ManualFileIndexer: FileIndexing {
 
 private final class FileIndexResultBox: @unchecked Sendable {
     var value: FileIndexResult?
+}
+
+private final class RecordingDiagnosticEventRecorder: DiagnosticEventRecording, @unchecked Sendable {
+    private(set) var events: [DiagnosticEvent] = []
+
+    func record(_ event: DiagnosticEvent) {
+        events.append(event)
+    }
 }
 
 private struct AppModelFixtureForSharedFiles {

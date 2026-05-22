@@ -1,0 +1,58 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit Tests
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run unit tests
+        run: scripts/test.sh
+
+  e2e:
+    name: E2E Tests
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run E2E tests
+        env:
+          YAAW_E2E_ARTIFACTS: ${{ runner.temp }}/yaaw-e2e-artifacts/latest
+        run: scripts/test-e2e.sh
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yaaw-e2e-artifacts
+          path: ${{ runner.temp }}/yaaw-e2e-artifacts/latest
+          if-no-files-found: ignore
+
+  performance:
+    name: Performance Tests
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run performance tests
+        env:
+          RUN_BENCHMARKS: "1"
+        run: swift test -c release --filter YAAWKitBenchmarks

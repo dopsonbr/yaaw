@@ -13,7 +13,7 @@ public struct FileBrowserEntry: Identifiable, Equatable, Sendable {
 }
 
 public struct FileIndexMetadata: Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var threadID: UUID
     public var cacheKey: String?
@@ -59,6 +59,7 @@ public struct FileBrowserState: Equatable, Sendable {
     public var searchQuery: String
     public var entries: [FileBrowserEntry]
     public var visibleEntries: [FileBrowserEntry]
+    public var isVisibleEntryLimitApplied: Bool
     public var isIndexing: Bool
     public var metadata: FileIndexMetadata?
     public var errorMessage: String?
@@ -68,6 +69,7 @@ public struct FileBrowserState: Equatable, Sendable {
         searchQuery: String = "",
         entries: [FileBrowserEntry] = [],
         visibleEntries: [FileBrowserEntry] = [],
+        isVisibleEntryLimitApplied: Bool = false,
         isIndexing: Bool = false,
         metadata: FileIndexMetadata? = nil,
         errorMessage: String? = nil
@@ -76,6 +78,7 @@ public struct FileBrowserState: Equatable, Sendable {
         self.searchQuery = searchQuery
         self.entries = entries
         self.visibleEntries = visibleEntries
+        self.isVisibleEntryLimitApplied = isVisibleEntryLimitApplied
         self.isIndexing = isIndexing
         self.metadata = metadata
         self.errorMessage = errorMessage

@@ -34,7 +34,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version
+      - name: Prepare version
         id: version
         env:
           BUMP: ${{ inputs.bump }}
@@ -80,6 +80,12 @@ jobs:
           echo "version=$next" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+      - name: Check
+        run: scripts/check.sh
+
+      - name: Package app
+        run: scripts/package-release.sh --version "${{ steps.version.outputs.version }}"
+
       - name: Commit and tag version
         run: |
           set -euo pipefail
@@ -88,12 +94,6 @@ jobs:
           git tag -a "${{ steps.version.outputs.tag }}" -m "YAAW ${{ steps.version.outputs.tag }}"
           git push origin HEAD:main
           git push origin "${{ steps.version.outputs.tag }}"
-
-      - name: Check
-        run: scripts/check.sh
-
-      - name: Package app
-        run: scripts/package-release.sh --version "${{ steps.version.outputs.version }}"
 
       - name: Publish GitHub Release
         env:
