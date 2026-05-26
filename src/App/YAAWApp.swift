@@ -104,6 +104,11 @@ struct YAAWApp: App {
             }
             .frame(minWidth: 1100, minHeight: 700)
             .toolbar(removing: .title)
+            .onAppear {
+                if startupError == nil {
+                    appDelegate.updateShortcutPreflightModel(model)
+                }
+            }
         }
         .defaultSize(width: 1400, height: 900)
         .restorationBehavior(.disabled)
@@ -480,11 +485,14 @@ extension AppModel {
     }
 }
 
+@MainActor
 private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
     private var terminationSignalSources: [DispatchSourceSignal] = []
+    private let shortcutPreflightMonitor = AppShortcutPreflightMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installTerminationSignalHandlers()
+        shortcutPreflightMonitor.installIfNeeded()
     }
 
     @MainActor
@@ -513,6 +521,10 @@ private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func cleanupTerminalProcesses() {
         GhosttyTerminalRuntime.closeAll()
+    }
+
+    func updateShortcutPreflightModel(_ model: AppModel) {
+        shortcutPreflightMonitor.updateModel(model)
     }
 }
 
