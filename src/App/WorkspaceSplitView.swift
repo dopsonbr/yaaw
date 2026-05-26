@@ -211,7 +211,7 @@ private final class WorkspaceSplitHostView: NSView {
             addSubview(view)
         }
         sidebarDivider.accessibilityLabel = "Resize sidebar"
-        rightDivider.accessibilityLabel = "Resize right panel"
+        rightDivider.accessibilityLabel = "Resize right-side area"
         bottomDivider.accessibilityLabel = "Resize bottom terminal"
         sidebarDivider.onDragBegan = { [weak self] in self?.beginResizeDrag() }
         sidebarDivider.onDragChanged = { [weak self] delta in self?.resizeSidebar(by: delta) }
@@ -259,7 +259,7 @@ private final class WorkspaceSplitHostView: NSView {
         layout.rightPanelWidth = LayoutState.clamp(
             layout.rightPanelWidth - delta,
             minimum: LayoutState.minimumRightPanelWidth,
-            maximum: LayoutState.maximumRightPanelWidth
+            maximum: maximumRightPanelWidth(for: layout)
         )
         publish(layout, phase: .live)
     }
@@ -313,29 +313,21 @@ private final class WorkspaceSplitHostView: NSView {
         let bottomHeight = resolvedBottomHeight(
             totalHeight: totalHeight, dividerHeight: bottomDividerHeight)
         let contentHeight = max(0, totalHeight - bottomDividerHeight - bottomHeight)
-        var sidebarWidth = resolvedSidebarWidth(
+        let sidebarWidth = resolvedSidebarWidth(
             totalWidth: totalWidth, dividerWidth: leftDividerWidth)
         var rightWidth = resolvedRightPanelWidth(
-            totalWidth: totalWidth, dividerWidth: rightDividerWidth)
+            totalWidth: totalWidth,
+            leftDividerWidth: leftDividerWidth,
+            rightDividerWidth: rightDividerWidth,
+            sidebarWidth: sidebarWidth
+        )
         let fixedWidth = leftDividerWidth + rightDividerWidth
         let availablePaneWidth = max(0, totalWidth - fixedWidth)
         var mainWidth = availablePaneWidth - sidebarWidth - rightWidth
 
-        if mainWidth < LayoutState.minimumMainWorkspaceWidth {
-            var deficit = LayoutState.minimumMainWorkspaceWidth - mainWidth
-            if !configuration.isRightPanelCollapsed {
-                let reducedRightWidth = max(
-                    LayoutState.minimumRightPanelWidth, rightWidth - deficit)
-                deficit -= rightWidth - reducedRightWidth
-                rightWidth = reducedRightWidth
-            }
-            if deficit > 0, !configuration.isSidebarCollapsed {
-                let reducedSidebarWidth = max(
-                    LayoutState.minimumSidebarWidth, sidebarWidth - deficit)
-                deficit -= sidebarWidth - reducedSidebarWidth
-                sidebarWidth = reducedSidebarWidth
-            }
-            mainWidth = max(0, availablePaneWidth - sidebarWidth - rightWidth)
+        if mainWidth < 0 {
+            rightWidth = max(0, rightWidth + mainWidth)
+            mainWidth = 0
         }
 
         let sidebarFrame = NSRect(x: 0, y: 0, width: sidebarWidth, height: totalHeight)
@@ -396,7 +388,7 @@ private final class WorkspaceSplitHostView: NSView {
             LayoutState.maximumSidebarWidth,
             max(
                 LayoutState.minimumSidebarWidth,
-                totalWidth - dividerWidth - LayoutState.minimumMainWorkspaceWidth
+                totalWidth - dividerWidth - LayoutState.minimumRightPanelWidth
             )
         )
         return LayoutState.clamp(
@@ -406,21 +398,73 @@ private final class WorkspaceSplitHostView: NSView {
         )
     }
 
-    private func resolvedRightPanelWidth(totalWidth: Double, dividerWidth: Double) -> Double {
+    private func resolvedRightPanelWidth(
+        totalWidth: Double,
+        leftDividerWidth: Double,
+        rightDividerWidth: Double,
+        sidebarWidth: Double
+    ) -> Double {
         if configuration.isRightPanelCollapsed {
             return Constants.collapsedRailWidth
         }
-        let maximum = min(
-            LayoutState.maximumRightPanelWidth,
-            max(
-                LayoutState.minimumRightPanelWidth,
-                totalWidth - dividerWidth - LayoutState.minimumMainWorkspaceWidth
-            )
+        let maximum = maximumRightPanelWidth(
+            totalWidth: totalWidth,
+            leftDividerWidth: leftDividerWidth,
+            rightDividerWidth: rightDividerWidth,
+            sidebarWidth: sidebarWidth
         )
         return LayoutState.clamp(
             configuration.layoutState.rightPanelWidth,
             minimum: LayoutState.minimumRightPanelWidth,
             maximum: maximum
+        )
+    }
+
+    private func maximumRightPanelWidth(for layout: LayoutState) -> Double {
+        let totalWidth = max(0, bounds.width)
+        let leftDividerWidth =
+            configuration.isSidebarCollapsed
+            ? Constants.collapsedDividerThickness
+            : Constants.dividerThickness
+        let rightDividerWidth =
+            configuration.isRightPanelCollapsed
+            ? Constants.collapsedDividerThickness
+            : Constants.dividerThickness
+        let sidebarWidth: Double
+        if configuration.isSidebarCollapsed {
+            sidebarWidth = Constants.collapsedRailWidth
+        } else {
+            let maximumSidebarWidth = min(
+                LayoutState.maximumSidebarWidth,
+                max(
+                    LayoutState.minimumSidebarWidth,
+                    totalWidth - leftDividerWidth - rightDividerWidth
+                        - LayoutState.minimumRightPanelWidth
+                )
+            )
+            sidebarWidth = LayoutState.clamp(
+                layout.sidebarWidth,
+                minimum: LayoutState.minimumSidebarWidth,
+                maximum: maximumSidebarWidth
+            )
+        }
+        return maximumRightPanelWidth(
+            totalWidth: totalWidth,
+            leftDividerWidth: leftDividerWidth,
+            rightDividerWidth: rightDividerWidth,
+            sidebarWidth: sidebarWidth
+        )
+    }
+
+    private func maximumRightPanelWidth(
+        totalWidth: Double,
+        leftDividerWidth: Double,
+        rightDividerWidth: Double,
+        sidebarWidth: Double
+    ) -> Double {
+        max(
+            LayoutState.minimumRightPanelWidth,
+            totalWidth - leftDividerWidth - rightDividerWidth - sidebarWidth
         )
     }
 

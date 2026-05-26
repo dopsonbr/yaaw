@@ -300,9 +300,17 @@ struct YAAWApp: App {
                     }
 
                     ShortcutCommandButton(
-                        model: model, action: .toggleRightPanel, title: "Toggle Right Panel"
+                        model: model, action: .toggleRightPanel, title: "Toggle Right-Side Area"
                     ) {
                         model.toggleRightPanelCollapsed()
+                    }
+
+                    ShortcutCommandButton(
+                        model: model,
+                        action: .swapMainAndRightPanels,
+                        title: "Swap Main and Right Panels"
+                    ) {
+                        model.toggleWorkspaceSwap()
                     }
                 }
 

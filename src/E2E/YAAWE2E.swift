@@ -348,6 +348,36 @@ private final class E2ERunner {
         try assert(
             model.selectedThread?.displayName == "Codex E2E Session",
             "codex CLI metadata renamed the thread")
+        try model.requestThreadRename(id: codexThreadID, to: "Codex Renamed E2E")
+        try assert(
+            model.selectedThread?.displayName == "Codex E2E Session",
+            "queued context-menu rename left the confirmed codex name visible")
+        try assert(
+            model.selectedThread?.pendingSessionRename == "Codex Renamed E2E",
+            "queued context-menu rename persisted pending intent")
+        let renameSession = try unwrap(
+            model.terminalSession(for: .project(threadID: codexThreadID)),
+            "rename relaunch terminal session")
+        if case .agentPTY(let renameLaunch) = renameSession.request.backend {
+            try assert(
+                renameLaunch.startupInput == "/rename Codex Renamed E2E\n",
+                "rename relaunch queued slash command startup input")
+            try assert(
+                renameLaunch.command.joined(separator: " ").contains("codex-e2e-001"),
+                "rename relaunch resumed the stored codex session")
+        } else {
+            throw E2EFailure("rename relaunch did not use an agent PTY")
+        }
+        model.recordAgentCLIOutput(
+            threadID: codexThreadID,
+            output: "YAAW_SESSION_ID=codex-e2e-001\nYAAW_SESSION_NAME=Codex Renamed E2E\n"
+        )
+        try assert(
+            model.selectedThread?.displayName == "Codex Renamed E2E",
+            "manual slash rename metadata updated the project/thread row")
+        try assert(
+            model.selectedThread?.pendingSessionRename == nil,
+            "confirmed slash rename cleared pending intent")
         try runYAAWNotify(
             threadID: codexThreadID,
             status: "needs-input",
@@ -535,11 +565,13 @@ private final class E2ERunner {
         try assertMissingNvimFallsBackToVimThenVi()
         try assertImagePastePolicyUsesNativeShortcut()
         try assertMissingDirectoryRecovery()
+        try assertUnboundThreadLinkRecovery()
 
         model.toggleBottomTerminal()
-        model.setRightPanelWidth(560)
+        model.setRightPanelWidth(960)
         model.setSidebarWidth(320)
         model.setGlobalTerminalHeight(240)
+        model.toggleWorkspaceSwap()
         model.toggleRightPanelCollapsed()
         model.toggleRightPanelCollapsed()
         model.archiveThread(id: claudeThreadID)
@@ -598,8 +630,11 @@ private final class E2ERunner {
             reloadedModel.layoutState.sidebarWidth == 320,
             "relaunch preserved resized sidebar width")
         try assert(
-            reloadedModel.layoutState.rightPanelWidth == 560,
+            reloadedModel.layoutState.rightPanelWidth == 960,
             "relaunch preserved resized right panel width")
+        try assert(
+            reloadedModel.layoutState.isWorkspaceSwapped,
+            "relaunch preserved swapped main and right panels")
         try assert(
             reloadedModel.layoutState.globalTerminalHeight == 240,
             "relaunch preserved resized bottom terminal height"
@@ -662,8 +697,9 @@ private final class E2ERunner {
                 model.toggleBottomTerminal()
             case .panelResize:
                 model.setSidebarWidth(360)
-                model.setRightPanelWidth(620)
+                model.setRightPanelWidth(960)
                 model.setGlobalTerminalHeight(260)
+                model.toggleWorkspaceSwap()
                 model.toggleBottomTerminal()
             case .panelCollapse:
                 model.toggleSidebarCollapsed()
@@ -788,6 +824,11 @@ private final class E2ERunner {
         let model = try makeModel(databasePath: databasePath)
         try model.createProject(displayName: "Recoverable Project", rootDirectory: recoverableRoot)
         let threadID = try model.createThread(agentCLI: .codex)
+        model.recordAgentCLIOutput(
+            threadID: threadID,
+            output:
+                "YAAW_SESSION_ID=codex-missing-directory\nYAAW_SESSION_NAME=Missing Directory\n"
+        )
         try fileManager.removeItem(at: recoverableRoot)
 
         try assert(
@@ -818,6 +859,96 @@ private final class E2ERunner {
             reloadedModel.terminalLaunchRequest(for: .project(threadID: threadID)) != nil,
             "restored directory allowed terminal launch after reload"
         )
+    }
+
+    private func assertUnboundThreadLinkRecovery() throws {
+        let databasePath = paths.stateDirectory.appendingPathComponent(
+            "unbound-thread-link.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: databasePath)
+        let projectID = UUID()
+        let threadID = UUID()
+        store.save(
+            YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: projectID,
+                        displayName: "Unbound Project",
+                        rootDirectory: paths.projectDirectory
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: threadID,
+                        displayName: "Legacy Thread",
+                        projectID: projectID,
+                        workingDirectory: paths.projectDirectory,
+                        agentCLI: .codex
+                    )
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = try makeModel(databasePath: databasePath)
+        try assert(model.selectedThreadRequiresSessionLink, "unbound loaded thread required link")
+        try assert(
+            model.terminalLaunchRequest(for: .project(threadID: threadID)) == nil,
+            "unbound loaded thread did not silently start a fresh session")
+
+        let candidate = SessionLinkCandidate(
+            identity: "codex-linked-e2e",
+            displayName: "Linked E2E Session",
+            agentCLI: .codex,
+            workingDirectory: paths.projectDirectory,
+            source: "fixture"
+        )
+        model.linkSession(threadID: threadID, candidate: candidate)
+        try assert(!model.selectedThreadRequiresSessionLink, "link selection cleared link state")
+        let linkedSession = try unwrap(
+            model.activateSelectedProjectTerminal(),
+            "linked project terminal session")
+        try assert(
+            linkedSession.request.command.joined(separator: " ").contains("codex-linked-e2e"),
+            "linked session resumed the selected identity")
+
+        let secondThreadID = UUID()
+        store.save(
+            YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: projectID,
+                        displayName: "Unbound Project",
+                        rootDirectory: paths.projectDirectory
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: secondThreadID,
+                        displayName: "Start Fresh",
+                        projectID: projectID,
+                        workingDirectory: paths.projectDirectory,
+                        agentCLI: .codex
+                    )
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: secondThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let startNewModel = try makeModel(databasePath: databasePath)
+        try assert(
+            startNewModel.selectedThreadRequiresSessionLink,
+            "second unbound thread required link")
+        startNewModel.startNewSessionForUnlinkedThread(threadID: secondThreadID)
+        let freshSession = try unwrap(
+            startNewModel.activateSelectedProjectTerminal(),
+            "fresh project terminal session")
+        try assert(
+            !freshSession.request.command.joined(separator: " ").contains(" resume "),
+            "explicit start-new action launched a fresh CLI session")
     }
 
     private func assertStateDatabasesAvoidProtectedUserDirectories() throws {

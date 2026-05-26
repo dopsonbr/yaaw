@@ -59,17 +59,20 @@ public struct AgentTerminalLaunchDescriptor: Equatable, Sendable {
     public var environment: [String: String]
     public var captureLogURL: URL?
     public var captureLogMaximumBytes: UInt64
+    public var startupInput: String?
 
     public init(
         command: [String],
         environment: [String: String],
         captureLogURL: URL? = nil,
-        captureLogMaximumBytes: UInt64 = AgentTerminalCaptureLog.maximumBytes
+        captureLogMaximumBytes: UInt64 = AgentTerminalCaptureLog.maximumBytes,
+        startupInput: String? = nil
     ) {
         self.command = command
         self.environment = environment
         self.captureLogURL = captureLogURL
         self.captureLogMaximumBytes = captureLogMaximumBytes
+        self.startupInput = startupInput
     }
 }
 

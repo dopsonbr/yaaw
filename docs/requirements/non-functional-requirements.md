@@ -62,7 +62,7 @@ Requirements use:
 - The app SHOULD support macOS keyboard navigation for primary workflows.
 - The app SHOULD expose a Settings key binding editor backed by the same YAML settings file as startup configuration.
 - The app SHOULD make all visible stable actions configurable as keyboard shortcuts, with contextual or destructive actions unbound by default.
-- The app SHOULD expose meaningful accessibility labels for sidebar items, right-panel mode controls, resize handles, and terminal regions.
+- The app SHOULD expose meaningful accessibility labels for sidebar items, right-tool-panel mode controls, right-side-area resize handles, and terminal regions.
 - The app SHOULD preserve sufficient contrast using the selected built-in palette.
 - The app SHOULD support system text scaling where practical without breaking the panel layout.
 
@@ -71,12 +71,12 @@ Requirements use:
 - The app MUST make the active project and thread visible.
 - The app MUST make each thread's selected agent CLI visible when starting or inspecting a thread.
 - The app SHOULD make each active thread's latest activity state visible in the sidebar.
-- The app MUST make the active right-panel mode visible.
-- The app MUST keep Files, `nvim`, and Git mode controls available in the right panel.
+- The app MUST make the active right-tool-panel mode visible.
+- The app MUST keep Files, `nvim`, and Git mode controls available in the right tool panel.
 - The app MUST use familiar shortcuts for global back/forward navigation.
 - The app MUST use `Cmd+J` for the selected-thread bottom terminal.
 - The app SHOULD use native macOS defaults where they fit, including `Cmd+,` for Settings, `Cmd+N` for new project, and `Cmd+S` for saving settings edits.
-- The app SHOULD remember the user's last selected project, thread, panel layout, and right-panel mode.
+- The app SHOULD remember the user's last selected project, thread, panel layout, main/right swap state, and right-tool-panel mode.
 - The app SHOULD avoid modal workflows except for project creation, settings inspection, and destructive confirmations.
 
 ## Compatibility
@@ -101,7 +101,7 @@ Requirements use:
 - The app MUST prioritize E2E tests that validate user-visible behavior.
 - The app MUST support screenshot capture for E2E failures and key UI states.
 - The app SHOULD include one high-level no-mock E2E journey through the full app workflow.
-- The app SHOULD include focused E2E tests for project/thread storage, agent CLI selection and resume, file indexing, fuzzy matching, right-panel modes, terminal launch, editor fallback, Git fallback, panel collapse, resize, paste behavior, and shortcut handling.
+- The app SHOULD include focused E2E tests for project/thread storage, agent CLI selection and resume, file indexing, fuzzy matching, right-tool-panel modes, terminal launch, editor fallback, Git fallback, panel collapse, resize, paste behavior, and shortcut handling.
 - Unit tests MAY be added for high-value input/output behavior, but they MUST NOT test internals or private functions.
 
 Detailed testing expectations are defined in [Testing Requirements](testing-requirements.md).

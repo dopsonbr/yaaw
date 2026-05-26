@@ -591,6 +591,7 @@ private struct ManagedAgentLaunchKey: Equatable {
 private final class ManagedAgentTerminal {
     let session: InMemoryTerminalSession
 
+    private let startupInput: String?
     private let process: AgentTerminalProcess
     private var hasStarted = false
 
@@ -636,6 +637,7 @@ private final class ManagedAgentTerminal {
             }
         )
         self.session = terminalSession
+        self.startupInput = launchDescriptor.startupInput
         self.process = terminalProcess
         callbacks.process = terminalProcess
         callbacks.resizeHandler = { [weak self] viewport in
@@ -657,9 +659,20 @@ private final class ManagedAgentTerminal {
         do {
             try process.start(initialViewport: viewport)
             hasStarted = true
+            sendStartupInputIfNeeded()
         } catch {
             session.receive("\r\nYAAW: failed to launch agent terminal: \(error)\r\n")
             session.finish(exitCode: 127, runtimeMilliseconds: 0)
+        }
+    }
+
+    private func sendStartupInputIfNeeded() {
+        guard let startupInput,
+            !startupInput.isEmpty,
+            let data = startupInput.data(using: .utf8)
+        else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            self?.process.write(data)
         }
     }
 }

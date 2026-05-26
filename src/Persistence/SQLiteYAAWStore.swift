@@ -19,7 +19,7 @@ private struct SidebarProjectStateRow {
 }
 
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 13
+    public static let schemaVersion = 14
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -309,6 +309,10 @@ public final class SQLiteYAAWStore: YAAWStore {
                 key: "global_terminal_expanded",
                 value: state.isGlobalTerminalExpanded ? "true" : "false"
             )
+            try upsertLayoutStateValue(
+                key: "workspace_swapped",
+                value: state.isWorkspaceSwapped ? "true" : "false"
+            )
         }
     }
 
@@ -514,6 +518,12 @@ extension SQLiteYAAWStore {
                 try execute("PRAGMA user_version = 13")
             }
         }
+        if currentVersion < 14 {
+            try transaction {
+                try migrateToVersionFourteen()
+                try execute("PRAGMA user_version = 14")
+            }
+        }
     }
 
     fileprivate func migrateToVersionNine() throws {
@@ -635,6 +645,13 @@ extension SQLiteYAAWStore {
         )
         try execute("DROP TABLE right_panel_tabs")
         try execute("ALTER TABLE right_panel_tabs_v13 RENAME TO right_panel_tabs")
+    }
+
+    fileprivate func migrateToVersionFourteen() throws {
+        let threadColumns = try tableColumns("threads")
+        if !threadColumns.contains("pending_session_rename") {
+            try execute("ALTER TABLE threads ADD COLUMN pending_session_rename TEXT")
+        }
     }
 
     fileprivate func createThreadActivityStateSchema() throws {
@@ -1049,9 +1066,10 @@ extension SQLiteYAAWStore {
                 agent_cli,
                 session_identity,
                 canonical_session_name,
+                pending_session_rename,
                 is_pinned
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
                 project_id = excluded.project_id,
@@ -1062,6 +1080,7 @@ extension SQLiteYAAWStore {
                 agent_cli = excluded.agent_cli,
                 session_identity = excluded.session_identity,
                 canonical_session_name = excluded.canonical_session_name,
+                pending_session_rename = excluded.pending_session_rename,
                 is_pinned = excluded.is_pinned
             """
         )
@@ -1076,7 +1095,8 @@ extension SQLiteYAAWStore {
         bind(thread.agentCLI.rawValue, at: 8, in: statement)
         bindOptional(thread.sessionIdentity, at: 9, in: statement)
         bindOptional(thread.canonicalSessionName, at: 10, in: statement)
-        sqlite3_bind_int(statement, 11, thread.isPinned ? 1 : 0)
+        bindOptional(thread.pendingSessionRename, at: 11, in: statement)
+        sqlite3_bind_int(statement, 12, thread.isPinned ? 1 : 0)
         try stepDone(statement)
     }
 
@@ -1146,9 +1166,10 @@ extension SQLiteYAAWStore {
                 agent_cli,
                 session_identity,
                 canonical_session_name,
+                pending_session_rename,
                 is_pinned
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -1162,7 +1183,8 @@ extension SQLiteYAAWStore {
         bind(thread.agentCLI.rawValue, at: 8, in: statement)
         bindOptional(thread.sessionIdentity, at: 9, in: statement)
         bindOptional(thread.canonicalSessionName, at: 10, in: statement)
-        sqlite3_bind_int(statement, 11, thread.isPinned ? 1 : 0)
+        bindOptional(thread.pendingSessionRename, at: 11, in: statement)
+        sqlite3_bind_int(statement, 12, thread.isPinned ? 1 : 0)
         try stepDone(statement)
     }
 
@@ -1290,6 +1312,10 @@ extension SQLiteYAAWStore {
         try insertLayoutStateValue(
             key: "global_terminal_expanded",
             value: layoutState.isGlobalTerminalExpanded ? "true" : "false"
+        )
+        try insertLayoutStateValue(
+            key: "workspace_swapped",
+            value: layoutState.isWorkspaceSwapped ? "true" : "false"
         )
     }
 
@@ -1561,6 +1587,7 @@ extension SQLiteYAAWStore {
                 agent_cli,
                 session_identity,
                 canonical_session_name,
+                pending_session_rename,
                 is_pinned
             FROM threads
             ORDER BY created_at, display_name
@@ -1585,10 +1612,11 @@ extension SQLiteYAAWStore {
                     agentCLI: agentCLI,
                     sessionIdentity: optionalText(at: 8, in: statement),
                     canonicalSessionName: optionalText(at: 9, in: statement),
+                    pendingSessionRename: optionalText(at: 10, in: statement),
                     createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
                     lastOpenedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
                     isArchived: sqlite3_column_int(statement, 6) == 1,
-                    isPinned: sqlite3_column_int(statement, 10) == 1
+                    isPinned: sqlite3_column_int(statement, 11) == 1
                 )
             )
         }
@@ -1629,7 +1657,8 @@ extension SQLiteYAAWStore {
             isSidebarCollapsed: try loadLayoutBool(key: "sidebar_collapsed") ?? false,
             isRightPanelCollapsed: try loadLayoutBool(key: "right_panel_collapsed") ?? false,
             isGlobalTerminalExpanded: try loadLayoutBool(key: "global_terminal_expanded")
-                ?? fallbackGlobalTerminalExpanded
+                ?? fallbackGlobalTerminalExpanded,
+            isWorkspaceSwapped: try loadLayoutBool(key: "workspace_swapped") ?? false
         )
     }
 

@@ -290,6 +290,7 @@ public enum KeyboardShortcutAction: String, CaseIterable, Hashable, Identifiable
     case selectNvimRightPanelMode
     case toggleSidebar
     case toggleRightPanel
+    case swapMainAndRightPanels
     case refreshFiles
     case openNvimFilePicker
     case openSelectedFileInNvim
@@ -365,7 +366,9 @@ public enum KeyboardShortcutAction: String, CaseIterable, Hashable, Identifiable
         case .toggleSidebar:
             "Toggle Sidebar"
         case .toggleRightPanel:
-            "Toggle Right Panel"
+            "Toggle Right-Side Area"
+        case .swapMainAndRightPanels:
+            "Swap Main and Right Panels"
         case .refreshFiles:
             "Refresh Files"
         case .openNvimFilePicker:
@@ -440,7 +443,7 @@ public enum KeyboardShortcutAction: String, CaseIterable, Hashable, Identifiable
             .selectGitRightPanelMode,
             .selectNvimRightPanelMode, .openNvimFilePicker:
             .rightPanel
-        case .toggleSidebar, .toggleRightPanel:
+        case .toggleSidebar, .toggleRightPanel, .swapMainAndRightPanels:
             .layout
         case .toggleBottomTerminal:
             .terminal

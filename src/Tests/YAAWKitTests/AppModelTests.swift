@@ -346,6 +346,15 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertTrue(model.layoutState.isSidebarCollapsed)
         XCTAssertTrue(model.layoutState.isRightPanelCollapsed)
+        XCTAssertFalse(model.layoutState.isWorkspaceSwapped)
+    }
+
+    func testWorkspaceSwapActionUpdatesLayoutState() {
+        let model = AppModel()
+
+        model.toggleWorkspaceSwap()
+
+        XCTAssertTrue(model.layoutState.isWorkspaceSwapped)
     }
 
     func testPanelResizeActionsClampLayoutState() {
@@ -365,11 +374,11 @@ final class AppModelTests: XCTestCase {
         let model = AppModel()
 
         model.setSidebarWidth(600)
-        model.setRightPanelWidth(650)
+        model.setRightPanelWidth(1_200)
         model.setGlobalTerminalHeight(400)
 
         XCTAssertEqual(model.layoutState.sidebarWidth, 520)
-        XCTAssertEqual(model.layoutState.rightPanelWidth, 650)
+        XCTAssertEqual(model.layoutState.rightPanelWidth, 1_200)
         XCTAssertEqual(model.layoutState.globalTerminalHeight, 400)
     }
 
@@ -397,6 +406,17 @@ final class AppModelTests: XCTestCase {
         model.commitLayoutResize()
 
         XCTAssertEqual(store.layoutStateWriteCount, 1)
+    }
+
+    func testWorkspaceSwapActionPersistsLayoutState() {
+        let store = InMemoryYAAWStore.helloWorld()
+        let model = AppModel(store: store)
+
+        model.toggleWorkspaceSwap()
+
+        XCTAssertTrue(model.layoutState.isWorkspaceSwapped)
+        XCTAssertEqual(store.layoutStateWriteCount, 1)
+        XCTAssertTrue(store.load().layoutState.isWorkspaceSwapped)
     }
 
     func testPanelSizeResetActionsPersistDefaults() {
@@ -854,6 +874,537 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(
             model.activeThreads(for: projectID).map(\.id), [secondThreadID, firstThreadID])
+    }
+
+    func testQueuedRenameWaitsForConfirmedCLIMetadata() throws {
+        let fixture = AppModelFixture()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "Original",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .codex,
+                        sessionIdentity: "codex-1",
+                        canonicalSessionName: "Original"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(store: store)
+
+        try model.requestThreadRename(id: fixture.firstThreadID, to: "  Renamed  ")
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output: """
+                session id: codex-1
+                session name: Original
+                """
+        )
+
+        XCTAssertEqual(model.selectedThread?.displayName, "Original")
+        XCTAssertEqual(model.selectedThread?.pendingSessionRename, "Renamed")
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output: """
+                session id: codex-1
+                session name: Renamed
+                """
+        )
+
+        XCTAssertEqual(model.selectedThread?.displayName, "Renamed")
+        XCTAssertNil(model.selectedThread?.pendingSessionRename)
+        XCTAssertEqual(store.load().threads.first?.displayName, "Renamed")
+    }
+
+    func testStoredIdentityLaunchesResumeAfterReload() throws {
+        let fixture = AppModelFixture()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["codex": "/tmp/bin/codex"]),
+            captureDirectory: nil
+        )
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "Existing",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .codex,
+                        sessionIdentity: "codex-resume-1",
+                        canonicalSessionName: "Existing"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(store: store, agentCLIBindings: service)
+
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+
+        XCTAssertTrue(request.command[2].contains("/tmp/bin/codex resume codex-resume-1"))
+    }
+
+    func testLoadedUnboundThreadRequiresExplicitLinkOrNewSession() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["codex": "/tmp/bin/codex"]),
+            captureDirectory: nil,
+            homeDirectory: home
+        )
+        let model = AppModel(
+            store: fixture.store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: true
+        )
+
+        XCTAssertTrue(model.selectedThreadRequiresSessionLink)
+        XCTAssertNil(model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+
+        model.startNewSessionForUnlinkedThread(threadID: fixture.firstThreadID)
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+
+        XCTAssertFalse(model.selectedThreadRequiresSessionLink)
+        XCTAssertTrue(request.command[2].contains("/tmp/bin/codex"))
+    }
+
+    func testLoadedUnboundCodexThreadAutoLinksExactNameAndResumes() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "rename-test",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .codex,
+                        pendingSessionRename: "rename-test"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["codex": "/tmp/bin/codex"]),
+            captureDirectory: nil,
+            homeDirectory: home
+        )
+
+        let model = AppModel(
+            store: store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: true
+        )
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+        let reloadedThread = try XCTUnwrap(
+            store.load().threads.first { $0.id == fixture.firstThreadID })
+
+        XCTAssertFalse(model.selectedThreadRequiresSessionLink)
+        XCTAssertTrue(request.command[2].contains("/tmp/bin/codex resume codex-1"))
+        XCTAssertEqual(reloadedThread.sessionIdentity, "codex-1")
+        XCTAssertEqual(reloadedThread.canonicalSessionName, "rename-test")
+        XCTAssertEqual(reloadedThread.displayName, "rename-test")
+        XCTAssertNil(reloadedThread.pendingSessionRename)
+    }
+
+    func testLoadedUnboundCodexThreadAutoLinksExactNameFromHistoryAndResumes() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"session_id":"codex-history-1","ts":1779820871,"text":"tell me 2 jokes"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("history.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "tell me 2 jokes",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .codex,
+                        pendingSessionRename: "tell me 2 jokes"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["codex": "/tmp/bin/codex"]),
+            captureDirectory: nil,
+            homeDirectory: home
+        )
+
+        let model = AppModel(
+            store: store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: true
+        )
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+        let reloadedThread = try XCTUnwrap(
+            store.load().threads.first { $0.id == fixture.firstThreadID })
+
+        XCTAssertFalse(model.selectedThreadRequiresSessionLink)
+        XCTAssertTrue(request.command[2].contains("/tmp/bin/codex resume codex-history-1"))
+        XCTAssertEqual(reloadedThread.sessionIdentity, "codex-history-1")
+        XCTAssertEqual(reloadedThread.canonicalSessionName, "tell me 2 jokes")
+        XCTAssertNil(reloadedThread.pendingSessionRename)
+    }
+
+    func testLoadedUnboundClaudeThreadAutoLinksExactNameAndResumes() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let claudeProjectDirectory =
+            home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(
+                fixture.root.path.replacingOccurrences(of: "/", with: "-"), isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: claudeProjectDirectory,
+            withIntermediateDirectories: true
+        )
+        try """
+        {"type":"custom-title","customTitle":"claude-resume-test","sessionId":"claude-1"}
+        """.write(
+            to: claudeProjectDirectory.appendingPathComponent("claude-1.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.secondThreadID,
+                        displayName: "claude-resume-test",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .claude,
+                        pendingSessionRename: "claude-resume-test"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.secondThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["claude": "/tmp/bin/claude"]),
+            captureDirectory: nil,
+            homeDirectory: home
+        )
+
+        let model = AppModel(
+            store: store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: true
+        )
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.secondThreadID)))
+        let reloadedThread = try XCTUnwrap(
+            store.load().threads.first { $0.id == fixture.secondThreadID })
+
+        XCTAssertFalse(model.selectedThreadRequiresSessionLink)
+        XCTAssertTrue(request.command[2].contains("/tmp/bin/claude --resume claude-1"))
+        XCTAssertEqual(reloadedThread.sessionIdentity, "claude-1")
+        XCTAssertEqual(reloadedThread.canonicalSessionName, "claude-resume-test")
+        XCTAssertEqual(reloadedThread.displayName, "claude-resume-test")
+        XCTAssertNil(reloadedThread.pendingSessionRename)
+    }
+
+    func testLoadedUnboundThreadRequiresLinkWhenExactNameIsAmbiguous() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
+        {"id":"codex-2","thread_name":"rename-test","updated_at":"2026-05-26T11:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "rename-test",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .codex,
+                        pendingSessionRename: "rename-test"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["codex": "/tmp/bin/codex"]),
+            captureDirectory: nil,
+            homeDirectory: home
+        )
+
+        let model = AppModel(
+            store: store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: true
+        )
+
+        XCTAssertTrue(model.selectedThreadRequiresSessionLink)
+        XCTAssertNil(model.terminalLaunchRequest(for: .project(threadID: fixture.firstThreadID)))
+    }
+
+    func testSelectedUnboundNamedThreadSyncAutoLinksExactCatalogMetadata() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "rename-test",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .codex,
+                        pendingSessionRename: "rename-test"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let model = AppModel(
+            store: store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: false
+        )
+
+        model.syncSelectedThreadSessionMetadata()
+
+        let reloadedThread = try XCTUnwrap(
+            store.load().threads.first { $0.id == fixture.firstThreadID })
+        XCTAssertFalse(model.selectedThreadRequiresSessionLink)
+        XCTAssertEqual(reloadedThread.sessionIdentity, "codex-1")
+        XCTAssertNil(reloadedThread.pendingSessionRename)
+    }
+
+    func testStartNewSessionSkipsExactAutoLinkDuringCurrentRun() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "rename-test",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .codex,
+                        pendingSessionRename: "rename-test"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let model = AppModel(
+            store: store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: true
+        )
+
+        XCTAssertTrue(model.selectedThreadRequiresSessionLink)
+        model.startNewSessionForUnlinkedThread(threadID: fixture.firstThreadID)
+
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        model.syncSelectedThreadSessionMetadata()
+
+        let reloadedThread = try XCTUnwrap(
+            store.load().threads.first { $0.id == fixture.firstThreadID })
+        XCTAssertFalse(model.selectedThreadRequiresSessionLink)
+        XCTAssertNil(reloadedThread.sessionIdentity)
+        XCTAssertEqual(reloadedThread.pendingSessionRename, "rename-test")
+    }
+
+    func testLinkSelectionPersistsSessionIdentityAndName() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.firstThreadID,
+                        displayName: "Pending",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .codex,
+                        pendingSessionRename: "Pending"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let model = AppModel(
+            store: store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: true
+        )
+        let candidate = SessionLinkCandidate(
+            identity: "codex-linked-1",
+            displayName: "Linked Codex",
+            agentCLI: .codex,
+            workingDirectory: fixture.root,
+            source: "fixture"
+        )
+
+        model.linkSession(threadID: fixture.firstThreadID, candidate: candidate)
+
+        let reloadedThread = try XCTUnwrap(
+            store.load().threads.first { $0.id == fixture.firstThreadID })
+        XCTAssertFalse(model.selectedThreadRequiresSessionLink)
+        XCTAssertEqual(reloadedThread.sessionIdentity, "codex-linked-1")
+        XCTAssertEqual(reloadedThread.displayName, "Linked Codex")
+        XCTAssertEqual(reloadedThread.canonicalSessionName, "Linked Codex")
+        XCTAssertNil(reloadedThread.pendingSessionRename)
     }
 
     func testThreadActivitySortsProjectThreadsByRecentInteraction() {

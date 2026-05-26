@@ -128,6 +128,311 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(command, ["/tmp/bin/copilot", "--resume=copilot-session-123"])
     }
 
+    func testStartNameAndInteractiveRenameCapabilitiesUseAdapterContracts() throws {
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticExecutableResolver(paths: [
+                "codex": "/tmp/bin/codex",
+                "claude": "/tmp/bin/claude",
+                "opencode": "/tmp/bin/opencode",
+                "copilot": "/tmp/bin/copilot",
+            ]),
+            environment: ["SHELL": "/bin/zsh"],
+            captureDirectory: root,
+            activityDirectory: root,
+            helperBinDirectory: try temporaryDirectory()
+        )
+
+        let codex = AgentThread(
+            displayName: "Codex Name",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex,
+            pendingSessionRename: "Codex Name"
+        )
+        let claude = AgentThread(
+            displayName: "Claude Name",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .claude,
+            pendingSessionRename: "Claude Name"
+        )
+        let claudeResume = AgentThread(
+            displayName: "Claude",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .claude,
+            sessionIdentity: "claude-123",
+            pendingSessionRename: "Claude Renamed"
+        )
+        let copilot = AgentThread(
+            displayName: "Copilot Name",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .copilot,
+            pendingSessionRename: "Copilot Name"
+        )
+        let opencode = AgentThread(
+            displayName: "OpenCode Name",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .opencode,
+            pendingSessionRename: "OpenCode Name"
+        )
+
+        XCTAssertTrue(service.supportsSessionRename(for: .codex))
+        XCTAssertTrue(service.supportsSessionRename(for: .claude))
+        XCTAssertFalse(service.supportsSessionRename(for: .opencode))
+        XCTAssertTrue(service.supportsSessionRename(for: .copilot))
+        XCTAssertEqual(
+            service.invocation(for: claude).command, ["/tmp/bin/claude", "--name", "Claude Name"])
+        XCTAssertEqual(
+            service.invocation(for: copilot).command,
+            ["/tmp/bin/copilot", "--name", "Copilot Name"])
+        XCTAssertEqual(service.invocation(for: opencode).command, ["/tmp/bin/opencode"])
+        XCTAssertEqual(
+            service.terminalLaunchDescriptor(for: codex).startupInput, "/rename Codex Name\n")
+        XCTAssertNil(service.terminalLaunchDescriptor(for: claude).startupInput)
+        XCTAssertEqual(
+            service.terminalLaunchDescriptor(for: claudeResume).startupInput,
+            "/rename Claude Renamed\n"
+        )
+    }
+
+    func testSessionCatalogReadersReturnWorkingDirectoryCandidates() throws {
+        let home = try temporaryDirectory()
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"codex-1","thread_name":"Codex Linked","cwd":"\(root.path)","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let claudeProjectDirectory =
+            home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(
+                root.path.replacingOccurrences(of: "/", with: "-"), isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: claudeProjectDirectory,
+            withIntermediateDirectories: true
+        )
+        try """
+        {"sessionId":"claude-1","cwd":"\(root.path)","agent-name":"Claude Linked","timestamp":"2026-05-26T11:00:00Z"}
+        """.write(
+            to: claudeProjectDirectory.appendingPathComponent("claude-1.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let openCodeDirectory =
+            home
+            .appendingPathComponent(".local", isDirectory: true)
+            .appendingPathComponent("share", isDirectory: true)
+            .appendingPathComponent("opencode", isDirectory: true)
+            .appendingPathComponent("storage", isDirectory: true)
+            .appendingPathComponent("session", isDirectory: true)
+            .appendingPathComponent("default", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: openCodeDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"opencode-1","title":"OpenCode Linked","directory":"\(root.path)","updated":1779796800}
+        """.write(
+            to: openCodeDirectory.appendingPathComponent("opencode-1.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let copilotDirectory =
+            home
+            .appendingPathComponent(".copilot", isDirectory: true)
+            .appendingPathComponent("session-state", isDirectory: true)
+            .appendingPathComponent("copilot-1", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: copilotDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"copilot-1","name":"Copilot Linked","context":{"cwd":"\(root.path)"},"updated_at":"2026-05-26T12:00:00Z"}
+        """.write(
+            to: copilotDirectory.appendingPathComponent("vscode.metadata.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let codex = AgentThread(
+            displayName: "Codex",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex,
+            sessionIdentity: "codex-1"
+        )
+        let claude = AgentThread(
+            displayName: "Claude",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .claude
+        )
+        let opencode = AgentThread(
+            displayName: "OpenCode",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .opencode
+        )
+        let copilot = AgentThread(
+            displayName: "Copilot",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .copilot
+        )
+
+        XCTAssertEqual(
+            CodexCLIAdapter().sessionLinkCandidates(
+                workingDirectory: root,
+                homeDirectory: home
+            ).first?.displayName,
+            "Codex Linked"
+        )
+        XCTAssertEqual(service.sessionLinkCandidates(for: codex).first?.displayName, "Codex Linked")
+        XCTAssertEqual(service.sessionLinkCandidates(for: claude).first?.identity, "claude-1")
+        XCTAssertEqual(
+            service.sessionLinkCandidates(for: opencode).first?.displayName, "OpenCode Linked")
+        XCTAssertEqual(service.sessionLinkCandidates(for: copilot).first?.identity, "copilot-1")
+        XCTAssertEqual(service.catalogMetadata(for: codex)?.canonicalName, "Codex Linked")
+    }
+
+    func testExactSessionLinkCandidateUsesUniqueCodexNameWithoutWorkingDirectory() throws {
+        let home = try temporaryDirectory()
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
+        {"id":"codex-2","thread_name":"other","updated_at":"2026-05-26T11:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let thread = AgentThread(
+            displayName: "rename-test",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex,
+            pendingSessionRename: "rename-test"
+        )
+
+        let candidate = try XCTUnwrap(service.exactSessionLinkCandidate(for: thread))
+
+        XCTAssertEqual(candidate.identity, "codex-1")
+        XCTAssertEqual(candidate.displayName, "rename-test")
+    }
+
+    func testExactSessionLinkCandidateUsesCodexHistoryWhenIndexIsMissingSession() throws {
+        let home = try temporaryDirectory()
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"other","thread_name":"other","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {"session_id":"codex-history-1","ts":1779820871,"text":"tell me 2 jokes"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("history.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let thread = AgentThread(
+            displayName: "tell me 2 jokes",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex,
+            pendingSessionRename: "tell me 2 jokes"
+        )
+
+        let candidate = try XCTUnwrap(service.exactSessionLinkCandidate(for: thread))
+
+        XCTAssertEqual(candidate.identity, "codex-history-1")
+        XCTAssertEqual(candidate.displayName, "tell me 2 jokes")
+        XCTAssertEqual(candidate.source, "~/.codex/history.jsonl")
+    }
+
+    func testExactSessionLinkCandidateRejectsAmbiguousCodexNames() throws {
+        let home = try temporaryDirectory()
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
+        {"id":"codex-2","thread_name":"rename-test","updated_at":"2026-05-26T11:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let thread = AgentThread(
+            displayName: "rename-test",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex,
+            pendingSessionRename: "rename-test"
+        )
+
+        XCTAssertNil(service.exactSessionLinkCandidate(for: thread))
+    }
+
+    func testExactSessionLinkCandidateReadsClaudeCustomTitle() throws {
+        let home = try temporaryDirectory()
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let claudeProjectDirectory =
+            home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(
+                root.path.replacingOccurrences(of: "/", with: "-"), isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: claudeProjectDirectory,
+            withIntermediateDirectories: true
+        )
+        try """
+        {"type":"custom-title","customTitle":"claude-resume-test","sessionId":"claude-1"}
+        """.write(
+            to: claudeProjectDirectory.appendingPathComponent("claude-1.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let thread = AgentThread(
+            displayName: "claude-resume-test",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .claude,
+            pendingSessionRename: "claude-resume-test"
+        )
+
+        let candidate = try XCTUnwrap(service.exactSessionLinkCandidate(for: thread))
+
+        XCTAssertEqual(candidate.identity, "claude-1")
+        XCTAssertEqual(candidate.displayName, "claude-resume-test")
+    }
+
     func testCanonicalNamePrefersReportedNameThenTitleThenIdentity() throws {
         let service = AgentCLISessionBindingService(captureDirectory: nil)
 

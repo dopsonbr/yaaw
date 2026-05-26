@@ -3,11 +3,13 @@ import Foundation
 
 public enum AppModelError: Error, Equatable {
     case emptyProjectName
+    case emptyThreadName
     case missingProjectDirectory(String)
     case selectedProjectMissing
     case missingAgentCLI
     case threadNotFound
     case agentCLIChangeNotAllowed
+    case sessionRenameNotSupported
 }
 
 private enum FileBrowserPresentationLimits {
@@ -35,6 +37,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var expandedProjectIDs: Set<UUID>
     @Published public private(set) var expandedArchivedProjectIDs: Set<UUID>
     @Published public private(set) var threadActivityByThreadID: [UUID: ThreadActivityState]
+    @Published public private(set) var sessionLinkRequiredThreadIDs: Set<UUID>
 
     public let projectTerminal: TerminalSurfaceDescriptor
     public private(set) var navigationHistory: NavigationHistory
@@ -57,12 +60,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var nvimRelativePathsByThreadID: [UUID: String] = [:]
     private var nvimRelaunchTokensByThreadID: [UUID: UUID] = [:]
     private var nvimRelaunchTokensByTabKey: [String: UUID] = [:]
-    private var activeProjectLaunchDescriptorsByThreadID:
-        [UUID: AgentTerminalLaunchDescriptor] = [:]
+    private var activeProjectLaunchDescriptorsByThreadID: [UUID: AgentTerminalLaunchDescriptor] =
+        [:]
     private var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
     private var activityReadOffsetsByThreadID: [UUID: UInt64] = [:]
     private var activityPartialLinesByThreadID: [UUID: String] = [:]
     private var pendingTerminalTitlesByThreadID: [UUID: String] = [:]
+    private var sessionLinkSkippedThreadIDs: Set<UUID> = []
     private var focusedProjectTerminalThreadID: UUID?
     private var threadIndexByID: [UUID: Int] = [:]
     private var cachedActiveThreadsByProject: [UUID: [AgentThread]] = [:]
@@ -81,7 +85,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         badgeUpdater: any ThreadActivityBadgeUpdating = NoopThreadActivityBadgeUpdater(),
         isApplicationActive: @escaping () -> Bool = { false },
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        requiresSessionLinkForLoadedUnboundThreads: Bool? = nil
     ) {
         self.store = store
         self.terminalManager = terminalManager
@@ -99,8 +104,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.environment = environment
         self.homeDirectory = homeDirectory
         let snapshot = store.load()
+        let requiresLinks =
+            requiresSessionLinkForLoadedUnboundThreads ?? (store is SQLiteYAAWStore)
         self.projects = Self.sortedProjects(snapshot.projects)
         self.threads = snapshot.threads
+        self.sessionLinkRequiredThreadIDs = []
         self.fileIndexMetadataByThreadID = snapshot.fileIndexMetadataByThreadID
         self.threadActivityByThreadID = snapshot.threadActivityByThreadID.mapValues {
             $0.downgradedForLaunch()
@@ -164,6 +172,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             title: "Project Terminal",
             placeholderText: "Terminal placeholder for the selected thread"
         )
+        reconcileLoadedUnboundSessionLinks(requiresLinks: requiresLinks)
         persistLaunchDowngradedThreadActivity(snapshot.threadActivityByThreadID)
         updateDockBadge()
         recordDiagnostic(
@@ -181,6 +190,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return nil
         }
         return threads[index]
+    }
+
+    public var selectedThreadRequiresSessionLink: Bool {
+        selectedThreadID.map { sessionLinkRequiredThreadIDs.contains($0) } ?? false
     }
 
     public var selectedProject: Project? {
@@ -334,6 +347,15 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return lhs.createdAt > rhs.createdAt
         }
         return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+    }
+
+    private static func normalizedThreadName(_ name: String) -> String? {
+        let normalized =
+            name
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
     }
 
     public var windowTitle: String {
@@ -590,6 +612,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         persistLayout()
     }
 
+    public func toggleWorkspaceSwap() {
+        layoutState.isWorkspaceSwapped.toggle()
+        persistLayout()
+    }
+
     public func setSidebarWidth(_ width: Double, persist: Bool = true) {
         layoutState.sidebarWidth = LayoutState.clamp(
             width,
@@ -602,10 +629,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func setRightPanelWidth(_ width: Double, persist: Bool = true) {
-        layoutState.rightPanelWidth = LayoutState.clamp(
+        layoutState.rightPanelWidth = LayoutState.clampMinimum(
             width,
-            minimum: LayoutState.minimumRightPanelWidth,
-            maximum: LayoutState.maximumRightPanelWidth
+            minimum: LayoutState.minimumRightPanelWidth
         )
         if persist {
             persistLayout()
@@ -671,7 +697,24 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 agentCLI: thread.agentCLI
             )
         case .project(let threadID):
-            guard let thread = activeThread(id: threadID) else { return nil }
+            guard var thread = activeThread(id: threadID) else { return nil }
+            if sessionLinkRequiredThreadIDs.contains(threadID),
+                !autoLinkUnboundThreadIfExactMatch(
+                    threadID: threadID,
+                    diagnosticName: "session_auto_linked_before_launch"
+                )
+            {
+                recordDiagnostic(
+                    category: "AgentCLI",
+                    name: "session_link_required",
+                    metadata: [
+                        "thread_id": threadID.uuidString,
+                        "agent_cli": thread.agentCLI.rawValue,
+                    ]
+                )
+                return nil
+            }
+            thread = activeThread(id: threadID) ?? thread
             guard isExistingDirectory(thread.workingDirectory) else {
                 recordTerminalLaunchFailure(
                     role: role,
@@ -1114,7 +1157,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "entry_count": "\(entryCount)",
                 "visible_row_count": "\(rowCount)",
                 "duration_ms": "\(durationMS)",
-                "limited": "\(rowCount >= FileBrowserPresentationLimits.treeRowDiagnosticThreshold)",
+                "limited":
+                    "\(rowCount >= FileBrowserPresentationLimits.treeRowDiagnosticThreshold)",
             ]
         )
     }
@@ -1317,11 +1361,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             trimmedDisplayName?.isEmpty == false
             ? trimmedDisplayName ?? ""
             : "Starting \(agentCLI.displayName)..."
+        let pendingSessionRename =
+            trimmedDisplayName?.isEmpty == false
+                && agentCLIBindings.canApplySessionNameOnLaunch(for: agentCLI)
+            ? trimmedDisplayName
+            : nil
         let thread = AgentThread(
             displayName: resolvedDisplayName,
             projectID: project.id,
             workingDirectory: resolvedWorkingDirectory,
             agentCLI: agentCLI,
+            pendingSessionRename: pendingSessionRename,
             createdAt: now,
             lastOpenedAt: now
         )
@@ -1380,6 +1430,160 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public func toggleSelectedThreadPinned() {
         guard let selectedThreadID else { return }
         toggleThreadPinned(id: selectedThreadID)
+    }
+
+    public func canRequestThreadRename(id threadID: UUID) -> Bool {
+        guard let thread = thread(withID: threadID) else { return false }
+        return agentCLIBindings.supportsSessionRename(for: thread.agentCLI)
+    }
+
+    public func requestThreadRename(id threadID: UUID, to rawName: String) throws {
+        guard let index = threadIndexByID[threadID] else {
+            throw AppModelError.threadNotFound
+        }
+        guard agentCLIBindings.supportsSessionRename(for: threads[index].agentCLI) else {
+            throw AppModelError.sessionRenameNotSupported
+        }
+        guard let name = Self.normalizedThreadName(rawName) else {
+            throw AppModelError.emptyThreadName
+        }
+        let hadStoredIdentity = threads[index].sessionIdentity != nil
+        let wasArchived = threads[index].isArchived
+        mutateThread(at: index) {
+            $0.pendingSessionRename = name
+        }
+        persistThread(threads[index])
+        activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
+        captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+        recordDiagnostic(
+            category: "AgentCLI",
+            name: "thread_rename_requested",
+            metadata: [
+                "thread_id": threadID.uuidString,
+                "agent_cli": threads[index].agentCLI.rawValue,
+            ]
+        )
+
+        guard selectedThreadID == threadID,
+            !wasArchived,
+            hadStoredIdentity,
+            !sessionLinkRequiredThreadIDs.contains(threadID)
+        else { return }
+        terminalManager.terminate(role: .project(threadID: threadID))
+        _ = activateTerminal(role: .project(threadID: threadID))
+    }
+
+    public func sessionLinkCandidates(for threadID: UUID) -> [SessionLinkCandidate] {
+        guard let thread = thread(withID: threadID) else { return [] }
+        return agentCLIBindings.sessionLinkCandidates(for: thread)
+    }
+
+    public func linkSession(threadID: UUID, candidate: SessionLinkCandidate) {
+        guard let index = threadIndexByID[threadID],
+            threads[index].agentCLI == candidate.agentCLI
+        else { return }
+        applySessionLink(candidate, toThreadAt: index)
+        recordDiagnostic(
+            category: "AgentCLI",
+            name: "session_linked",
+            metadata: [
+                "thread_id": threadID.uuidString,
+                "agent_cli": candidate.agentCLI.rawValue,
+                "source": candidate.source,
+            ]
+        )
+    }
+
+    public func startNewSessionForUnlinkedThread(threadID: UUID) {
+        guard let index = threadIndexByID[threadID] else { return }
+        mutateThread(at: index) {
+            $0.sessionIdentity = nil
+            $0.canonicalSessionName = nil
+        }
+        sessionLinkRequiredThreadIDs.remove(threadID)
+        sessionLinkSkippedThreadIDs.insert(threadID)
+        activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
+        captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+        persistThread(threads[index])
+        recordDiagnostic(
+            category: "AgentCLI",
+            name: "session_link_skipped",
+            metadata: [
+                "thread_id": threadID.uuidString,
+                "agent_cli": threads[index].agentCLI.rawValue,
+            ]
+        )
+    }
+
+    private func reconcileLoadedUnboundSessionLinks(requiresLinks: Bool) {
+        guard requiresLinks else { return }
+        let threadIDs = threads.filter { $0.sessionIdentity == nil }.map(\.id)
+        for threadID in threadIDs {
+            if autoLinkUnboundThreadIfExactMatch(
+                threadID: threadID,
+                diagnosticName: "session_auto_linked_on_load"
+            ) {
+                continue
+            }
+            sessionLinkRequiredThreadIDs.insert(threadID)
+        }
+    }
+
+    @discardableResult
+    private func autoLinkUnboundThreadIfExactMatch(
+        threadID: UUID,
+        diagnosticName: String
+    ) -> Bool {
+        guard let index = threadIndexByID[threadID],
+            threads[index].sessionIdentity == nil,
+            let candidate = agentCLIBindings.exactSessionLinkCandidate(for: threads[index])
+        else { return false }
+        applySessionLink(candidate, toThreadAt: index)
+        recordDiagnostic(
+            category: "AgentCLI",
+            name: diagnosticName,
+            metadata: [
+                "thread_id": threadID.uuidString,
+                "agent_cli": candidate.agentCLI.rawValue,
+                "source": candidate.source,
+            ]
+        )
+        return true
+    }
+
+    private func applySessionLink(_ candidate: SessionLinkCandidate, toThreadAt index: Int) {
+        let threadID = threads[index].id
+        mutateThread(at: index) {
+            $0.sessionIdentity = candidate.identity
+            $0.canonicalSessionName = candidate.displayName
+            $0.displayName = candidate.displayName
+            $0.pendingSessionRename = nil
+        }
+        sessionLinkRequiredThreadIDs.remove(threadID)
+        sessionLinkSkippedThreadIDs.remove(threadID)
+        activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
+        captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+        persistThread(threads[index])
+    }
+
+    public func syncSelectedThreadSessionMetadata() {
+        guard let selectedThreadID else { return }
+        if let index = threadIndexByID[selectedThreadID],
+            threads[index].sessionIdentity == nil,
+            !sessionLinkSkippedThreadIDs.contains(selectedThreadID)
+        {
+            _ = autoLinkUnboundThreadIfExactMatch(
+                threadID: selectedThreadID,
+                diagnosticName: "session_auto_linked_during_sync"
+            )
+        }
+        if sessionLinkRequiredThreadIDs.contains(selectedThreadID) {
+            return
+        }
+        guard let index = threadIndexByID[selectedThreadID],
+            let metadata = agentCLIBindings.catalogMetadata(for: threads[index])
+        else { return }
+        applyAgentCLIMetadata(metadata, toThreadAt: index)
     }
 
     public func moveProject(id projectID: UUID, direction: ProjectMoveDirection) {
@@ -1555,12 +1759,22 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     private func applyAgentCLIMetadata(_ metadata: AgentCLISessionMetadata, toThreadAt index: Int) {
+        let threadID = threads[index].id
+        let pendingRename = threads[index].pendingSessionRename
+        let canonicalName = metadata.canonicalName
+        let isPendingRenameConfirmed =
+            pendingRename.map { $0 == canonicalName } ?? true
         mutateThread(at: index) {
             $0.sessionIdentity = metadata.identity
-            $0.canonicalSessionName = metadata.canonicalName
-            $0.displayName = metadata.canonicalName
+            if isPendingRenameConfirmed {
+                $0.canonicalSessionName = canonicalName
+                $0.displayName = canonicalName
+                $0.pendingSessionRename = nil
+            }
         }
-        pendingTerminalTitlesByThreadID.removeValue(forKey: threads[index].id)
+        sessionLinkRequiredThreadIDs.remove(threadID)
+        sessionLinkSkippedThreadIDs.remove(threadID)
+        pendingTerminalTitlesByThreadID.removeValue(forKey: threadID)
         persistThread(threads[index])
     }
 

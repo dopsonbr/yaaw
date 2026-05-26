@@ -24,7 +24,7 @@ Implementation plans should reference the relevant requirements and standards.
 - Bind each thread to exactly one `codex`, `claude`, `opencode`, or `copilot` CLI session and resume that session by stored identity.
 - Keep project metadata, settings, file indexes, diagnostics, and activity previews in app-owned local storage.
 - Use `libghostty` for terminal-backed work surfaces: agent sessions, bottom terminal, `nvim`, and Git.
-- Keep the right panel focused on four local tools: Files, Browser previews, `nvim`, and Git.
+- Keep the right tool panel focused on four local tools: Files, Browser previews, `nvim`, and Git.
 - Preserve Dracula as the default visual system while supporting built-in theme, icon, font, keyboard, tool, and indexing settings.
 - Prefer E2E behavior tests and screenshot artifacts over internals-heavy tests.
 

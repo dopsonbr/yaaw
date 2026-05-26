@@ -84,7 +84,8 @@ public final class AgentTerminalProcess: @unchecked Sendable {
 
         let argvStorage = command.map { strdup($0) }
         var argv = argvStorage + [nil]
-        let environmentEntries = environment
+        let environmentEntries =
+            environment
             .map { "\($0.key)=\($0.value)" }
             .sorted()
         let environmentStorage = environmentEntries.map { strdup($0) }

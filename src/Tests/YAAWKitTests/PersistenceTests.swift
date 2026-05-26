@@ -13,6 +13,9 @@ final class PersistenceTests: XCTestCase {
         let version = try sqliteUserVersion(path: path)
 
         XCTAssertEqual(version, SQLiteYAAWStore.schemaVersion)
+        XCTAssertTrue(
+            try sqliteTableColumns(path: path, table: "threads").contains(
+                "pending_session_rename"))
     }
 
     func testSQLiteMigrationRecoversPartialVersionZeroSchema() throws {
@@ -238,6 +241,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.threads.map(\.isArchived), [true, false])
         XCTAssertEqual(reloaded.threads.map(\.agentCLI), [.codex, .claude])
         XCTAssertEqual(reloaded.threads.map(\.sessionIdentity), [nil, nil])
+        XCTAssertEqual(reloaded.threads.map(\.pendingSessionRename), [nil, nil])
         XCTAssertEqual(reloaded.selectedProjectID, projectID)
         XCTAssertEqual(reloaded.selectedThreadID, secondThreadID)
         XCTAssertEqual(reloaded.rightPanelModesByThreadID[firstThreadID], .git)
@@ -248,6 +252,42 @@ final class PersistenceTests: XCTestCase {
             reloaded.rightPanelStatesByThreadID[secondThreadID]?.selectedTabID,
             RightPanelTab.defaultNvimID)
         XCTAssertTrue(reloaded.isGlobalTerminalExpanded)
+    }
+
+    func testSQLitePersistsPendingThreadRename() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: path)
+        let projectID = UUID()
+        let threadID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
+
+        store.save(
+            YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(
+                        id: threadID,
+                        displayName: "Thread",
+                        projectID: projectID,
+                        workingDirectory: root,
+                        agentCLI: .codex,
+                        sessionIdentity: "codex-1",
+                        canonicalSessionName: "Thread",
+                        pendingSessionRename: "Renamed Thread"
+                    )
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
+
+        XCTAssertEqual(reloaded.threads.first?.pendingSessionRename, "Renamed Thread")
+        XCTAssertEqual(reloaded.threads.first?.sessionIdentity, "codex-1")
     }
 
     func testSQLiteStorePersistsThreadActivityState() throws {
@@ -462,7 +502,8 @@ final class PersistenceTests: XCTestCase {
             globalTerminalHeight: 188,
             isSidebarCollapsed: true,
             isRightPanelCollapsed: true,
-            isGlobalTerminalExpanded: true
+            isGlobalTerminalExpanded: true,
+            isWorkspaceSwapped: true
         )
         snapshot.layoutState = layoutState
 
@@ -476,6 +517,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(
             reloaded.layoutState.isRightPanelCollapsed, layoutState.isRightPanelCollapsed)
         XCTAssertFalse(reloaded.layoutState.isGlobalTerminalExpanded)
+        XCTAssertTrue(reloaded.layoutState.isWorkspaceSwapped)
     }
 
     func testSQLiteMigrationAddsAgentCLISessionColumnsToVersionThreeThreads() throws {
@@ -857,6 +899,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertFalse(reloaded.layoutState.isSidebarCollapsed)
         XCTAssertFalse(reloaded.layoutState.isRightPanelCollapsed)
         XCTAssertFalse(reloaded.layoutState.isGlobalTerminalExpanded)
+        XCTAssertFalse(reloaded.layoutState.isWorkspaceSwapped)
     }
 
     func testSQLiteTransactionRejectsPartialInvalidThreadWrite() throws {

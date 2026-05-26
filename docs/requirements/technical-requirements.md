@@ -46,6 +46,7 @@ The SQLite database MUST store:
 - Thread agent CLI selection.
 - Thread agent CLI session identity.
 - Thread canonical CLI session name.
+- Thread pending CLI-confirmed rename intent.
 - Thread latest activity status, unread flag, and sanitized notification preview.
 - Archive state.
 - Last selected project.
@@ -104,6 +105,8 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - A thread MUST have a stable id, display name, project id, working directory, `agent_cli`, CLI session identity, created timestamp, last opened timestamp, and archive state.
 - A thread MUST have durable pin state.
 - A thread display name MUST be derived from the bound CLI session's reported name, title, or id.
+- A thread rename MUST be sent to the selected CLI through the adapter and MUST update the visible thread name only after confirmed CLI metadata reports the new name.
+- Manual CLI rename commands such as `/rename` MUST be reflected in the project/thread panel when metadata confirms the changed name.
 - A thread working directory MAY be the project root or a separate worktree directory.
 - A thread MUST NOT switch from one CLI family to another after it is created.
 - New thread creation MUST ask the user which available CLI family to start.
@@ -111,6 +114,8 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - New thread creation MUST launch the selected agent CLI in the thread working directory.
 - Creating a thread from a project row MUST create the thread under that project, even when another project was previously selected.
 - Reopening a thread MUST invoke the matching CLI resume behavior for the stored session identity.
+- Reopening a thread that has no stored CLI session identity MUST first auto-link a unique exact local CLI catalog match by pending rename, canonical name, or visible display name.
+- Reopening a thread that has no stored CLI session identity and no unique exact local CLI catalog match MUST require an explicit link-to-existing-session or start-new-session choice.
 - Each thread MUST own one agent CLI session terminal while the app is running.
 - Live thread terminal sessions MUST NOT be required to persist after app restart.
 - Thread terminal/session state MUST be preserved while the app process is running.
@@ -126,11 +131,12 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - Every embedded terminal surface MUST use `libghostty`.
 - The app MUST provide one agent CLI session terminal per active thread.
 - The app MUST provide one selected-thread bottom terminal.
-- The app MUST provide a right-panel terminal for `nvim`, falling back to `vim` and then `vi`.
-- The app MUST provide a right-panel terminal for `lazygit`, falling back to `git diff`.
+- The app MUST provide a right-tool-panel terminal for `nvim`, falling back to `vim` and then `vi`.
+- The app MUST provide a right-tool-panel terminal for `lazygit`, falling back to `git diff`.
 - Agent CLI session terminals MUST launch in the selected thread's working directory.
 - Agent CLI session terminals MUST invoke the selected local CLI according to the selected thread's stored `agent_cli`.
 - Agent CLI session terminals MUST resume the selected thread's stored CLI session identity when reopening an existing thread.
+- Agent CLI session terminals MUST NOT silently start a fresh agent session for a loaded thread whose stored CLI session identity is missing unless the user explicitly chooses start-new recovery.
 - The bottom terminal MUST launch in the selected thread's working directory.
 - The `nvim` terminal MUST launch in the selected thread's working directory.
 - The `lazygit` terminal MUST launch in the selected thread's working directory.
@@ -145,15 +151,19 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - The app MUST have a left project/thread sidebar.
 - The app MUST have a central agent CLI session terminal area.
 - The app MUST have a right tool panel.
+- The app MUST have a right-side area that can contain either the right tool panel or the agent CLI session terminal.
 - The app MUST have a selected-thread bottom terminal.
 - The left sidebar MUST be collapsible.
 - The left sidebar MUST show project rows with nested active thread history.
 - Each project row MUST expose a new-thread action that targets that project.
 - Project rows SHOULD hide pin actions behind an actions menu.
 - Thread rows SHOULD hide pin and archive actions behind an actions menu.
+- Thread row actions menus MUST expose `Rename Thread...` for CLI families that support confirmable rename.
 - Agent CLI identity SHOULD use accessible icon-only labels in dense sidebar rows.
 - Project disclosure state SHOULD persist across app restarts.
-- The right tool panel MUST be collapsible.
+- The right-side area MUST be collapsible.
+- Users MUST be able to swap the main agent CLI area with the right-side area.
+- The swapped layout MUST persist across app restarts.
 - The bottom terminal MUST be collapsed by default per thread.
 - The bottom terminal MUST toggle with `Cmd+J`.
 - Toggling or resizing the bottom terminal MUST NOT mutate sidebar width, sidebar collapse state, project selection, thread selection, or left-panel content.
@@ -164,12 +174,14 @@ Resizeable panels:
 
 - Sidebar width.
 - Main agent CLI session terminal width.
-- Right tool panel width.
+- Right-side area width.
 - Bottom terminal height when expanded.
 
 ## Right Tool Panel
 
 The right tool panel MUST be scoped to the selected thread.
+
+The right tool panel MUST keep its selected-thread state whether it appears in the main area or the physical right-side area.
 
 The right tool panel MUST provide four modes:
 
@@ -200,17 +212,17 @@ If two threads happen to share the same panel state because they point at the sa
 - File index caches MUST remain read-only with respect to user project directories and MUST NOT write app metadata into repositories.
 - If a Git branch or detached `HEAD` identity changes for a working directory, Files mode MUST use a different cache key to avoid showing stale branch-specific results as current.
 - File search SHOULD prefer exact filename matches, then prefix matches, then fuzzy path matches.
-- Opening a file through the default row action MUST switch the right panel to `nvim` mode.
-- Opening a file through the default row action MUST launch `nvim <relative-file-path>` in the right-panel terminal.
+- Opening a file through the default row action MUST switch the right tool panel to `nvim` mode.
+- Opening a file through the default row action MUST launch `nvim <relative-file-path>` in the right-tool-panel terminal.
 - Supported preview files MUST offer an `Open in Browser` context-menu action without replacing the default `nvim` behavior.
 - Files mode MUST offer `Copy Relative Path` and `Copy Full Path` context-menu actions for files and folders.
-- Files mode MUST offer exactly two editor context-menu actions: the configured default external editor and the built-in right-panel editor.
-- The built-in editor action MUST use the existing `nvim` right-panel flow and MUST be omitted for folders.
+- Files mode MUST offer exactly two editor context-menu actions: the configured default external editor and the built-in right-tool-panel editor.
+- The built-in editor action MUST use the existing `nvim` right-tool-panel flow and MUST be omitted for folders.
 - External file-open actions MUST use the selected thread's working directory for relative file targets and MUST reject escaping paths.
 
 ## Browser Mode
 
-- Browser mode MUST appear inside the right panel through a native WebKit surface.
+- Browser mode MUST appear inside the right tool panel through a native WebKit surface.
 - Browser mode MUST run WebKit in an isolated helper process, not in the main app process.
 - A browser renderer crash MUST NOT terminate the main app.
 - A browser renderer crash MUST show an inline recovery state with a reload or restart path.
@@ -219,18 +231,18 @@ If two threads happen to share the same panel state because they point at the sa
 - Browser local preview support MUST include `html`, `htm`, `svg`, `pdf`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `txt`, `json`, `xml`, `md`, and `markdown`.
 - Browser Markdown previews MUST render as generated HTML in the isolated WebKit helper, support Mermaid fenced diagrams, sanitize raw HTML, and preserve relative image and link resolution from the Markdown file directory.
 - Browser mode MUST NOT write app metadata into user project directories.
-- Browser mode SHOULD keep new-window requests inside right-panel browser tabs.
+- Browser mode SHOULD keep new-window requests inside right-tool-panel browser tabs.
 - Browser mode MAY omit downloads, extensions, developer tools, and profile controls for the first version.
 
 ## Isolated Tool Hosts
 
-- Risky or heavyweight right-panel tools SHOULD use a reusable isolated helper-process runtime.
+- Risky or heavyweight right-tool-panel tools SHOULD use a reusable isolated helper-process runtime.
 - Isolated tool hosts MUST communicate with the main app through a versioned command/event protocol.
 - Isolated tool runtime state, helper process ids, viewport frames, and crash counters MUST remain runtime-only and MUST NOT be written into user project directories.
 
 ## nvim Mode
 
-- `nvim` mode MUST run inside the right panel.
+- `nvim` mode MUST run inside the right tool panel.
 - `nvim` mode MUST use the selected thread's working directory.
 - `nvim` mode MUST NOT open a separate app window.
 - `nvim` mode MUST use an embedded `libghostty` terminal.
@@ -238,7 +250,7 @@ If two threads happen to share the same panel state because they point at the sa
 
 ## Git Mode
 
-- Git mode MUST run `lazygit` inside the right panel when it is available.
+- Git mode MUST run `lazygit` inside the right tool panel when it is available.
 - Git mode MUST use the selected thread's working directory.
 - Git mode MUST NOT open a separate terminal window.
 - Git mode MUST use an embedded `libghostty` terminal.
@@ -261,7 +273,7 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 
 - The app MUST default to the Dracula theme across all app surfaces.
 - The app MUST support built-in theme switching from Settings.
-- Terminals, sidebar, right panel, modal sheets, split-view handles, icons, file tree, browser chrome, `nvim`, and `lazygit` surfaces MUST use the selected built-in visual system.
+- Terminals, sidebar, right tool panel, modal sheets, split-view handles, icons, file tree, browser chrome, `nvim`, and `lazygit` surfaces MUST use the selected built-in visual system.
 - The implementation SHOULD use shared theme tokens rather than hardcoding colors throughout the app.
 
 ## Agent CLI Scope
@@ -304,16 +316,18 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - Each running thread has one agent CLI session terminal.
 - Each active thread shows a latest activity indicator and notification preview when available.
 - The selected-thread bottom terminal is collapsed by default and toggles with `Cmd+J`.
-- The sidebar, right tool panel, and bottom terminal are resizeable.
+- The sidebar, right-side area, and bottom terminal are resizeable.
+- The right-side area can be resized across the available workspace up to the projects sidebar boundary.
+- The swapped main/right layout persists across relaunch.
 - The right tool panel is scoped to the active thread.
 - The right tool panel can switch between Files, `nvim`, and Git.
 - `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes.
 - `Cmd+[` and `Cmd+]` perform global back/forward navigation.
 - Hidden files appear in the file browser by default.
 - Supported local preview files can be opened in Browser mode from the file browser context menu.
-- Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
+- Opening a file launches `nvim`, `vim`, or `vi` inside the right tool panel.
 - A user can open the selected project or selected file in an installed external editor, Finder, or terminal destination.
-- Opening Git mode launches `lazygit` or `git diff` inside the right panel.
+- Opening Git mode launches `lazygit` or `git diff` inside the right tool panel.
 - `lazygit` is resolved from `PATH`, with `git diff` fallback when unavailable.
 - Project, thread, agent CLI session, index, archive, and layout metadata are stored in SQLite.
 - Latest thread activity state is stored in SQLite without persisting full terminal scrollback.

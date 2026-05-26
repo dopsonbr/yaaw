@@ -1,3 +1,5 @@
+import Foundation
+
 public enum ThemeRole: String, CaseIterable, Identifiable, Sendable {
     case background
     case currentLine
@@ -37,6 +39,21 @@ public enum ThemeGroup: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public enum ThemePreferredColorScheme: String, Equatable, Sendable {
+    case light
+    case dark
+}
+
+public enum ThemeUIRole: String, CaseIterable, Identifiable, Sendable {
+    case controlBackground
+    case controlForeground
+    case secondaryLabel
+    case controlBorder
+    case focusAccent
+
+    public var id: String { rawValue }
+}
+
 public struct ThemeToken: Equatable, Sendable {
     public let role: ThemeRole
     public let hex: String
@@ -72,6 +89,26 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
 
     public func hex(for role: ThemeRole) -> String {
         tokens.first { $0.role == role }?.hex ?? ThemeCatalog.defaultTheme.hex(for: role)
+    }
+
+    public var preferredColorScheme: ThemePreferredColorScheme {
+        group == .light || id == "light-high-contrast" ? .light : .dark
+    }
+
+    public func uiHex(for role: ThemeUIRole) -> String {
+        switch role {
+        case .controlBackground:
+            hex(for: .currentLine)
+        case .controlForeground:
+            hex(for: .foreground)
+        case .secondaryLabel:
+            accessibleSecondaryLabelHex()
+        case .controlBorder:
+            Self.blendedHex(from: hex(for: .currentLine), to: hex(for: .foreground), amount: 0.28)
+                ?? hex(for: .foreground)
+        case .focusAccent:
+            hex(for: .cyan)
+        }
     }
 
     public var terminalANSIPalette: [String] {
@@ -117,6 +154,103 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
             hex(for: .cyan),
             white,
         ]
+    }
+
+    private func accessibleSecondaryLabelHex() -> String {
+        let background = hex(for: .background)
+        let comment = hex(for: .comment)
+        if Self.contrastRatio(comment, background) >= 4.5 {
+            return comment
+        }
+
+        let foreground = hex(for: .foreground)
+        for amount in stride(from: 0.15, through: 0.85, by: 0.10) {
+            guard let candidate = Self.blendedHex(from: comment, to: foreground, amount: amount)
+            else {
+                break
+            }
+            if Self.contrastRatio(candidate, background) >= 4.5 {
+                return candidate
+            }
+        }
+        return foreground
+    }
+
+    private static func contrastRatio(_ firstHex: String, _ secondHex: String) -> Double {
+        guard let first = linearRGBComponents(firstHex),
+            let second = linearRGBComponents(secondHex)
+        else {
+            return 0
+        }
+
+        let firstLuminance = relativeLuminance(first)
+        let secondLuminance = relativeLuminance(second)
+        let lighter = max(firstLuminance, secondLuminance)
+        let darker = min(firstLuminance, secondLuminance)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private static func relativeLuminance(_ components: (red: Double, green: Double, blue: Double))
+        -> Double
+    {
+        0.2126 * components.red + 0.7152 * components.green + 0.0722 * components.blue
+    }
+
+    private static func linearRGBComponents(_ hex: String) -> (
+        red: Double, green: Double, blue: Double
+    )? {
+        guard let components = rgbComponents(hex) else { return nil }
+        return (
+            red: linearizedColorComponent(components.red),
+            green: linearizedColorComponent(components.green),
+            blue: linearizedColorComponent(components.blue)
+        )
+    }
+
+    private static func linearizedColorComponent(_ component: Double) -> Double {
+        component <= 0.03928
+            ? component / 12.92
+            : pow((component + 0.055) / 1.055, 2.4)
+    }
+
+    private static func blendedHex(from startHex: String, to endHex: String, amount: Double)
+        -> String?
+    {
+        guard let start = rgbComponents(startHex), let end = rgbComponents(endHex) else {
+            return nil
+        }
+        let clampedAmount = min(max(amount, 0), 1)
+        let red = start.red + (end.red - start.red) * clampedAmount
+        let green = start.green + (end.green - start.green) * clampedAmount
+        let blue = start.blue + (end.blue - start.blue) * clampedAmount
+        return hex(red: red, green: green, blue: blue)
+    }
+
+    private static func rgbComponents(_ hex: String) -> (red: Double, green: Double, blue: Double)?
+    {
+        var value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        if value.count == 3 {
+            value = value.map { "\($0)\($0)" }.joined()
+        }
+        guard value.count == 6 else { return nil }
+
+        let scanner = Scanner(string: value)
+        var rgb: UInt64 = 0
+        guard scanner.scanHexInt64(&rgb) else { return nil }
+        return (
+            red: Double((rgb >> 16) & 0xff) / 255.0,
+            green: Double((rgb >> 8) & 0xff) / 255.0,
+            blue: Double(rgb & 0xff) / 255.0
+        )
+    }
+
+    private static func hex(red: Double, green: Double, blue: Double) -> String {
+        String(
+            format: "#%02x%02x%02x",
+            Int((red * 255).rounded()),
+            Int((green * 255).rounded()),
+            Int((blue * 255).rounded())
+        )
     }
 }
 

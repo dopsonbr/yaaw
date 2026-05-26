@@ -8,6 +8,7 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
     public var agentCLI: AgentCLIKind
     public var sessionIdentity: String?
     public var canonicalSessionName: String?
+    public var pendingSessionRename: String?
     public var createdAt: Date
     public var lastOpenedAt: Date
     public var isArchived: Bool
@@ -21,6 +22,7 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
         agentCLI: AgentCLIKind = .codex,
         sessionIdentity: String? = nil,
         canonicalSessionName: String? = nil,
+        pendingSessionRename: String? = nil,
         createdAt: Date = Date(),
         lastOpenedAt: Date = Date(),
         isArchived: Bool = false,
@@ -33,6 +35,10 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
         self.agentCLI = agentCLI
         self.sessionIdentity = sessionIdentity
         self.canonicalSessionName = canonicalSessionName
+        let trimmedPendingRename =
+            pendingSessionRename?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.pendingSessionRename =
+            trimmedPendingRename?.isEmpty == false ? trimmedPendingRename : nil
         self.createdAt = createdAt
         self.lastOpenedAt = lastOpenedAt
         self.isArchived = isArchived

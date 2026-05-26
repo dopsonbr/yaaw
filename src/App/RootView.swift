@@ -28,8 +28,10 @@ struct RootView: View {
                         title: model.windowTitle,
                         isSidebarCollapsed: model.layoutState.isSidebarCollapsed,
                         isRightPanelCollapsed: model.layoutState.isRightPanelCollapsed,
+                        isWorkspaceSwapped: model.layoutState.isWorkspaceSwapped,
                         onToggleSidebar: model.toggleSidebarCollapsed,
                         onToggleRightPanel: model.toggleRightPanelCollapsed,
+                        onToggleWorkspaceSwap: model.toggleWorkspaceSwap,
                         onNavigateBack: model.navigateBack,
                         onNavigateForward: model.navigateForward,
                         fonts: model.configuration.fonts,
@@ -70,6 +72,7 @@ struct RootView: View {
         .font(model.configuration.fonts.interfaceFont())
         .environment(\.fontSettings, model.configuration.fonts)
         .environment(\.appTheme, model.configuration.resolvedTheme)
+        .environment(\.colorScheme, model.configuration.resolvedTheme.swiftUIColorScheme)
         .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
         .confirmationDialog(
             "Install the latest release?",
@@ -154,10 +157,9 @@ struct RootView: View {
         ) {
             sidebarRegion
         } main: {
-            MainWorkspaceView(model: model)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            mainWorkspaceRegion
         } right: {
-            rightPanelRegion
+            rightSideRegion
         } bottom: {
             BottomTerminalBar(
                 isExpanded: model.isBottomTerminalExpanded,
@@ -168,6 +170,37 @@ struct RootView: View {
                     model.activateSelectedBottomTerminal()
                 }
             )
+        }
+    }
+
+    @ViewBuilder
+    private var mainWorkspaceRegion: some View {
+        if model.layoutState.isWorkspaceSwapped {
+            rightToolPanelRegion
+        } else {
+            agentCLIRegion
+        }
+    }
+
+    @ViewBuilder
+    private var agentCLIRegion: some View {
+        MainWorkspaceView(model: model)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var rightSideRegion: some View {
+        if model.layoutState.isRightPanelCollapsed {
+            CollapsedPanelRail(
+                systemImage: IconRole.rightSidebar.icon.systemSymbolName,
+                accessibilityLabel: "Expand right-side area",
+                action: model.toggleRightPanelCollapsed
+            )
+            .frame(width: 44)
+        } else if model.layoutState.isWorkspaceSwapped {
+            agentCLIRegion
+        } else {
+            rightToolPanelRegion
         }
     }
 
@@ -186,22 +219,13 @@ struct RootView: View {
     }
 
     @ViewBuilder
-    private var rightPanelRegion: some View {
-        if model.layoutState.isRightPanelCollapsed {
-            CollapsedPanelRail(
-                systemImage: IconRole.rightSidebar.icon.systemSymbolName,
-                accessibilityLabel: "Expand right panel",
-                action: model.toggleRightPanelCollapsed
-            )
-            .frame(width: 44)
-        } else {
-            RightPanelView(
-                model: model,
-                defaultExternalEditorTool: defaultExternalEditorTool,
-                onOpenFileExternally: openFileExternally,
-                onCopyPath: copyFileBrowserPath
-            )
-        }
+    private var rightToolPanelRegion: some View {
+        RightPanelView(
+            model: model,
+            defaultExternalEditorTool: defaultExternalEditorTool,
+            onOpenFileExternally: openFileExternally,
+            onCopyPath: copyFileBrowserPath
+        )
     }
 
     private func updateLayoutFromSplitView(
@@ -236,8 +260,10 @@ private struct AppChromeHeader: View {
     let title: String
     let isSidebarCollapsed: Bool
     let isRightPanelCollapsed: Bool
+    let isWorkspaceSwapped: Bool
     let onToggleSidebar: () -> Void
     let onToggleRightPanel: () -> Void
+    let onToggleWorkspaceSwap: () -> Void
     let onNavigateBack: () -> Void
     let onNavigateForward: () -> Void
     let fonts: FontSettings
@@ -318,15 +344,25 @@ private struct AppChromeHeader: View {
             .accessibilityLabel("Open settings")
             .accessibilityIdentifier("open-settings-button")
 
+            Button(action: onToggleWorkspaceSwap) {
+                Image(systemName: IconRole.workspaceSwap.icon.systemSymbolName)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isWorkspaceSwapped ? dracula(.pink) : dracula(.foreground))
+            .help("Swap main and right panels")
+            .accessibilityLabel("Swap main and right panels")
+            .accessibilityIdentifier("swap-main-and-right-panels-button")
+
             Button(action: onToggleRightPanel) {
                 Image(systemName: IconRole.rightSidebar.icon.systemSymbolName)
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .foregroundStyle(dracula(.foreground))
-            .help(isRightPanelCollapsed ? "Expand right panel" : "Collapse right panel")
+            .help(isRightPanelCollapsed ? "Expand right-side area" : "Collapse right-side area")
             .accessibilityLabel(
-                isRightPanelCollapsed ? "Expand right panel" : "Collapse right panel")
+                isRightPanelCollapsed ? "Expand right-side area" : "Collapse right-side area")
         }
         .padding(.leading, 14)
         .padding(.trailing, 12)
@@ -610,6 +646,8 @@ private struct SettingsEditorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
+        .environment(\.appTheme, currentConfiguration.resolvedTheme)
+        .environment(\.colorScheme, currentConfiguration.resolvedTheme.swiftUIColorScheme)
         .onAppear(perform: loadIfNeeded)
         .onChange(of: configuration.themeName) { _, newThemeID in
             selectedThemeID = ThemeCatalog.theme(id: newThemeID)?.id ?? ThemeCatalog.defaultID
@@ -758,8 +796,7 @@ private struct SettingsEditorView: View {
                             }
                         }
                     }
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: 360, alignment: .leading)
+                    .settingsMenuControl(maxWidth: 360)
                     .accessibilityLabel("Theme")
                     .accessibilityIdentifier("settings-theme-picker")
                 }
@@ -922,7 +959,7 @@ private struct SettingsEditorView: View {
         GridRow {
             Text(title)
                 .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
-                .foregroundStyle(dracula(.comment))
+                .foregroundStyle(themeUI(.secondaryLabel))
                 .frame(width: 130, alignment: .trailing)
 
             content()
@@ -940,7 +977,7 @@ private struct SettingsEditorView: View {
                 Text(option.label).tag(option.value)
             }
         }
-        .pickerStyle(.menu)
+        .settingsMenuControl(maxWidth: 380)
         .accessibilityLabel(label)
     }
 
@@ -952,8 +989,10 @@ private struct SettingsEditorView: View {
         Stepper(value: value, in: range, step: 1) {
             Text("\(Int(value.wrappedValue.rounded())) pt")
                 .font(fonts.interfaceFont(sizeOffset: -1))
-                .foregroundStyle(dracula(.foreground))
+                .foregroundStyle(themeUI(.controlForeground))
         }
+        .foregroundStyle(themeUI(.controlForeground))
+        .tint(themeUI(.focusAccent))
         .accessibilityLabel(label)
     }
 
@@ -1302,6 +1341,7 @@ private struct SidebarView: View {
     @ObservedObject var model: AppModel
     @State private var isProjectSheetPresented = false
     @State private var threadSheetProject: Project?
+    @State private var renameThread: AgentThread?
     @State private var isArchiveExpanded = false
     @Environment(\.fontSettings) private var fonts
 
@@ -1324,6 +1364,9 @@ private struct SidebarView: View {
                                 project: project,
                                 onNewThread: {
                                     threadSheetProject = project
+                                },
+                                onRenameThread: { thread in
+                                    renameThread = thread
                                 }
                             )
                         }
@@ -1337,7 +1380,10 @@ private struct SidebarView: View {
 
             GlobalArchivedThreadsSection(
                 model: model,
-                isExpanded: $isArchiveExpanded
+                isExpanded: $isArchiveExpanded,
+                onRenameThread: { thread in
+                    renameThread = thread
+                }
             )
 
             Button {
@@ -1357,6 +1403,9 @@ private struct SidebarView: View {
         .sheet(item: $threadSheetProject) { project in
             ThreadChoiceSheet(model: model, project: project)
         }
+        .sheet(item: $renameThread) { thread in
+            ThreadRenameSheet(model: model, thread: thread)
+        }
     }
 }
 
@@ -1364,6 +1413,7 @@ private struct ProjectSidebarSection: View {
     @ObservedObject var model: AppModel
     let project: Project
     let onNewThread: () -> Void
+    let onRenameThread: (AgentThread) -> Void
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
@@ -1438,7 +1488,11 @@ private struct ProjectSidebarSection: View {
             if model.isProjectExpanded(project.id) {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(model.activeThreads(for: project.id)) { thread in
-                        ActiveThreadRow(model: model, thread: thread)
+                        ActiveThreadRow(
+                            model: model,
+                            thread: thread,
+                            onRenameThread: onRenameThread
+                        )
                     }
                 }
                 .padding(.leading, 20)
@@ -1450,6 +1504,7 @@ private struct ProjectSidebarSection: View {
 private struct ActiveThreadRow: View {
     @ObservedObject var model: AppModel
     let thread: AgentThread
+    let onRenameThread: (AgentThread) -> Void
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
@@ -1509,6 +1564,11 @@ private struct ActiveThreadRow: View {
             )
 
             SidebarActionsMenu(help: "Thread actions") {
+                Button("Rename Thread...") {
+                    onRenameThread(thread)
+                }
+                .disabled(!model.canRequestThreadRename(id: thread.id))
+
                 Button(thread.isPinned ? "Unpin Thread" : "Pin Thread") {
                     model.toggleThreadPinned(id: thread.id)
                 }
@@ -1645,6 +1705,7 @@ private struct SidebarActionsMenu<Content: View>: View {
 private struct GlobalArchivedThreadsSection: View {
     @ObservedObject var model: AppModel
     @Binding var isExpanded: Bool
+    let onRenameThread: (AgentThread) -> Void
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
@@ -1687,7 +1748,11 @@ private struct GlobalArchivedThreadsSection: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(model.archivedThreads) { thread in
-                                ArchivedThreadRow(model: model, thread: thread)
+                                ArchivedThreadRow(
+                                    model: model,
+                                    thread: thread,
+                                    onRenameThread: onRenameThread
+                                )
                             }
                         }
                     }
@@ -1702,6 +1767,7 @@ private struct GlobalArchivedThreadsSection: View {
 private struct ArchivedThreadRow: View {
     @ObservedObject var model: AppModel
     let thread: AgentThread
+    let onRenameThread: (AgentThread) -> Void
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
@@ -1731,6 +1797,11 @@ private struct ArchivedThreadRow: View {
             .accessibilityLabel("Archived thread \(thread.displayName)")
 
             SidebarActionsMenu(help: "Archived thread actions") {
+                Button("Rename Thread...") {
+                    onRenameThread(thread)
+                }
+                .disabled(!model.canRequestThreadRename(id: thread.id))
+
                 Button(thread.isPinned ? "Unpin Thread" : "Pin Thread") {
                     model.toggleThreadPinned(id: thread.id)
                 }
@@ -1927,9 +1998,82 @@ private struct ThreadChoiceSheet: View {
     }
 }
 
+private struct ThreadRenameSheet: View {
+    @ObservedObject var model: AppModel
+    let thread: AgentThread
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName: String
+    @State private var errorMessage: String?
+    @Environment(\.fontSettings) private var fonts
+
+    init(model: AppModel, thread: AgentThread) {
+        self.model = model
+        self.thread = thread
+        _displayName = State(initialValue: thread.canonicalSessionName ?? thread.displayName)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Rename Thread")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(dracula(.purple))
+
+            Text(thread.agentCLI.displayName)
+                .font(fonts.interfaceFont(sizeOffset: -1))
+                .foregroundStyle(dracula(.comment))
+
+            TextField("Thread name", text: $displayName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(dracula(.currentLine))
+                .foregroundStyle(dracula(.foreground))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityLabel("Thread name")
+
+            HStack(spacing: 10) {
+                Spacer()
+
+                Button("Cancel") {
+                    dismiss()
+                }
+
+                Button("Rename") {
+                    renameThread()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(dracula(.red))
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+        .background(dracula(.background))
+    }
+
+    private func renameThread() {
+        do {
+            try model.requestThreadRename(id: thread.id, to: displayName)
+            dismiss()
+        } catch AppModelError.sessionRenameNotSupported {
+            errorMessage = "Rename is not available for \(thread.agentCLI.displayName)."
+        } catch AppModelError.emptyThreadName {
+            errorMessage = "Enter a thread name."
+        } catch {
+            errorMessage = "Thread could not be renamed."
+        }
+    }
+}
+
 private struct MainWorkspaceView: View {
     @ObservedObject var model: AppModel
     private let capturePoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var isSessionLinkSheetPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1949,48 +2093,73 @@ private struct MainWorkspaceView: View {
                 )
             }
 
-            TerminalPlaceholderView(
-                request: selectedProjectTerminalRequest,
-                unavailableMessage: selectedProjectTerminalUnavailableMessage,
-                fonts: model.configuration.fonts,
-                onTitleChange: { role, title in
-                    if case .project(let threadID) = role {
-                        model.recordAgentCLITerminalTitle(threadID: threadID, title: title)
-                    }
-                },
-                onDesktopNotification: { role, title, body in
-                    if case .project(let threadID) = role {
-                        model.recordAgentTerminalNotification(
-                            threadID: threadID, title: title, body: body)
-                    }
-                },
-                onFocusChange: { role, focused in
-                    if case .project(let threadID) = role {
-                        model.recordAgentTerminalFocus(threadID: threadID, focused: focused)
-                    }
-                },
-                onClose: { role in
-                    if case .project(let threadID) = role {
-                        model.recordAgentTerminalClosed(threadID: threadID)
-                    }
-                },
-                onCommandFinished: { role, exitCode in
-                    if case .project(let threadID) = role {
-                        model.recordAgentCommandFinished(threadID: threadID, exitCode: exitCode)
+            Group {
+                if model.selectedThreadRequiresSessionLink {
+                    SessionLinkRequiredView(
+                        model: model,
+                        onLink: { isSessionLinkSheetPresented = true },
+                        onStartNew: startNewSelectedSession
+                    )
+                } else {
+                    TerminalPlaceholderView(
+                        request: selectedProjectTerminalRequest,
+                        unavailableMessage: selectedProjectTerminalUnavailableMessage,
+                        fonts: model.configuration.fonts,
+                        onTitleChange: { role, title in
+                            if case .project(let threadID) = role {
+                                model.recordAgentCLITerminalTitle(threadID: threadID, title: title)
+                            }
+                        },
+                        onDesktopNotification: { role, title, body in
+                            if case .project(let threadID) = role {
+                                model.recordAgentTerminalNotification(
+                                    threadID: threadID, title: title, body: body)
+                            }
+                        },
+                        onFocusChange: { role, focused in
+                            if case .project(let threadID) = role {
+                                model.recordAgentTerminalFocus(threadID: threadID, focused: focused)
+                            }
+                        },
+                        onClose: { role in
+                            if case .project(let threadID) = role {
+                                model.recordAgentTerminalClosed(threadID: threadID)
+                            }
+                        },
+                        onCommandFinished: { role, exitCode in
+                            if case .project(let threadID) = role {
+                                model.recordAgentCommandFinished(
+                                    threadID: threadID, exitCode: exitCode)
+                            }
+                        }
+                    )
+                    .id(model.selectedThreadID)
+                    .onAppear {
+                        model.activateSelectedProjectTerminal()
                     }
                 }
-            )
-            .id(model.selectedThreadID)
-            .onAppear {
-                model.activateSelectedProjectTerminal()
             }
             .onReceive(capturePoll) { _ in
                 model.pollSelectedAgentCLICaptureLog()
+                model.syncSelectedThreadSessionMetadata()
                 model.pollAgentCLIActivityLogs()
             }
         }
         .padding(8)
         .background(dracula(.background))
+        .sheet(isPresented: $isSessionLinkSheetPresented) {
+            SessionLinkSheet(
+                model: model,
+                onResume: {
+                    isSessionLinkSheetPresented = false
+                    model.activateSelectedProjectTerminal()
+                },
+                onStartNew: {
+                    isSessionLinkSheetPresented = false
+                    startNewSelectedSession()
+                }
+            )
+        }
     }
 
     private var selectedProjectTerminalRequest: TerminalLaunchRequest? {
@@ -2003,6 +2172,146 @@ private struct MainWorkspaceView: View {
             return "Missing working directory: \(path)"
         }
         return model.projectTerminal.placeholderText
+    }
+
+    private func startNewSelectedSession() {
+        guard let selectedThreadID = model.selectedThreadID else { return }
+        model.startNewSessionForUnlinkedThread(threadID: selectedThreadID)
+        model.activateSelectedProjectTerminal()
+    }
+}
+
+private struct SessionLinkRequiredView: View {
+    @ObservedObject var model: AppModel
+    let onLink: () -> Void
+    let onStartNew: () -> Void
+    @Environment(\.fontSettings) private var fonts
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(model.selectedThread?.displayName ?? "Thread")
+                .font(fonts.interfaceFont(sizeOffset: 5, weight: .semibold))
+                .foregroundStyle(dracula(.foreground))
+                .lineLimit(1)
+
+            Text("Session link required")
+                .font(fonts.interfaceFont(sizeOffset: 1, weight: .semibold))
+                .foregroundStyle(dracula(.purple))
+
+            HStack(spacing: 10) {
+                Button("Link Session...") {
+                    onLink()
+                }
+                .keyboardShortcut(.defaultAction)
+
+                Button("Start New Session") {
+                    onStartNew()
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(dracula(.background))
+    }
+}
+
+private struct SessionLinkSheet: View {
+    @ObservedObject var model: AppModel
+    let onResume: () -> Void
+    let onStartNew: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.fontSettings) private var fonts
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Link Session")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(dracula(.purple))
+
+            if candidates.isEmpty {
+                Text("No matching sessions found.")
+                    .font(fonts.interfaceFont())
+                    .foregroundStyle(dracula(.comment))
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(candidates) { candidate in
+                            candidateRow(candidate)
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+
+            HStack(spacing: 10) {
+                Button("Start New Session") {
+                    onStartNew()
+                }
+
+                Spacer()
+
+                Button("Cancel") {
+                    dismiss()
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+        .background(dracula(.background))
+    }
+
+    private var candidates: [SessionLinkCandidate] {
+        guard let selectedThreadID = model.selectedThreadID else { return [] }
+        return model.sessionLinkCandidates(for: selectedThreadID)
+    }
+
+    private func candidateRow(_ candidate: SessionLinkCandidate) -> some View {
+        Button {
+            guard let selectedThreadID = model.selectedThreadID else { return }
+            model.linkSession(threadID: selectedThreadID, candidate: candidate)
+            onResume()
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(candidate.displayName)
+                        .font(fonts.interfaceFont(weight: .semibold))
+                        .foregroundStyle(dracula(.foreground))
+                        .lineLimit(1)
+
+                    Text(candidate.identity)
+                        .font(fonts.interfaceFont(sizeOffset: -2))
+                        .foregroundStyle(dracula(.comment))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    Text(candidate.updatedAt.map(Self.shortDate) ?? candidate.source)
+                        .font(fonts.interfaceFont(sizeOffset: -2))
+                        .foregroundStyle(dracula(.comment))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Text("Link & Resume")
+                    .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+                    .foregroundStyle(dracula(.cyan))
+                    .lineLimit(1)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(dracula(.currentLine))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Link \(candidate.displayName)")
+    }
+
+    private static func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 
@@ -2069,8 +2378,8 @@ private struct RightPanelView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(dracula(.foreground))
                     .background(dracula(.background))
-                    .help("Open a new right panel tab")
-                    .accessibilityLabel("Open a new right panel tab")
+                    .help("Open a new right tool panel tab")
+                    .accessibilityLabel("Open a new right tool panel tab")
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 7)
@@ -2219,7 +2528,7 @@ private struct RightPanelView: View {
         .background(isSelected ? dracula(.currentLine) : dracula(.background))
         .foregroundStyle(isSelected ? dracula(.pink) : dracula(.foreground))
         .help(tab.title)
-        .accessibilityLabel("\(tab.title) right panel tab")
+        .accessibilityLabel("\(tab.title) right tool panel tab")
     }
 
     private func shouldShowTabTitle(_ tab: RightPanelTab) -> Bool {
@@ -2657,7 +2966,8 @@ private struct FileBrowserPanel: View {
                 return
                     "Showing \(state.visibleEntries.count) of \(metadata.fileCount) matches, \(ignored)"
             }
-            return "\(state.visibleEntries.count) matches of \(metadata.fileCount) items, \(ignored)"
+            return
+                "\(state.visibleEntries.count) matches of \(metadata.fileCount) items, \(ignored)"
         }
         if treeRows.count >= FileBrowserPanelConstants.maxVisibleTreeRows {
             return
@@ -3028,11 +3338,52 @@ func dracula(_ role: ThemeRole) -> AppThemeColor {
     AppThemeColor(role: role)
 }
 
+func themeUI(_ role: ThemeUIRole) -> AppThemeUIColor {
+    AppThemeUIColor(role: role)
+}
+
 struct AppThemeColor: ShapeStyle {
     let role: ThemeRole
 
     func resolve(in environment: EnvironmentValues) -> Color.Resolved {
         Color(hex: environment.appTheme.hex(for: role)).resolve(in: environment)
+    }
+}
+
+struct AppThemeUIColor: ShapeStyle {
+    let role: ThemeUIRole
+
+    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        Color(hex: environment.appTheme.uiHex(for: role)).resolve(in: environment)
+    }
+}
+
+private struct SettingsMenuControlModifier: ViewModifier {
+    let maxWidth: CGFloat
+    @Environment(\.fontSettings) private var fonts
+
+    func body(content: Content) -> some View {
+        content
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .font(fonts.interfaceFont(sizeOffset: -1, weight: .medium))
+            .foregroundStyle(themeUI(.controlForeground))
+            .tint(themeUI(.focusAccent))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .frame(maxWidth: maxWidth, minHeight: 30, alignment: .leading)
+            .background(themeUI(.controlBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(themeUI(.controlBorder), lineWidth: 1)
+            )
+    }
+}
+
+extension View {
+    fileprivate func settingsMenuControl(maxWidth: CGFloat) -> some View {
+        modifier(SettingsMenuControlModifier(maxWidth: maxWidth))
     }
 }
 
@@ -3053,6 +3404,17 @@ extension EnvironmentValues {
     fileprivate var fontSettings: FontSettings {
         get { self[FontSettingsEnvironmentKey.self] }
         set { self[FontSettingsEnvironmentKey.self] = newValue }
+    }
+}
+
+extension ThemeDefinition {
+    fileprivate var swiftUIColorScheme: ColorScheme {
+        switch preferredColorScheme {
+        case .light:
+            .light
+        case .dark:
+            .dark
+        }
     }
 }
 

@@ -44,6 +44,31 @@ final class DraculaThemeTests: XCTestCase {
         }
     }
 
+    func testEveryBuiltInThemeExposesValidUIColors() {
+        for theme in ThemeCatalog.themes {
+            for role in ThemeUIRole.allCases {
+                XCTAssertTrue(
+                    isValidHexColor(theme.uiHex(for: role)), "\(theme.id) \(role.rawValue)")
+            }
+        }
+    }
+
+    func testPreferredColorSchemeFollowsThemeGroup() {
+        XCTAssertEqual(ThemeCatalog.theme(id: "dracula")?.preferredColorScheme, .dark)
+        XCTAssertEqual(ThemeCatalog.theme(id: "dark-2026")?.preferredColorScheme, .dark)
+        XCTAssertEqual(ThemeCatalog.theme(id: "dark-high-contrast")?.preferredColorScheme, .dark)
+        XCTAssertEqual(ThemeCatalog.theme(id: "light-2026")?.preferredColorScheme, .light)
+        XCTAssertEqual(ThemeCatalog.theme(id: "light-high-contrast")?.preferredColorScheme, .light)
+    }
+
+    func testDraculaSecondaryUILabelMeetsTextContrast() {
+        let theme = ThemeCatalog.defaultTheme
+        XCTAssertGreaterThanOrEqual(
+            contrastRatio(theme.uiHex(for: .secondaryLabel), theme.hex(for: .background)),
+            4.5
+        )
+    }
+
     func testDraculaThemeExposesExpectedInitialTokens() {
         XCTAssertEqual(DraculaTheme.hex(for: .background), "#282a36")
         XCTAssertEqual(DraculaTheme.hex(for: .currentLine), "#44475a")
@@ -87,5 +112,40 @@ final class DraculaThemeTests: XCTestCase {
         return value.dropFirst().allSatisfy { character in
             character.isNumber || ("a"..."f").contains(character.lowercased())
         }
+    }
+
+    private func contrastRatio(_ firstHex: String, _ secondHex: String) -> Double {
+        let firstLuminance = relativeLuminance(firstHex)
+        let secondLuminance = relativeLuminance(secondHex)
+        let lighter = max(firstLuminance, secondLuminance)
+        let darker = min(firstLuminance, secondLuminance)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private func relativeLuminance(_ hex: String) -> Double {
+        let components = rgbComponents(hex)
+        return 0.2126 * components.red + 0.7152 * components.green + 0.0722 * components.blue
+    }
+
+    private func rgbComponents(_ hex: String) -> (red: Double, green: Double, blue: Double) {
+        var value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        if value.count == 3 {
+            value = value.map { "\($0)\($0)" }.joined()
+        }
+
+        let scanner = Scanner(string: value)
+        var rgb: UInt64 = 0
+        scanner.scanHexInt64(&rgb)
+        return (
+            red: linearizedColorComponent(Double((rgb >> 16) & 0xff) / 255.0),
+            green: linearizedColorComponent(Double((rgb >> 8) & 0xff) / 255.0),
+            blue: linearizedColorComponent(Double(rgb & 0xff) / 255.0)
+        )
+    }
+
+    private func linearizedColorComponent(_ component: Double) -> Double {
+        component <= 0.03928
+            ? component / 12.92
+            : pow((component + 0.055) / 1.055, 2.4)
     }
 }

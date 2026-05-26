@@ -63,6 +63,7 @@ public enum IconRole: Equatable, Sendable {
     case add
     case warning
     case bottomTerminal
+    case workspaceSwap
     case rightPanelMode(RightPanelMode)
     case fileStateOverlay(FileStateOverlay)
 
@@ -116,6 +117,8 @@ public enum IconRole: Equatable, Sendable {
             .systemSymbol("exclamationmark.triangle")
         case .bottomTerminal:
             .systemSymbol("terminal")
+        case .workspaceSwap:
+            .systemSymbol("arrow.left.arrow.right")
         case .rightPanelMode(let mode):
             switch mode {
             case .files:

@@ -7,7 +7,6 @@ public struct LayoutState: Equatable, Sendable {
     public static let minimumSidebarWidth = 180.0
     public static let maximumSidebarWidth = 520.0
     public static let minimumRightPanelWidth = 280.0
-    public static let maximumRightPanelWidth = 720.0
     public static let minimumMainWorkspaceWidth = 420.0
     public static let minimumGlobalTerminalHeight = 96.0
     public static let maximumGlobalTerminalHeight = 420.0
@@ -18,6 +17,7 @@ public struct LayoutState: Equatable, Sendable {
     public var isSidebarCollapsed: Bool
     public var isRightPanelCollapsed: Bool
     public var isGlobalTerminalExpanded: Bool
+    public var isWorkspaceSwapped: Bool
 
     public init(
         sidebarWidth: Double = LayoutState.defaultSidebarWidth,
@@ -25,17 +25,17 @@ public struct LayoutState: Equatable, Sendable {
         globalTerminalHeight: Double = LayoutState.defaultGlobalTerminalHeight,
         isSidebarCollapsed: Bool = false,
         isRightPanelCollapsed: Bool = false,
-        isGlobalTerminalExpanded: Bool = false
+        isGlobalTerminalExpanded: Bool = false,
+        isWorkspaceSwapped: Bool = false
     ) {
         self.sidebarWidth = Self.clamp(
             sidebarWidth,
             minimum: Self.minimumSidebarWidth,
             maximum: Self.maximumSidebarWidth
         )
-        self.rightPanelWidth = Self.clamp(
+        self.rightPanelWidth = Self.clampMinimum(
             rightPanelWidth,
-            minimum: Self.minimumRightPanelWidth,
-            maximum: Self.maximumRightPanelWidth
+            minimum: Self.minimumRightPanelWidth
         )
         self.globalTerminalHeight = Self.clamp(
             globalTerminalHeight,
@@ -45,6 +45,7 @@ public struct LayoutState: Equatable, Sendable {
         self.isSidebarCollapsed = isSidebarCollapsed
         self.isRightPanelCollapsed = isRightPanelCollapsed
         self.isGlobalTerminalExpanded = isGlobalTerminalExpanded
+        self.isWorkspaceSwapped = isWorkspaceSwapped
     }
 
     public static var defaults: LayoutState {
@@ -53,6 +54,10 @@ public struct LayoutState: Equatable, Sendable {
 
     public static func clamp(_ value: Double, minimum: Double, maximum: Double) -> Double {
         min(max(value, minimum), maximum)
+    }
+
+    public static func clampMinimum(_ value: Double, minimum: Double) -> Double {
+        max(value, minimum)
     }
 
     public static func maximumGlobalTerminalHeight(for availableWindowHeight: Double?) -> Double {

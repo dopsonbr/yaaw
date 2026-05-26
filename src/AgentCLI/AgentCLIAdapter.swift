@@ -36,16 +36,93 @@ public struct AgentCLISessionMetadata: Equatable, Sendable {
     }
 }
 
+public struct SessionLinkCandidate: Identifiable, Equatable, Sendable {
+    public var identity: String
+    public var displayName: String
+    public var agentCLI: AgentCLIKind
+    public var workingDirectory: URL?
+    public var updatedAt: Date?
+    public var source: String
+
+    public init(
+        identity: String,
+        displayName: String,
+        agentCLI: AgentCLIKind,
+        workingDirectory: URL? = nil,
+        updatedAt: Date? = nil,
+        source: String
+    ) {
+        self.identity = identity
+        self.displayName = displayName
+        self.agentCLI = agentCLI
+        self.workingDirectory = workingDirectory
+        self.updatedAt = updatedAt
+        self.source = source
+    }
+
+    public var id: String {
+        "\(agentCLI.rawValue):\(identity)"
+    }
+}
+
 public protocol AgentCLIAdapter: Sendable {
     var kind: AgentCLIKind { get }
     var executableName: String { get }
+    var supportsStartName: Bool { get }
+    var supportsInteractiveRename: Bool { get }
 
     func invocation(
         sessionIdentity: String?,
+        requestedName: String?,
         resolvedExecutablePath: String?
     ) -> AgentCLIInvocation
 
+    func startupInput(
+        forPendingSessionRename name: String,
+        sessionIdentity: String?
+    ) -> String?
+
     func metadata(from output: String, terminalTitle: String?) -> AgentCLISessionMetadata?
+
+    func sessionLinkCandidates(
+        workingDirectory: URL,
+        homeDirectory: URL
+    ) -> [SessionLinkCandidate]
+
+    func metadataFromCatalog(
+        sessionIdentity: String,
+        workingDirectory: URL,
+        homeDirectory: URL
+    ) -> AgentCLISessionMetadata?
+}
+
+extension AgentCLIAdapter {
+    public var supportsStartName: Bool { false }
+    public var supportsInteractiveRename: Bool { false }
+
+    public func startupInput(
+        forPendingSessionRename name: String,
+        sessionIdentity: String?
+    ) -> String? {
+        nil
+    }
+
+    public func sessionLinkCandidates(
+        workingDirectory: URL,
+        homeDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        []
+    }
+
+    public func metadataFromCatalog(
+        sessionIdentity: String,
+        workingDirectory: URL,
+        homeDirectory: URL
+    ) -> AgentCLISessionMetadata? {
+        sessionLinkCandidates(workingDirectory: workingDirectory, homeDirectory: homeDirectory)
+            .first { $0.identity == sessionIdentity }
+            .map { AgentCLISessionMetadata(identity: $0.identity, reportedName: $0.displayName) }
+    }
 }
 
 public struct CodexCLIAdapter: AgentCLIAdapter {
@@ -56,17 +133,37 @@ public struct CodexCLIAdapter: AgentCLIAdapter {
 
     public func invocation(
         sessionIdentity: String?,
+        requestedName: String?,
         resolvedExecutablePath: String?
     ) -> AgentCLIInvocation {
-        AgentCLIInvocation(
+        return AgentCLIInvocation(
             executableName: executableName,
             resolvedExecutablePath: resolvedExecutablePath,
             arguments: sessionIdentity.map { ["resume", $0] } ?? []
         )
     }
 
+    public var supportsInteractiveRename: Bool { true }
+
+    public func startupInput(
+        forPendingSessionRename name: String,
+        sessionIdentity: String?
+    ) -> String? {
+        Self.renameCommand(for: name)
+    }
+
     public func metadata(from output: String, terminalTitle: String?) -> AgentCLISessionMetadata? {
         AgentCLIOutputParser.metadata(from: output, terminalTitle: terminalTitle, kind: kind)
+    }
+
+    public func sessionLinkCandidates(
+        workingDirectory: URL,
+        homeDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        AgentCLISessionCatalog.codexCandidates(
+            homeDirectory: homeDirectory,
+            workingDirectory: workingDirectory
+        )
     }
 }
 
@@ -78,17 +175,46 @@ public struct ClaudeCLIAdapter: AgentCLIAdapter {
 
     public func invocation(
         sessionIdentity: String?,
+        requestedName: String?,
         resolvedExecutablePath: String?
     ) -> AgentCLIInvocation {
-        AgentCLIInvocation(
+        let arguments: [String]
+        if let sessionIdentity {
+            arguments = ["--resume", sessionIdentity]
+        } else if let requestedName = Self.sanitizedSessionName(requestedName) {
+            arguments = ["--name", requestedName]
+        } else {
+            arguments = []
+        }
+        return AgentCLIInvocation(
             executableName: executableName,
             resolvedExecutablePath: resolvedExecutablePath,
-            arguments: sessionIdentity.map { ["--resume", $0] } ?? []
+            arguments: arguments
         )
+    }
+
+    public var supportsStartName: Bool { true }
+    public var supportsInteractiveRename: Bool { true }
+
+    public func startupInput(
+        forPendingSessionRename name: String,
+        sessionIdentity: String?
+    ) -> String? {
+        sessionIdentity == nil ? nil : Self.renameCommand(for: name)
     }
 
     public func metadata(from output: String, terminalTitle: String?) -> AgentCLISessionMetadata? {
         AgentCLIOutputParser.metadata(from: output, terminalTitle: terminalTitle, kind: kind)
+    }
+
+    public func sessionLinkCandidates(
+        workingDirectory: URL,
+        homeDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        AgentCLISessionCatalog.claudeCandidates(
+            homeDirectory: homeDirectory,
+            workingDirectory: workingDirectory
+        )
     }
 }
 
@@ -100,9 +226,10 @@ public struct OpenCodeCLIAdapter: AgentCLIAdapter {
 
     public func invocation(
         sessionIdentity: String?,
+        requestedName: String?,
         resolvedExecutablePath: String?
     ) -> AgentCLIInvocation {
-        AgentCLIInvocation(
+        return AgentCLIInvocation(
             executableName: executableName,
             resolvedExecutablePath: resolvedExecutablePath,
             arguments: sessionIdentity.map { ["--session", $0] } ?? []
@@ -111,6 +238,16 @@ public struct OpenCodeCLIAdapter: AgentCLIAdapter {
 
     public func metadata(from output: String, terminalTitle: String?) -> AgentCLISessionMetadata? {
         AgentCLIOutputParser.metadata(from: output, terminalTitle: terminalTitle, kind: kind)
+    }
+
+    public func sessionLinkCandidates(
+        workingDirectory: URL,
+        homeDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        AgentCLISessionCatalog.openCodeCandidates(
+            homeDirectory: homeDirectory,
+            workingDirectory: workingDirectory
+        )
     }
 }
 
@@ -122,17 +259,46 @@ public struct CopilotCLIAdapter: AgentCLIAdapter {
 
     public func invocation(
         sessionIdentity: String?,
+        requestedName: String?,
         resolvedExecutablePath: String?
     ) -> AgentCLIInvocation {
-        AgentCLIInvocation(
+        let arguments: [String]
+        if let sessionIdentity {
+            arguments = ["--resume=\(sessionIdentity)"]
+        } else if let requestedName = Self.sanitizedSessionName(requestedName) {
+            arguments = ["--name", requestedName]
+        } else {
+            arguments = []
+        }
+        return AgentCLIInvocation(
             executableName: executableName,
             resolvedExecutablePath: resolvedExecutablePath,
-            arguments: sessionIdentity.map { ["--resume=\($0)"] } ?? []
+            arguments: arguments
         )
+    }
+
+    public var supportsStartName: Bool { true }
+    public var supportsInteractiveRename: Bool { true }
+
+    public func startupInput(
+        forPendingSessionRename name: String,
+        sessionIdentity: String?
+    ) -> String? {
+        sessionIdentity == nil ? nil : Self.renameCommand(for: name)
     }
 
     public func metadata(from output: String, terminalTitle: String?) -> AgentCLISessionMetadata? {
         AgentCLIOutputParser.metadata(from: output, terminalTitle: terminalTitle, kind: kind)
+    }
+
+    public func sessionLinkCandidates(
+        workingDirectory: URL,
+        homeDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        AgentCLISessionCatalog.copilotCandidates(
+            homeDirectory: homeDirectory,
+            workingDirectory: workingDirectory
+        )
     }
 }
 
@@ -206,6 +372,7 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
     private let captureDirectory: URL?
     private let activityDirectory: URL?
     private let helperBinDirectory: URL
+    private let homeDirectory: URL
 
     public init(
         adapters: [any AgentCLIAdapter] = [
@@ -218,7 +385,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         captureDirectory: URL? = AgentCLISessionBindingService.defaultCaptureDirectory(),
         activityDirectory: URL? = AgentCLISessionBindingService.defaultActivityDirectory(),
-        helperBinDirectory: URL = AgentCLISessionBindingService.defaultHelperBinDirectory()
+        helperBinDirectory: URL = AgentCLISessionBindingService.defaultHelperBinDirectory(),
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         self.adaptersByKind = Dictionary(uniqueKeysWithValues: adapters.map { ($0.kind, $0) })
         self.resolver = resolver
@@ -226,6 +394,7 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         self.captureDirectory = captureDirectory
         self.activityDirectory = activityDirectory
         self.helperBinDirectory = helperBinDirectory
+        self.homeDirectory = homeDirectory
     }
 
     public static func defaultCaptureDirectory() -> URL {
@@ -279,7 +448,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             try? FileManager.default.removeItem(at: captureLogURL)
         }
         let shellPath = interactiveShellPath()
-        let agentCommand = command
+        let agentCommand =
+            command
             .map(Self.shellQuoted)
             .joined(separator: " ")
         let launchEnvironment = shellEnvironment(
@@ -292,7 +462,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         return AgentTerminalLaunchDescriptor(
             command: [shellPath, "-lic", shellCommand],
             environment: launchEnvironment,
-            captureLogURL: captureLogURL
+            captureLogURL: captureLogURL,
+            startupInput: startupInput(for: thread)
         )
     }
 
@@ -312,6 +483,7 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         let resolvedPath = resolver.executablePath(named: executableName, environment: environment)
         let invocation = adapter.invocation(
             sessionIdentity: thread.sessionIdentity,
+            requestedName: thread.pendingSessionRename,
             resolvedExecutablePath: resolvedPath
         )
         return AgentCLIInvocation(
@@ -336,12 +508,69 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         AgentCLISessionMetadata(identity: identity, title: terminalTitle)
     }
 
+    public func supportsSessionRename(for kind: AgentCLIKind) -> Bool {
+        adaptersByKind[kind]?.supportsInteractiveRename == true
+    }
+
+    public func canApplySessionNameOnLaunch(for kind: AgentCLIKind) -> Bool {
+        guard let adapter = adaptersByKind[kind] else { return false }
+        return adapter.supportsStartName || adapter.supportsInteractiveRename
+    }
+
+    public func sessionLinkCandidates(for thread: AgentThread) -> [SessionLinkCandidate] {
+        adaptersByKind[thread.agentCLI]?.sessionLinkCandidates(
+            workingDirectory: thread.workingDirectory,
+            homeDirectory: homeDirectory
+        ) ?? []
+    }
+
+    public func catalogMetadata(for thread: AgentThread) -> AgentCLISessionMetadata? {
+        guard let sessionIdentity = thread.sessionIdentity else { return nil }
+        return adaptersByKind[thread.agentCLI]?.metadataFromCatalog(
+            sessionIdentity: sessionIdentity,
+            workingDirectory: thread.workingDirectory,
+            homeDirectory: homeDirectory
+        )
+    }
+
+    public func exactSessionLinkCandidate(for thread: AgentThread) -> SessionLinkCandidate? {
+        guard thread.sessionIdentity == nil else { return nil }
+        let matchNames = Self.sessionLinkMatchNames(for: thread)
+        guard !matchNames.isEmpty else { return nil }
+        let matchingCandidates = sessionLinkCandidates(for: thread).filter { candidate in
+            guard let candidateName = Self.normalizedSessionLinkName(candidate.displayName) else {
+                return false
+            }
+            return matchNames.contains(candidateName)
+        }
+        guard !matchingCandidates.isEmpty else { return nil }
+
+        let directoryMatches = matchingCandidates.filter { candidate in
+            guard let directory = candidate.workingDirectory else { return false }
+            return Self.sameDirectory(directory, thread.workingDirectory)
+        }
+        let candidates = directoryMatches.isEmpty ? matchingCandidates : directoryMatches
+        let identities = Set(candidates.map(\.id))
+        guard identities.count == 1 else { return nil }
+        return candidates.first
+    }
+
     public func captureLogURL(for thread: AgentThread) -> URL? {
         captureDirectory?.appendingPathComponent("\(thread.id.uuidString).log")
     }
 
     public func activityLogURL(for thread: AgentThread) -> URL? {
         activityDirectory?.appendingPathComponent("\(thread.id.uuidString).ndjson")
+    }
+
+    private func startupInput(for thread: AgentThread) -> String? {
+        guard let pendingSessionRename = thread.pendingSessionRename,
+            let adapter = adaptersByKind[thread.agentCLI]
+        else { return nil }
+        return adapter.startupInput(
+            forPendingSessionRename: pendingSessionRename,
+            sessionIdentity: thread.sessionIdentity
+        )
     }
 
     private func shellEnvironment(
@@ -361,7 +590,8 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         }
         if let helperBinURL {
             let path = launchEnvironment["PATH"] ?? ""
-            launchEnvironment["PATH"] = path.isEmpty ? helperBinURL.path : "\(helperBinURL.path):\(path)"
+            launchEnvironment["PATH"] =
+                path.isEmpty ? helperBinURL.path : "\(helperBinURL.path):\(path)"
         }
         if launchEnvironment["TERM"]?.nilIfBlank == nil {
             launchEnvironment["TERM"] = "xterm-256color"
@@ -475,6 +705,30 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    private static func sessionLinkMatchNames(for thread: AgentThread) -> Set<String> {
+        var names: [String] = []
+        names.append(
+            contentsOf: [
+                thread.pendingSessionRename,
+                thread.canonicalSessionName,
+                thread.displayName,
+            ].compactMap { $0 })
+        return Set(names.compactMap(normalizedSessionLinkName))
+    }
+
+    private static func normalizedSessionLinkName(_ name: String?) -> String? {
+        let collapsed = name?
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        return collapsed?.nilIfBlank
+    }
+
+    private static func sameDirectory(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.standardizedFileURL.path == rhs.standardizedFileURL.path
+    }
+
     public static let captureLogStaleWindow: UInt64 = 8 * 1024 * 1024
 
     public func capturedOutput(
@@ -557,6 +811,7 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
 
         let invocation = adapter.invocation(
             sessionIdentity: resumeIdentity,
+            requestedName: nil,
             resolvedExecutablePath: executablePath
         )
         let process = Process()
@@ -583,6 +838,520 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         }
         return metadata
     }
+}
+
+extension AgentCLIAdapter {
+    fileprivate static func sanitizedSessionName(_ name: String?) -> String? {
+        let singleLine = name?
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+        let trimmed = singleLine?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    fileprivate static func renameCommand(for name: String) -> String? {
+        guard let name = sanitizedSessionName(name) else { return nil }
+        return "/rename \(name)\n"
+    }
+}
+
+private enum AgentCLISessionCatalog {
+    static func codexCandidates(
+        homeDirectory: URL,
+        workingDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        let codexDirectory =
+            homeDirectory
+            .appendingPathComponent(".codex", isDirectory: true)
+        let indexURL =
+            codexDirectory
+            .appendingPathComponent("session_index.jsonl")
+        let indexCandidates: [SessionLinkCandidate] =
+            jsonObjects(fromJSONL: indexURL).compactMap { object in
+                guard
+                    let identity = firstString(
+                        in: object,
+                        keys: ["session_id", "sessionId", "id", "conversation_id", "thread_id"]
+                    )
+                else { return nil }
+                let directory = firstURL(
+                    in: object,
+                    keys: ["cwd", "working_directory", "workingDirectory", "directory", "path"]
+                )
+                guard matches(workingDirectory: workingDirectory, candidateDirectory: directory)
+                else { return nil }
+                let name =
+                    firstString(
+                        in: object,
+                        keys: [
+                            "thread_name", "session_name", "sessionName", "title", "name",
+                            "summary",
+                        ]
+                    ) ?? identity
+                return SessionLinkCandidate(
+                    identity: identity,
+                    displayName: name,
+                    agentCLI: .codex,
+                    workingDirectory: directory,
+                    updatedAt: firstDate(
+                        in: object,
+                        keys: ["updated_at", "updatedAt", "timestamp", "created_at", "createdAt"]
+                    ),
+                    source: "~/.codex/session_index.jsonl"
+                )
+            }
+        let indexedIdentities = Set(indexCandidates.map(\.identity))
+        let historyURL = codexDirectory.appendingPathComponent("history.jsonl")
+        let historyCandidates: [SessionLinkCandidate] =
+            jsonObjects(fromJSONL: historyURL).compactMap { object in
+                guard
+                    let identity = firstString(
+                        in: object,
+                        keys: ["session_id", "sessionId", "id", "conversation_id", "thread_id"]
+                    ),
+                    !indexedIdentities.contains(identity)
+                else { return nil }
+                let name =
+                    firstString(
+                        in: object,
+                        keys: [
+                            "thread_name", "session_name", "sessionName", "title", "name",
+                            "summary", "text",
+                        ]
+                    ) ?? identity
+                return SessionLinkCandidate(
+                    identity: identity,
+                    displayName: name,
+                    agentCLI: .codex,
+                    updatedAt: firstDate(
+                        in: object,
+                        keys: [
+                            "updated_at", "updatedAt", "timestamp", "created_at", "createdAt", "ts",
+                        ]
+                    ),
+                    source: "~/.codex/history.jsonl"
+                )
+            }
+        return merged(indexCandidates + historyCandidates)
+    }
+
+    static func claudeCandidates(
+        homeDirectory: URL,
+        workingDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        let projectsDirectory =
+            homeDirectory
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+        let directories = claudeProjectDirectories(
+            root: projectsDirectory,
+            workingDirectory: workingDirectory
+        )
+        let candidates = directories.flatMap { projectDirectory in
+            enumeratedFiles(in: projectDirectory, extensions: ["jsonl"]).compactMap { fileURL in
+                claudeCandidate(
+                    from: fileURL,
+                    workingDirectory: workingDirectory
+                )
+            }
+        }
+        return merged(candidates)
+    }
+
+    static func openCodeCandidates(
+        homeDirectory: URL,
+        workingDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        let sessionsDirectory =
+            homeDirectory
+            .appendingPathComponent(".local", isDirectory: true)
+            .appendingPathComponent("share", isDirectory: true)
+            .appendingPathComponent("opencode", isDirectory: true)
+            .appendingPathComponent("storage", isDirectory: true)
+            .appendingPathComponent("session", isDirectory: true)
+        return merged(
+            enumeratedFiles(in: sessionsDirectory, extensions: ["json"]).compactMap { fileURL in
+                guard let object = jsonObject(from: fileURL) else { return nil }
+                let directory = firstURL(
+                    in: object,
+                    keys: ["directory", "cwd", "working_directory", "workingDirectory", "path"]
+                )
+                guard
+                    matches(
+                        workingDirectory: workingDirectory,
+                        candidateDirectory: directory,
+                        allowUnknownDirectory: false
+                    )
+                else { return nil }
+                guard
+                    let identity =
+                        firstString(
+                            in: object, keys: ["id", "sessionID", "sessionId", "session_id"])
+                        ?? fileURL.deletingPathExtension().lastPathComponent.nilIfBlank
+                else { return nil }
+                let name =
+                    firstString(in: object, keys: ["title", "name", "summary", "description"])
+                    ?? identity
+                return SessionLinkCandidate(
+                    identity: identity,
+                    displayName: name,
+                    agentCLI: .opencode,
+                    workingDirectory: directory,
+                    updatedAt: firstDate(
+                        in: object,
+                        keys: ["updated", "updated_at", "updatedAt", "time", "created_at"]
+                    ) ?? modificationDate(for: fileURL),
+                    source: "~/.local/share/opencode/storage/session"
+                )
+            })
+    }
+
+    static func copilotCandidates(
+        homeDirectory: URL,
+        workingDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        let stateDirectory =
+            homeDirectory
+            .appendingPathComponent(".copilot", isDirectory: true)
+            .appendingPathComponent("session-state", isDirectory: true)
+        guard let sessionDirectories = directoryChildren(of: stateDirectory) else {
+            return []
+        }
+        return merged(
+            sessionDirectories.compactMap { sessionDirectory in
+                copilotCandidate(
+                    from: sessionDirectory,
+                    workingDirectory: workingDirectory
+                )
+            })
+    }
+
+    private static func claudeProjectDirectories(
+        root: URL,
+        workingDirectory: URL
+    ) -> [URL] {
+        let encoded = workingDirectory.path.replacingOccurrences(of: "/", with: "-")
+        var directories: [URL] = []
+        let direct = root.appendingPathComponent(encoded, isDirectory: true)
+        if isDirectory(direct) {
+            directories.append(direct)
+        }
+        if let children = directoryChildren(of: root) {
+            for child in children
+            where decodedClaudeDirectoryName(child.lastPathComponent) == workingDirectory.path
+                && !directories.contains(child)
+            {
+                directories.append(child)
+            }
+        }
+        return directories
+    }
+
+    private static func claudeCandidate(
+        from fileURL: URL,
+        workingDirectory: URL
+    ) -> SessionLinkCandidate? {
+        var identity = fileURL.deletingPathExtension().lastPathComponent.nilIfBlank
+        var name: String?
+        var directory: URL? = workingDirectory
+        var updatedAt = modificationDate(for: fileURL)
+        for object in jsonObjects(fromJSONL: fileURL) {
+            identity =
+                firstString(in: object, keys: ["sessionId", "session_id", "id", "uuid"])
+                ?? identity
+            name =
+                firstString(
+                    in: object,
+                    keys: [
+                        "agent-name", "agentName", "custom-title", "customTitle", "ai-title",
+                        "aiTitle", "title", "name", "summary",
+                    ]
+                ) ?? name
+            directory =
+                firstURL(
+                    in: object,
+                    keys: ["cwd", "working_directory", "workingDirectory", "directory"]
+                ) ?? directory
+            updatedAt =
+                firstDate(
+                    in: object,
+                    keys: ["timestamp", "updated_at", "updatedAt", "created_at", "createdAt"]
+                ) ?? updatedAt
+        }
+        guard let identity else { return nil }
+        guard matches(workingDirectory: workingDirectory, candidateDirectory: directory) else {
+            return nil
+        }
+        return SessionLinkCandidate(
+            identity: identity,
+            displayName: name ?? identity,
+            agentCLI: .claude,
+            workingDirectory: directory,
+            updatedAt: updatedAt,
+            source: "~/.claude/projects"
+        )
+    }
+
+    private static func copilotCandidate(
+        from sessionDirectory: URL,
+        workingDirectory: URL
+    ) -> SessionLinkCandidate? {
+        let metadataURL = sessionDirectory.appendingPathComponent("vscode.metadata.json")
+        let metadataObject = jsonObject(from: metadataURL)
+        var identity =
+            metadataObject.flatMap {
+                firstString(in: $0, keys: ["session_id", "sessionId", "id"])
+            } ?? sessionDirectory.lastPathComponent.nilIfBlank
+        var name = metadataObject.flatMap {
+            firstString(in: $0, keys: ["name", "title", "sessionName", "session_name"])
+        }
+        var directory = metadataObject.flatMap {
+            firstURL(
+                in: $0,
+                keys: ["cwd", "directory", "working_directory", "workingDirectory", "path"]
+            )
+        }
+        var updatedAt =
+            metadataObject.flatMap {
+                firstDate(in: $0, keys: ["updated_at", "updatedAt", "timestamp", "created_at"])
+            } ?? modificationDate(for: metadataURL)
+
+        let eventsURL = sessionDirectory.appendingPathComponent("events.jsonl")
+        for object in jsonObjects(fromJSONL: eventsURL) {
+            identity =
+                firstString(in: object, keys: ["session_id", "sessionId", "id"])
+                ?? identity
+            directory =
+                firstURL(
+                    in: object,
+                    keys: ["cwd", "directory", "working_directory", "workingDirectory", "path"]
+                ) ?? directory
+            name =
+                firstString(
+                    in: object,
+                    keys: [
+                        "name", "title", "sessionName", "session_name", "firstUserMessage",
+                        "first_user_message",
+                    ]
+                ) ?? name
+            updatedAt =
+                firstDate(in: object, keys: ["timestamp", "created_at", "createdAt", "time"])
+                ?? updatedAt
+        }
+        guard let identity else { return nil }
+        guard
+            matches(
+                workingDirectory: workingDirectory,
+                candidateDirectory: directory,
+                allowUnknownDirectory: false
+            )
+        else { return nil }
+        return SessionLinkCandidate(
+            identity: identity,
+            displayName: name ?? identity,
+            agentCLI: .copilot,
+            workingDirectory: directory,
+            updatedAt: updatedAt,
+            source: "~/.copilot/session-state"
+        )
+    }
+
+    private static func merged(_ candidates: [SessionLinkCandidate]) -> [SessionLinkCandidate] {
+        var byIdentity: [String: SessionLinkCandidate] = [:]
+        for candidate in candidates {
+            guard !candidate.identity.isEmpty else { continue }
+            guard let existing = byIdentity[candidate.identity] else {
+                byIdentity[candidate.identity] = candidate
+                continue
+            }
+            let candidateIsNewer =
+                (candidate.updatedAt ?? .distantPast) > (existing.updatedAt ?? .distantPast)
+            let existingUsesIdentity = existing.displayName == existing.identity
+            if candidateIsNewer || existingUsesIdentity {
+                byIdentity[candidate.identity] = candidate
+            }
+        }
+        return byIdentity.values.sorted { lhs, rhs in
+            switch (lhs.updatedAt, rhs.updatedAt) {
+            case (let lhsDate?, let rhsDate?) where lhsDate != rhsDate:
+                return lhsDate > rhsDate
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return lhs.displayName.localizedStandardCompare(rhs.displayName)
+                    == .orderedAscending
+            }
+        }
+    }
+
+    private static func matches(
+        workingDirectory: URL,
+        candidateDirectory: URL?,
+        allowUnknownDirectory: Bool = true
+    ) -> Bool {
+        guard let candidateDirectory else { return allowUnknownDirectory }
+        return candidateDirectory.standardizedFileURL.path
+            == workingDirectory.standardizedFileURL.path
+    }
+
+    private static func decodedClaudeDirectoryName(_ name: String) -> String {
+        guard name.hasPrefix("-") else { return name }
+        return name.replacingOccurrences(of: "-", with: "/")
+    }
+
+    private static func directoryChildren(of directory: URL) -> [URL]? {
+        guard
+            let children = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+        else { return nil }
+        return children.filter { isDirectory($0) }
+    }
+
+    private static func enumeratedFiles(in directory: URL, extensions: Set<String>) -> [URL] {
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else { return [] }
+        var files: [URL] = []
+        for case let url as URL in enumerator {
+            guard extensions.contains(url.pathExtension.lowercased()) else { continue }
+            files.append(url)
+        }
+        return files
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+
+    private static func jsonObject(from url: URL) -> Any? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    private static func jsonObjects(fromJSONL url: URL) -> [Any] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return text.split(whereSeparator: \.isNewline).compactMap { rawLine in
+            let line = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, let data = line.data(using: .utf8) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data)
+        }
+    }
+
+    private static func firstString(in object: Any, keys: [String]) -> String? {
+        for key in keys {
+            if let value = stringValue(in: object, key: key) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func stringValue(in object: Any, key: String) -> String? {
+        if let dictionary = object as? [String: Any] {
+            for (candidateKey, value) in dictionary
+            where candidateKey.caseInsensitiveCompare(key) == .orderedSame {
+                if let string = coercedString(value) {
+                    return string
+                }
+            }
+            for value in dictionary.values {
+                if let nested = stringValue(in: value, key: key) {
+                    return nested
+                }
+            }
+        } else if let array = object as? [Any] {
+            for value in array {
+                if let nested = stringValue(in: value, key: key) {
+                    return nested
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func firstURL(in object: Any, keys: [String]) -> URL? {
+        firstString(in: object, keys: keys).flatMap(urlFromPath)
+    }
+
+    private static func urlFromPath(_ path: String) -> URL? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let expanded =
+            trimmed == "~" || trimmed.hasPrefix("~/")
+            ? FileManager.default.homeDirectoryForCurrentUser.path
+                + String(trimmed.dropFirst())
+            : trimmed
+        return URL(fileURLWithPath: expanded, isDirectory: true)
+    }
+
+    private static func firstDate(in object: Any, keys: [String]) -> Date? {
+        for key in keys {
+            if let date = dateValue(in: object, key: key) {
+                return date
+            }
+        }
+        return nil
+    }
+
+    private static func dateValue(in object: Any, key: String) -> Date? {
+        if let dictionary = object as? [String: Any] {
+            for (candidateKey, value) in dictionary
+            where candidateKey.caseInsensitiveCompare(key) == .orderedSame {
+                if let date = coercedDate(value) {
+                    return date
+                }
+            }
+            for value in dictionary.values {
+                if let nested = dateValue(in: value, key: key) {
+                    return nested
+                }
+            }
+        } else if let array = object as? [Any] {
+            for value in array {
+                if let nested = dateValue(in: value, key: key) {
+                    return nested
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func coercedString(_ value: Any) -> String? {
+        if let string = value as? String {
+            return string.nilIfBlank
+        }
+        if let number = value as? NSNumber {
+            return number.stringValue.nilIfBlank
+        }
+        return nil
+    }
+
+    private static func coercedDate(_ value: Any) -> Date? {
+        if let number = value as? NSNumber {
+            let raw = number.doubleValue
+            return Date(timeIntervalSince1970: raw > 1_000_000_000_000 ? raw / 1000 : raw)
+        }
+        guard let string = coercedString(value) else { return nil }
+        if let numeric = Double(string) {
+            return Date(
+                timeIntervalSince1970: numeric > 1_000_000_000_000 ? numeric / 1000 : numeric)
+        }
+        return ISO8601DateFormatter().date(from: string)
+    }
+
+    private static func modificationDate(for url: URL) -> Date? {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+    }
+
 }
 
 private enum AgentCLIOutputParser {

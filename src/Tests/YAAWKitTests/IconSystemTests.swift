@@ -108,6 +108,7 @@ final class IconSystemTests: XCTestCase {
         XCTAssertEqual(IconRole.settings.icon.systemSymbolName, "gearshape")
         XCTAssertEqual(IconRole.installUpdate.icon.systemSymbolName, "arrow.down.circle")
         XCTAssertEqual(IconRole.moreActions.icon.systemSymbolName, "ellipsis")
+        XCTAssertEqual(IconRole.workspaceSwap.icon.systemSymbolName, "arrow.left.arrow.right")
         XCTAssertEqual(IconRole.rightPanelMode(.files).icon.systemSymbolName, "doc.on.doc")
         XCTAssertEqual(IconRole.rightPanelMode(.git).icon.systemSymbolName, "arrow.triangle.branch")
         XCTAssertEqual(IconRole.rightPanelMode(.nvim).icon.systemSymbolName, "square.and.pencil")

@@ -4,12 +4,15 @@
 
 Bind every thread to exactly one user-provided `codex` or `claude` CLI session inside the embedded terminal. This plan owns YAAW's thin launch/resume adapter boundary: launching the chosen CLI in the thread working directory, capturing the canonical session identity and display name the CLI reports, persisting that identity, and resuming the same session when the thread is reopened. It does not make YAAW an agent harness.
 
+Plan 14 extends this boundary for Codex, Claude, OpenCode, and Copilot with CLI-confirmed rename, exact local session catalog auto-linking, and explicit recovery for older unbound threads when no unique exact match exists.
+
 ## Requirements
 
 - Technical Requirements: Threads, Terminal Requirements, Agent CLI Scope, External Tools, Acceptance Criteria.
 - Non-Functional Requirements: Reliability, Maintainability, Observability.
 - Testing Requirements: Inputs And Outputs, Mocking Policy.
 - Standards: [libghostty Standard](../standards/dependency/libghostty.md).
+- Follow-up: [Plan 14: Session Resume And Rename Support](14-session-resume-and-rename.md).
 
 ## Implementation
 
