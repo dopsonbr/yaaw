@@ -264,6 +264,16 @@ private final class E2ERunner {
         try assert(
             settingsText.contains("default: zed"),
             "settings YAML exposes the default external-open destination")
+        try assert(settingsText.contains("fonts:"), "settings YAML exposes font settings")
+        try assert(
+            settingsText.contains("interfaceFamily: system"),
+            "settings YAML exposes the interface font family")
+        try assert(
+            settingsText.contains("editorFamily: system-monospace"),
+            "settings YAML exposes the editor font family")
+        try assert(
+            settingsText.contains("terminalFamily: \"\""),
+            "settings YAML exposes the Ghostty-default terminal font family")
         let detectedExternalTools: Set<ExternalOpenToolID> = [.vscode, .finder]
         try assert(
             ExternalOpenToolResolver.defaultTool(
@@ -396,7 +406,18 @@ private final class E2ERunner {
 
         model.selectThread(id: codexThreadID)
         model.reloadConfiguration(
-            YAAWConfiguration(theme: ThemeSettings(active: "light-high-contrast")))
+            YAAWConfiguration(
+                theme: ThemeSettings(active: "light-high-contrast"),
+                fonts: FontSettings(
+                    interfaceFamily: "Avenir Next",
+                    interfaceSize: 14,
+                    editorFamily: "SF Mono",
+                    editorSize: 15,
+                    terminalFamily: "JetBrains Mono",
+                    terminalSize: 16
+                )
+            )
+        )
         try assert(
             model.configuration.themeName == "light-high-contrast",
             "settings reload applied selected built-in theme")
@@ -404,8 +425,26 @@ private final class E2ERunner {
             model.configuration.resolvedTheme.group == .highContrast,
             "selected theme resolved to high contrast group")
         try assert(
+            model.configuration.fonts.interfaceFamily == "Avenir Next",
+            "settings reload applied interface font family")
+        try assert(
+            model.configuration.fonts.interfaceSize == 14,
+            "settings reload applied interface font size")
+        try assert(
+            model.configuration.fonts.editorFamily == "SF Mono",
+            "settings reload applied editor font family")
+        try assert(
+            model.configuration.fonts.editorSize == 15,
+            "settings reload applied editor font size")
+        try assert(
+            model.configuration.fonts.terminalFamily == "JetBrains Mono",
+            "settings reload applied terminal font family")
+        try assert(
+            model.configuration.fonts.terminalSize == 16,
+            "settings reload applied terminal font size")
+        try assert(
             model.selectedThread?.id == codexThreadID,
-            "theme settings reload preserved selected thread")
+            "appearance settings reload preserved selected thread")
 
         model.refreshSelectedFileBrowser()
         try waitUntil("file index contains README.md") {

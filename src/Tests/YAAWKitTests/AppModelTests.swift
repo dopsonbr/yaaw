@@ -1122,6 +1122,41 @@ final class AppModelTests: XCTestCase {
         )
     }
 
+    func testReloadConfigurationAppliesFontsAndRecordsDiagnostic() throws {
+        let fixture = AppModelFixture()
+        let recorder = RecordingDiagnosticEventRecorder()
+        let model = AppModel(store: fixture.store, diagnosticRecorder: recorder)
+
+        model.reloadConfiguration(
+            YAAWConfiguration(
+                fonts: FontSettings(
+                    interfaceFamily: "Avenir Next",
+                    interfaceSize: 14,
+                    editorFamily: "SF Mono",
+                    editorSize: 15,
+                    terminalFamily: "JetBrains Mono",
+                    terminalSize: 16
+                )
+            )
+        )
+
+        XCTAssertEqual(model.configuration.fonts.interfaceFamily, "Avenir Next")
+        XCTAssertEqual(model.configuration.fonts.interfaceSize, 14)
+        XCTAssertEqual(model.configuration.fonts.editorFamily, "SF Mono")
+        XCTAssertEqual(model.configuration.fonts.editorSize, 15)
+        XCTAssertEqual(model.configuration.fonts.terminalFamily, "JetBrains Mono")
+        XCTAssertEqual(model.configuration.fonts.terminalSize, 16)
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "Configuration"
+                    && $0.name == "settings_yaml_reloaded"
+                    && $0.metadata["interface_font_size"] == "14.0"
+                    && $0.metadata["editor_font_size"] == "15.0"
+                    && $0.metadata["terminal_font_size"] == "16.0"
+            }
+        )
+    }
+
     func testConfiguredEditorAndGitToolsAreUsedForRightPanelTerminals() throws {
         let fixture = AppModelFixture()
         let resolver = StaticAppModelExecutableResolver(

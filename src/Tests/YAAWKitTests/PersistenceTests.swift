@@ -982,6 +982,33 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(configuration.fonts.terminalSize, 16)
     }
 
+    func testYAMLConfigurationSaveRendersFontSettingsAndReloadsThem() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+        let configuration = YAAWConfiguration(
+            fonts: FontSettings(
+                interfaceFamily: "Avenir Next",
+                interfaceSize: 14.5,
+                editorFamily: "SF Mono",
+                editorSize: 15,
+                terminalFamily: "JetBrains Mono",
+                terminalSize: 16
+            )
+        )
+
+        try store.save(configuration)
+
+        let text = try String(contentsOf: path, encoding: .utf8)
+        let reloaded = store.load()
+        XCTAssertTrue(text.contains("interfaceFamily: \"Avenir Next\""))
+        XCTAssertTrue(text.contains("interfaceSize: 14.5"))
+        XCTAssertTrue(text.contains("editorFamily: \"SF Mono\""))
+        XCTAssertTrue(text.contains("editorSize: 15"))
+        XCTAssertTrue(text.contains("terminalFamily: \"JetBrains Mono\""))
+        XCTAssertTrue(text.contains("terminalSize: 16"))
+        XCTAssertEqual(reloaded.fonts, configuration.fonts)
+    }
+
     func testYAMLConfigurationAcceptsSupportedTheme() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         let store = YAMLConfigurationStore(path: path)

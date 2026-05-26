@@ -746,27 +746,81 @@ private struct SettingsEditorView: View {
     }
 
     private var appearanceSection: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text("Appearance")
-                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
-                .foregroundStyle(dracula(.comment))
-
-            Picker("Theme", selection: themeSelection) {
-                ForEach(ThemeGroup.allCases) { group in
-                    Section(group.displayName) {
-                        ForEach(ThemeCatalog.themes(in: group)) { theme in
-                            Text(theme.displayName).tag(theme.id)
+        ScrollView {
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
+                appearanceRow("Theme") {
+                    Picker("Theme", selection: themeSelection) {
+                        ForEach(ThemeGroup.allCases) { group in
+                            Section(group.displayName) {
+                                ForEach(ThemeCatalog.themes(in: group)) { theme in
+                                    Text(theme.displayName).tag(theme.id)
+                                }
+                            }
                         }
                     }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 360, alignment: .leading)
+                    .accessibilityLabel("Theme")
+                    .accessibilityIdentifier("settings-theme-picker")
+                }
+
+                appearanceRow("Interface font") {
+                    fontFamilyPicker(
+                        label: "Interface font family",
+                        selection: interfaceFontFamilySelection,
+                        options: interfaceFontFamilyOptions
+                    )
+                    .accessibilityIdentifier("settings-interface-font-picker")
+                }
+
+                appearanceRow("Interface size") {
+                    fontSizeStepper(
+                        label: "Interface font size",
+                        value: interfaceFontSizeSelection,
+                        range: 9...28
+                    )
+                    .accessibilityIdentifier("settings-interface-size-stepper")
+                }
+
+                appearanceRow("Editor font") {
+                    fontFamilyPicker(
+                        label: "Editor font family",
+                        selection: editorFontFamilySelection,
+                        options: editorFontFamilyOptions
+                    )
+                    .accessibilityIdentifier("settings-editor-font-picker")
+                }
+
+                appearanceRow("Editor size") {
+                    fontSizeStepper(
+                        label: "Editor font size",
+                        value: editorFontSizeSelection,
+                        range: 9...28
+                    )
+                    .accessibilityIdentifier("settings-editor-size-stepper")
+                }
+
+                appearanceRow("Terminal font") {
+                    fontFamilyPicker(
+                        label: "Terminal font family",
+                        selection: terminalFontFamilySelection,
+                        options: terminalFontFamilyOptions
+                    )
+                    .accessibilityIdentifier("settings-terminal-font-picker")
+                }
+
+                appearanceRow("Terminal size") {
+                    fontSizeStepper(
+                        label: "Terminal font size",
+                        value: terminalFontSizeSelection,
+                        range: 8...32
+                    )
+                    .accessibilityIdentifier("settings-terminal-size-stepper")
                 }
             }
-            .pickerStyle(.menu)
-            .frame(maxWidth: 360, alignment: .leading)
-            .accessibilityLabel("Theme")
-            .accessibilityIdentifier("settings-theme-picker")
-
-            Spacer()
+            .padding(.top, 2)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var themeSelection: Binding<String> {
@@ -778,6 +832,137 @@ private struct SettingsEditorView: View {
                 saveThemeSelection(newValue)
             }
         )
+    }
+
+    private var effectiveFonts: FontSettings {
+        currentConfiguration.validated().fonts
+    }
+
+    private var installedFontFamilies: [String] {
+        NSFontManager.shared.availableFontFamilies.sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+    }
+
+    private var interfaceFontFamilyOptions: [(String, String)] {
+        fontFamilyOptions(pinned: [("system", "System")])
+    }
+
+    private var editorFontFamilyOptions: [(String, String)] {
+        fontFamilyOptions(pinned: [("system-monospace", "System monospace")])
+    }
+
+    private var terminalFontFamilyOptions: [(String, String)] {
+        fontFamilyOptions(
+            pinned: [
+                ("", "Ghostty default"),
+                ("system-monospace", "System monospace"),
+            ])
+    }
+
+    private var interfaceFontFamilySelection: Binding<String> {
+        Binding(
+            get: { effectiveFonts.interfaceFamily },
+            set: { newValue in
+                saveFontSettings { $0.interfaceFamily = newValue }
+            }
+        )
+    }
+
+    private var interfaceFontSizeSelection: Binding<Double> {
+        Binding(
+            get: { effectiveFonts.interfaceSize },
+            set: { newValue in
+                saveFontSettings { $0.interfaceSize = newValue }
+            }
+        )
+    }
+
+    private var editorFontFamilySelection: Binding<String> {
+        Binding(
+            get: { effectiveFonts.editorFamily },
+            set: { newValue in
+                saveFontSettings { $0.editorFamily = newValue }
+            }
+        )
+    }
+
+    private var editorFontSizeSelection: Binding<Double> {
+        Binding(
+            get: { effectiveFonts.editorSize },
+            set: { newValue in
+                saveFontSettings { $0.editorSize = newValue }
+            }
+        )
+    }
+
+    private var terminalFontFamilySelection: Binding<String> {
+        Binding(
+            get: { effectiveFonts.terminalFamily },
+            set: { newValue in
+                saveFontSettings { $0.terminalFamily = newValue }
+            }
+        )
+    }
+
+    private var terminalFontSizeSelection: Binding<Double> {
+        Binding(
+            get: { effectiveFonts.terminalSize },
+            set: { newValue in
+                saveFontSettings { $0.terminalSize = newValue }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func appearanceRow<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        GridRow {
+            Text(title)
+                .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
+                .foregroundStyle(dracula(.comment))
+                .frame(width: 130, alignment: .trailing)
+
+            content()
+                .frame(maxWidth: 380, alignment: .leading)
+        }
+    }
+
+    private func fontFamilyPicker(
+        label: String,
+        selection: Binding<String>,
+        options: [(value: String, label: String)]
+    ) -> some View {
+        Picker(label, selection: selection) {
+            ForEach(options, id: \.value) { option in
+                Text(option.label).tag(option.value)
+            }
+        }
+        .pickerStyle(.menu)
+        .accessibilityLabel(label)
+    }
+
+    private func fontSizeStepper(
+        label: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>
+    ) -> some View {
+        Stepper(value: value, in: range, step: 1) {
+            Text("\(Int(value.wrappedValue.rounded())) pt")
+                .font(fonts.interfaceFont(sizeOffset: -1))
+                .foregroundStyle(dracula(.foreground))
+        }
+        .accessibilityLabel(label)
+    }
+
+    private func fontFamilyOptions(pinned: [(value: String, label: String)]) -> [(String, String)] {
+        let pinnedValues = Set(pinned.map(\.value))
+        return pinned
+            + installedFontFamilies
+            .filter { !pinnedValues.contains($0) }
+            .map { ($0, $0) }
     }
 
     private func loadIfNeeded() {
@@ -884,6 +1069,25 @@ private struct SettingsEditorView: View {
             selectedThemeID = configuration.resolvedTheme.id
             validationError = "YAML validation failed: \(error)"
             statusMessage = "Theme was not changed."
+        }
+    }
+
+    private func saveFontSettings(_ mutate: (inout FontSettings) -> Void) {
+        do {
+            var nextConfiguration = try onValidateText(editorText)
+            mutate(&nextConfiguration.fonts)
+            nextConfiguration = nextConfiguration.validated()
+            let renderedText = YAMLConfigurationStore.render(nextConfiguration)
+            _ = try onSaveText(renderedText)
+            editorText = renderedText
+            lastSavedText = renderedText
+            currentConfiguration = nextConfiguration
+            selectedThemeID = nextConfiguration.resolvedTheme.id
+            validationError = nil
+            statusMessage = "Font settings saved and applied."
+        } catch {
+            validationError = "YAML validation failed: \(error)"
+            statusMessage = "Font settings were not changed."
         }
     }
 
