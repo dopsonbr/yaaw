@@ -1,6 +1,7 @@
 .build/
 .swiftpm/
 .pages/
+.understand-anything/
 _site/
 dist/
 .DS_Store
