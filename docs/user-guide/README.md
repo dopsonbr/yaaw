@@ -1,6 +1,6 @@
 # User Guide
 
-This guide describes the intended first-version workflow for YAAW - Yet Another Agent Wrapper.
+This guide describes the current workflow for YAAW - Yet Another Agent Wrapper.
 
 ## What The App Is For
 
@@ -12,7 +12,7 @@ YAAW has no telemetry. Projects, threads, settings, indexes, activity previews, 
 
 The app uses Dracula by default and supports built-in light, dark, and high-contrast themes across panels, terminals, file browsing, and editing surfaces.
 
-Settings are stored in an app-owned YAML file. Use the title-bar gear to inspect the current settings path, open the YAML file, or reload settings after editing it.
+Settings are stored in an app-owned YAML file. Use the title-bar gear to open Settings, change Appearance values, edit key bindings, inspect or edit the YAML file, save changes, reload from disk, revert unsaved edits, or open the YAML file externally.
 
 ## Main Screen
 
@@ -72,9 +72,9 @@ Pin important projects to keep them above unpinned projects. Drag project rows t
 
 ## Use The Agent CLI Session Terminal
 
-The agent CLI session terminal is the main working surface. It starts in the selected thread's working directory, runs the thread's bound user-installed local CLI agent session, and should behave like a native terminal because it is backed by `libghostty`.
+The agent CLI session terminal is the main working surface. It starts in the selected thread's working directory, runs the thread's bound user-installed local CLI agent session, and behaves like a native terminal because it is backed by `libghostty`.
 
-The MVP expectation is simple:
+Current behavior is:
 
 - One agent CLI session terminal per thread.
 - User-owned agent CLI and harness behavior remains inside that CLI process.
@@ -113,7 +113,7 @@ The bottom terminal is collapsed by default and scoped to the selected project t
 
 Press `Cmd+J` to toggle it.
 
-Use the bottom terminal for commands tied to the active project thread. Toggling or resizing it should not change the sidebar width, sidebar collapsed state, selected project, selected thread, or left-panel content.
+Use the bottom terminal for commands tied to the active project thread. Toggling or resizing it does not change the sidebar width, sidebar collapsed state, selected project, selected thread, or left-panel content.
 
 ## Browse Project Files
 
@@ -125,7 +125,7 @@ Use it to:
 - Find files by name.
 - Use fuzzy matching to narrow large file lists.
 
-When multiple threads use the same directory and Git branch, the file list can reuse the same app-owned cache. Switching between those threads should keep the file list available while YAAW refreshes it in the background.
+When multiple threads use the same directory and Git branch, the file list reuses the same app-owned SQLite cache. Switching between those threads keeps cached file entries available while YAAW refreshes them in the background.
 
 The file browser can be collapsed when it is not needed.
 
@@ -168,16 +168,16 @@ From Files mode, right-click a supported preview file and choose Open in Browser
 4. Open the file.
 5. The right tool panel switches to `nvim` and opens the selected file.
 
-The editor session runs inside the selected project's directory and stays in the right tool panel. YAAW tries `nvim` first, then `vim`, then `vi`. It should not open a separate app window for the MVP.
+The editor session runs inside the selected thread's working directory and stays in the right tool panel. YAAW tries `nvim` first, then `vim`, then `vi`. It does not open a separate app window.
 
 ## Open lazygit
 
 1. Select a project thread.
 2. Open the right tool panel.
 3. Click the Git mode icon or cycle tabs until Git is active.
-4. The right tool panel opens a terminal and starts `lazygit` in the selected project's directory.
+4. The right tool panel opens a terminal and starts `lazygit` in the selected thread's working directory.
 
-Use `lazygit` for focused Git tasks without leaving the app shell. If `lazygit` is unavailable, YAAW opens `git diff` in the same right-tool-panel terminal. The MVP should not open a separate terminal window for this flow.
+Use `lazygit` for focused Git tasks without leaving the app shell. If `lazygit` is unavailable, YAAW opens `git diff` in the same right-tool-panel terminal. This flow stays inside the right tool panel.
 
 ## Paste Images Into CLIs
 
@@ -191,7 +191,7 @@ Current and historical screenshots live under `docs/examples/screenshots/`. Pref
 
 Drag panel dividers to resize the workspace.
 
-The MVP panels that must resize are:
+The resizeable panels are:
 
 - Projects sidebar width.
 - Main agent CLI session terminal width.
@@ -266,8 +266,8 @@ Use Save to validate, write, and apply YAML changes. Reload re-reads the file fr
 12. Resize or collapse panels when you want more terminal or editor space.
 13. Archive the thread when the work is complete.
 
-## MVP Boundaries
+## Current Boundaries
 
-The first version should stay focused. Expect terminal-first CLI agent workflows, simple project/thread management, lightweight file browsing, isolated right-tool-panel WebKit previews, terminal-backed editor fallback through `nvim`, `vim`, or `vi`, external-open handoff to installed macOS apps, and Git workflows through `lazygit` or `git diff`. Current implementation paths cover `codex`, `claude`, `opencode`, and `copilot`, but YAAW treats them as user-provided tools rather than bundled agent runtimes.
+The current app stays focused on terminal-first CLI agent workflows, simple project/thread management, lightweight file browsing, isolated right-tool-panel WebKit previews, terminal-backed editor fallback through `nvim`, `vim`, or `vi`, external-open handoff to installed macOS apps, and Git workflows through `lazygit` or `git diff`. Current implementation paths cover `codex`, `claude`, `opencode`, and `copilot`, but YAAW treats them as user-provided tools rather than bundled agent runtimes.
 
 Use a full editor or external tools for advanced editing, source control management, debugging, or deep project analysis until those features are intentionally added.

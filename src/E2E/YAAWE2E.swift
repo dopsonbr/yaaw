@@ -579,6 +579,45 @@ private final class E2ERunner {
             model.archivedThreadsForSelectedProject.contains { $0.id == claudeThreadID },
             "archive moved the claude thread")
 
+        try assertAgentCLIMetadataCapture()
+
+        let reloadedModel = try makeModel(databasePath: databasePath)
+        try assert(
+            reloadedModel.selectedThread?.id == codexThreadID,
+            "relaunch preserved selected codex thread")
+        try assert(
+            reloadedModel.selectedThread?.sessionIdentity == "codex-e2e-001",
+            "relaunch preserved codex session identity")
+        try assert(
+            reloadedModel.layoutState.sidebarWidth == 320,
+            "relaunch preserved resized sidebar width")
+        try assert(
+            reloadedModel.layoutState.rightPanelWidth == 960,
+            "relaunch preserved resized right panel width")
+        try assert(
+            reloadedModel.layoutState.isWorkspaceSwapped,
+            "relaunch preserved swapped main and right panels")
+        try assert(
+            reloadedModel.layoutState.globalTerminalHeight == 240,
+            "relaunch preserved resized bottom terminal height"
+        )
+        let resumedRequest = try unwrap(
+            reloadedModel.activateSelectedProjectTerminal(), "resumed project terminal exists")
+        let resumedCommand = resumedRequest.request.command.joined(separator: " ")
+        try assert(
+            resumedCommand.contains("resume")
+                && resumedCommand.contains("codex-e2e-001"),
+            "reopened codex thread resumed the stored session identity"
+        )
+
+        return FocusedBehaviorResult(
+            databasePath: databasePath,
+            codexThreadID: codexThreadID,
+            claudeThreadID: claudeThreadID
+        )
+    }
+
+    private func assertAgentCLIMetadataCapture() throws {
         let service = makeAgentCLIService()
         let freshCodexMetadata = try service.captureMetadataByRunningCLI(
             kind: .codex,
@@ -617,41 +656,6 @@ private final class E2ERunner {
         try assert(
             resumedCopilotMetadata.canonicalName == "Copilot Resumed copilot-e2e-001",
             "copilot command double reported deterministic resume metadata"
-        )
-
-        let reloadedModel = try makeModel(databasePath: databasePath)
-        try assert(
-            reloadedModel.selectedThread?.id == codexThreadID,
-            "relaunch preserved selected codex thread")
-        try assert(
-            reloadedModel.selectedThread?.sessionIdentity == "codex-e2e-001",
-            "relaunch preserved codex session identity")
-        try assert(
-            reloadedModel.layoutState.sidebarWidth == 320,
-            "relaunch preserved resized sidebar width")
-        try assert(
-            reloadedModel.layoutState.rightPanelWidth == 960,
-            "relaunch preserved resized right panel width")
-        try assert(
-            reloadedModel.layoutState.isWorkspaceSwapped,
-            "relaunch preserved swapped main and right panels")
-        try assert(
-            reloadedModel.layoutState.globalTerminalHeight == 240,
-            "relaunch preserved resized bottom terminal height"
-        )
-        let resumedRequest = try unwrap(
-            reloadedModel.activateSelectedProjectTerminal(), "resumed project terminal exists")
-        let resumedCommand = resumedRequest.request.command.joined(separator: " ")
-        try assert(
-            resumedCommand.contains("resume")
-                && resumedCommand.contains("codex-e2e-001"),
-            "reopened codex thread resumed the stored session identity"
-        )
-
-        return FocusedBehaviorResult(
-            databasePath: databasePath,
-            codexThreadID: codexThreadID,
-            claudeThreadID: claudeThreadID
         )
     }
 

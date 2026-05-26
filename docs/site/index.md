@@ -8,8 +8,8 @@ title: YAAW
     <h1>YAAW</h1>
     <p class="hero-copy">
       Yet Another Agent Wrapper gives user-owned agent CLIs a native desktop
-      workspace: projects, threads, libghostty terminal surfaces, local files,
-      nvim, lazygit, and a Dracula-first interface.
+      workspace: projects, threads, libghostty terminal surfaces, shared local
+      file indexing, Browser previews, nvim, lazygit, and configurable settings.
     </p>
     <div class="actions">
       <a class="button primary" href="{{ '/docs/user-guide/' | relative_url }}">Open the user guide</a>
@@ -37,19 +37,23 @@ title: YAAW
   <div class="feature-grid">
     <div class="feature">
       <strong>Thread-bound terminals</strong>
-      <p>Each thread owns one agent CLI terminal, working directory, and resume identity.</p>
+      <p>Each thread owns one agent CLI terminal, working directory, activity state, and resume identity.</p>
     </div>
     <div class="feature">
       <strong>Local-first storage</strong>
-      <p>Projects, indexes, activity previews, settings, and diagnostics stay on device.</p>
+      <p>Projects, shared indexes, activity previews, settings, and diagnostics stay on device.</p>
+    </div>
+    <div class="feature">
+      <strong>Browser previews</strong>
+      <p>The right panel previews URLs and supported local files, including Markdown with Mermaid diagrams.</p>
     </div>
     <div class="feature">
       <strong>Terminal-backed tools</strong>
       <p>The right panel launches nvim, vim, vi, lazygit, or git diff without building custom clones.</p>
     </div>
     <div class="feature">
-      <strong>Dracula by default</strong>
-      <p>The visual system starts with Dracula and extends it across panels, sheets, and terminal surfaces.</p>
+      <strong>Configurable surfaces</strong>
+      <p>Appearance, fonts, key bindings, external-open targets, agents, tools, and ignore rules live in app-owned YAML.</p>
     </div>
   </div>
 </section>

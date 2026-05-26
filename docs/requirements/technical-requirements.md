@@ -320,7 +320,7 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 - The right-side area can be resized across the available workspace up to the projects sidebar boundary.
 - The swapped main/right layout persists across relaunch.
 - The right tool panel is scoped to the active thread.
-- The right tool panel can switch between Files, `nvim`, and Git.
+- The right tool panel can switch between Files, Browser, `nvim`, and Git.
 - `Cmd+Shift+[` and `Cmd+Shift+]` cycle right-panel modes.
 - `Cmd+[` and `Cmd+]` perform global back/forward navigation.
 - Hidden files appear in the file browser by default.

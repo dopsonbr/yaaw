@@ -92,8 +92,12 @@ public final class AgentTerminalProcess: @unchecked Sendable {
         var envp = environmentStorage + [nil]
         let cwd = strdup(workingDirectory.path)
         defer {
-            argvStorage.forEach { free($0) }
-            environmentStorage.forEach { free($0) }
+            for argument in argvStorage {
+                free(argument)
+            }
+            for environmentEntry in environmentStorage {
+                free(environmentEntry)
+            }
             free(cwd)
         }
 

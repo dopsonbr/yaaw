@@ -6,7 +6,7 @@ YAAW is not an agent harness itself. It does not orchestrate agents, rewrite pro
 
 YAAW has no telemetry. App state, settings, indexes, activity previews, and diagnostics stay local on the user's device. Anything that leaves the device is between the user and the agent CLI or CLI harness they chose to run.
 
-The first implementation stays small: it gives users a project list, one active thread at a time, one managed agent CLI session terminal per thread, and a collapsible right tool panel for files, Browser previews, `nvim`/`vim`/`vi`, and `lazygit`/`git diff`. Current code paths cover `codex`, `claude`, `opencode`, and `copilot`.
+The current app gives users a project/thread sidebar, one managed agent CLI session terminal per thread, a collapsed-by-default bottom terminal, and a swappable right tool panel for files, Browser previews, `nvim`/`vim`/`vi`, and `lazygit`/`git diff`. Current code paths cover `codex`, `claude`, `opencode`, and `copilot`.
 
 ## Install
 
@@ -30,22 +30,22 @@ The release installer downloads the latest `YAAW-*-macos-arm64.zip` asset, insta
 - Provide a selected-thread bottom terminal that starts collapsed and can be toggled with `Cmd+J`.
 - Use `libghostty` for embedded terminal rendering and terminal behavior.
 - Use Dracula by default and keep built-in theme switching consistent across every app surface.
-- Show files for the selected project in a collapsible right tool panel.
-- Preview supported local files and typed URLs in an isolated right-panel Browser mode.
+- Show files for the selected thread's working directory in a collapsible right tool panel.
+- Preview supported local files and typed URLs in an isolated right-panel Browser mode, including Markdown with Mermaid diagram rendering.
 - Open selected files in `nvim` inside the right panel, falling back to `vim` and then `vi`.
 - Open `lazygit` in a terminal inside the right panel, falling back to `git diff` when `lazygit` is unavailable.
 - Switch the right panel between Files, Browser, Git, and `nvim` by cycling tabs or clicking mode icons.
-- Support fuzzy matching in the file browser.
-- Provide a title-bar settings gear for the app-owned YAML settings editor.
+- Support fuzzy matching and durable shared file-index caching in the file browser.
+- Provide a title-bar settings gear for app-owned Appearance, Key Bindings, and YAML settings.
 - Let users configure built-in theme, icon pack, fonts, key bindings, external-open destinations, agent commands, editor fallbacks, Git command, and file indexing ignore rules through YAML-backed settings.
 - Surface thread activity states and sanitized notification previews without storing terminal scrollback.
 - Open selected projects and files in installed external editors, Finder, Terminal, Ghostty, Xcode, or WebStorm.
-- Make every major panel resizeable.
+- Make every major panel resizeable and persist layout state.
 - Allow old or completed threads to be archived.
 
 ## Visual Theme
 
-The app uses Dracula as the default theme and supports built-in light, dark, and high-contrast themes. All primary surfaces, including sidebars, terminals, file browser, `nvim` editor panel, `lazygit` panel, modal sheets, dividers, and selection states, should use the selected theme palette.
+The app uses Dracula as the default theme and supports built-in light, dark, and high-contrast themes. Primary surfaces, including sidebars, terminals, file browser, `nvim` editor panel, `lazygit` panel, modal sheets, dividers, and selection states, use the selected theme palette.
 
 | Role | Color |
 | --- | --- |
@@ -63,7 +63,7 @@ The app uses Dracula as the default theme and supports built-in light, dark, and
 
 Reference: [dracula/dracula-theme](https://github.com/dracula/dracula-theme).
 
-## MVP Layout
+## Current Layout
 
 The app has three primary regions:
 
@@ -84,7 +84,7 @@ The app has three primary regions:
 3. **Right tool panel**
    - Collapsible.
    - Resizeable.
-   - Shows files for the selected project directory.
+   - Shows files for the selected thread working directory.
    - Supports fuzzy matching for quickly finding files.
    - Opens supported preview files and typed URLs in isolated Browser mode.
    - Opens selected files in `nvim` inside the same right panel.
@@ -121,15 +121,15 @@ The bottom terminal is scoped to the selected thread and uses that thread's work
 
 ### Right Tool Panel
 
-The right tool panel shows files for the selected project and provides lightweight local tools. It should stay small: file tree, fuzzy matching, isolated Browser previews, `nvim` file open behavior, and `lazygit` are enough for the first version.
+The right tool panel shows files for the selected thread working directory and provides lightweight local tools: file tree, fuzzy matching, isolated Browser previews, `nvim` file open behavior, and Git mode through `lazygit` or `git diff`.
 
-When a file is opened, the right panel changes from browse mode to editor mode and launches `nvim` for that file in the selected project's directory. If `nvim` is unavailable, YAAW falls back to `vim` and then `vi`. The panel remains part of the app layout instead of opening a separate editor window.
+When a file is opened, the right panel changes from browse mode to editor mode and launches `nvim` for that file in the selected thread's working directory. If `nvim` is unavailable, YAAW falls back to `vim` and then `vi`. The panel remains part of the app layout instead of opening a separate editor window.
 
-When the Git mode is opened, the right panel launches `lazygit` in the selected project's directory. If `lazygit` is unavailable, YAAW falls back to `git diff`. This gives users a focused Git terminal UI without building custom source control screens.
+When the Git mode is opened, the right panel launches `lazygit` in the selected thread's working directory. If `lazygit` is unavailable, YAAW falls back to `git diff`. This gives users a focused Git terminal UI without building custom source control screens.
 
 When an agent terminal has focus, `Cmd+V` can paste text through the normal terminal path or attach an image from the pasteboard. Image paste sends the terminal's native attachment shortcut without inserting a visible filesystem path. `Ctrl+V` uses the same native image attach path when the terminal has focus.
 
-User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml` by default. The title-bar gear opens a lightweight settings sheet with actions to open and reload that YAML file.
+User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml` by default. The title-bar gear opens Settings with Appearance controls, a searchable key binding editor, the raw YAML editor, and Save, Reload, Revert, and Open External actions.
 
 Users can switch right-panel modes by cycling tabs or clicking mode icons:
 
@@ -140,26 +140,30 @@ Users can switch right-panel modes by cycling tabs or clicking mode icons:
 
 ### Resizeable Panels
 
-Every major panel should be resizeable through native split-view handles:
+Every major panel is resizeable through native split-view handles:
 
 - Sidebar width.
 - Main agent CLI session terminal width.
-- Right tool panel width.
+- Right-side area width.
 - Bottom terminal height when expanded.
 
-Panel sizes should persist per app workspace unless that adds too much implementation complexity for the first cut. If persistence is deferred, resize behavior itself remains required.
+Panel sizes, collapsed states, and the main/right swap state are persisted in app-owned storage.
 
-## Initial Feature Set
+## Current Feature Set
 
-| Area | MVP behavior |
+| Area | Current behavior |
 | --- | --- |
 | Projects | Create a project from a local directory, name it, and list it in the sidebar. |
-| Threads | Create, select, resume, and archive CLI agent sessions under a project. |
+| Threads | Create, select, rename when supported, pin, resume, and archive CLI agent sessions under a project. |
 | Terminals | One `libghostty` agent CLI session terminal per thread. One collapsed selected-thread bottom terminal. |
-| Theme | Dracula across all panels, terminals, modals, and selection states. |
-| Sidebar | Collapsible and resizeable project/thread navigation. |
-| Right tool panel | Collapsible and resizeable Files, Browser, `nvim`, and Git modes with fuzzy file matching. |
-| Archive | Move inactive threads out of the main project list. |
+| Theme | Dracula by default, with built-in light, dark, and high-contrast themes. |
+| Sidebar | Collapsible and resizeable nested project/thread navigation with pinning, reordering, expansion state, and a global archive. |
+| Right tool panel | Collapsible, resizeable, and swappable Files, Browser, `nvim`, and Git modes with fuzzy file matching. |
+| Files | Background indexing, hidden files by default, heavy-directory ignores, shared SQLite cache by directory and Git identity, and path copy actions. |
+| Browser | Isolated WebKit previews for typed URLs and supported local files, including Markdown and Mermaid diagrams. |
+| External open | Open projects or files in configured editors, Finder, Terminal, Ghostty, Xcode, or WebStorm. |
+| Settings | App-owned YAML plus in-app Appearance and Key Bindings editors. |
+| Activity | Thread activity indicators, sanitized previews, helper-driven notifications, unread state, and local persistence. |
 
 ## Current Screenshot
 
@@ -180,25 +184,23 @@ Additional Dracula-themed example pages are available under `docs/examples/scree
 - [Right panel lazygit mode](docs/examples/screenshots/right-panel-lazygit-mode-dracula.png)
 - [Right panel mode switcher](docs/examples/screenshots/right-panel-mode-switcher-dracula.png)
 
-## Suggested Implementation Direction
+## Implementation Notes
 
-- Build the shell as a native macOS app.
-- Use SwiftUI for high-level layout where it fits naturally.
-- Use AppKit where lower-level windowing, focus, terminal embedding, or split-view behavior needs more control.
-- Embed terminals through `libghostty`.
-- Treat agent CLIs and CLI harnesses as user-owned executables resolved from settings or `PATH`; YAAW should launch and resume them, not reimplement them.
-- Launch `nvim`, `vim`, or `vi` in the right panel for file editing rather than building a custom editor for the MVP.
-- Launch `lazygit`, with `git diff` fallback, in the right panel for Git workflows rather than building a custom source control UI for the MVP.
-- Persist project, thread, selected agent CLI, and CLI session identity metadata locally.
+- The app shell is a native macOS Swift package targeting current macOS on Apple Silicon.
+- SwiftUI owns high-level layout and controls; AppKit is used where terminal embedding, focus, split-view behavior, or window control needs it.
+- Embedded terminals use `libghostty`.
+- Agent CLIs and CLI harnesses are user-owned executables resolved from settings or `PATH`; YAAW launches and resumes them instead of reimplementing them.
+- File editing launches `nvim`, `vim`, or `vi` in the right panel.
+- Git mode launches `lazygit`, with `git diff` fallback, in the right panel.
+- Project, thread, selected agent CLI, CLI session identity, layout, activity, and index metadata are persisted locally.
 - Treat the selected agent CLI, CLI session identity, terminal process, and working directory as part of the thread model.
 - Treat panel dimensions as first-class layout state.
-- Keep file indexing shallow and responsive for the MVP; add deeper indexing later only if needed.
+- Keep file indexing read-only, backgrounded, and cacheable in app-owned SQLite.
 
-## Non-Goals For The First Version
+## Non-Goals
 
 - Agent harness behavior.
 - Bundled agent runtime, hosted agent service, or replacement agent CLI.
-- Multi-agent orchestration.
 - Prompt or tool-call mediation.
 - Full code editor features.
 - Custom text editor implementation.
@@ -209,9 +211,9 @@ Additional Dracula-themed example pages are available under `docs/examples/scree
 - Multi-agent orchestration beyond one bound CLI agent session per thread.
 - Deep semantic code indexing.
 
-## Open Design Questions
+## Architecture Decisions
 
-These are tracked as decision records under [`docs/decisions/`](docs/decisions/). Each record names a recommended default the implementation plans assume until the decision is finalized.
+Project-level architecture decisions are tracked under [`docs/decisions/`](docs/decisions/). They document defaults the implementation follows and the tradeoffs to revisit if requirements change.
 
 - [001 — Archived Thread Scrollback Retention](docs/decisions/001-archived-thread-scrollback.md)
 - [002 — Project Metadata Location](docs/decisions/002-project-metadata-location.md)
