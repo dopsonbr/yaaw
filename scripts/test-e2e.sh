@@ -37,6 +37,16 @@ terminate_e2e_app() {
   done < <(running_e2e_app_pids)
 }
 
+wait_for_process_exit() {
+  for _ in {1..80}; do
+    if [[ -z "$(running_e2e_app_pids)" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 SCREENSHOT_DIR="$ARTIFACT_DIR/screenshots"
 SCREENSHOT_BLOCKER="$SCREENSHOT_DIR/SCREENSHOT_BLOCKER.md"
 mkdir -p "$SCREENSHOT_DIR"
@@ -80,6 +90,47 @@ tell application "System Events"
   error "$APP_NAME did not expose a window"
 end tell
 APPLESCRIPT
+}
+
+report_window_launch_failure() {
+  local context="$1"
+  echo "$APP_NAME did not expose a window for $context" >&2
+  local pids
+  pids="$(running_e2e_app_pids | tr '\n' ' ')"
+  if [[ -n "$pids" ]]; then
+    echo "Running $APP_NAME pids: $pids" >&2
+    ps -axo pid=,stat=,comm=,args= | awk -v app_binary="$APP_BINARY" '
+      $1 ~ /^[0-9]+$/ && $3 == app_binary {
+        print
+      }
+    ' >&2 || true
+  else
+    echo "No running $APP_NAME process found after launch attempts." >&2
+  fi
+}
+
+launch_e2e_app() {
+  local database_path="$1"
+  local app_path="${2:-$ARTIFACT_DIR/bin:$PATH}"
+  local context="${3:-app launch}"
+
+  terminate_e2e_app
+  wait_for_process_exit || true
+  set_launch_environment "$database_path" "$app_path"
+
+  for attempt in 1 2 3; do
+    /usr/bin/open -n "$APP_BUNDLE"
+    if wait_for_window; then
+      return 0
+    fi
+    echo "$APP_NAME launch attempt $attempt did not expose a window for $context" >&2
+    terminate_e2e_app
+    wait_for_process_exit || true
+    sleep "$attempt"
+  done
+
+  report_window_launch_failure "$context"
+  return 1
 }
 
 assert_no_privacy_prompts() {
@@ -218,20 +269,10 @@ launch_state() {
   local screenshot_path="$SCREENSHOT_DIR/$state.png"
   local log_path="$ARTIFACT_DIR/$state.app.log"
 
-  terminate_e2e_app
   : >"$log_path"
-  set_launch_environment "$database_path" "$app_path"
-  /usr/bin/open -n "$APP_BUNDLE"
-
-  if ! wait_for_window; then
-    terminate_e2e_app
-    sleep 1
-    /usr/bin/open -n "$APP_BUNDLE"
-    if ! wait_for_window; then
-      echo "$APP_NAME did not stay running for visual state $state" >&2
-      sed -n '1,120p' "$log_path" >&2 || true
-      return 1
-    fi
+  if ! launch_e2e_app "$database_path" "$app_path" "visual state $state"; then
+    sed -n '1,120p' "$log_path" >&2 || true
+    return 1
   fi
 
   if [[ "$state" == "missing-tool" ]]; then
@@ -272,16 +313,6 @@ wait_for_sql_value() {
   done
 
   echo "$APP_NAME expected $label to be '$expected' but saw '$value'" >&2
-  return 1
-}
-
-wait_for_process_exit() {
-  for _ in {1..80}; do
-    if [[ -z "$(running_e2e_app_pids)" ]]; then
-      return 0
-    fi
-    sleep 0.1
-  done
   return 1
 }
 
@@ -401,12 +432,9 @@ run_workspace_shortcut_probe() {
   local selected_tab_query="SELECT COALESCE((SELECT selected_tab_id FROM right_panel_tab_state ORDER BY thread_id LIMIT 1), '');"
   local bottom_terminal_query="SELECT COALESCE((SELECT is_expanded FROM bottom_terminal_state ORDER BY thread_id LIMIT 1), 0);"
 
-  terminate_e2e_app
   cp "$ARTIFACT_DIR/states/launch.sqlite" "$database_path"
   sqlite3 "$database_path" "DELETE FROM bottom_terminal_state; UPDATE right_panel_modes SET mode = 'files'; UPDATE right_panel_tab_state SET selected_tab_id = 'files';"
-  set_launch_environment "$database_path"
-  /usr/bin/open -n "$APP_BUNDLE"
-  wait_for_window
+  launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "workspace shortcut probe"
   assert_no_privacy_prompts "workspace shortcut probe"
   focus_workspace_terminal
 
@@ -438,11 +466,8 @@ run_workspace_shortcut_probe() {
     return 1
   }
 
-  terminate_e2e_app
   sqlite3 "$database_path" "UPDATE right_panel_modes SET mode = 'files'; UPDATE right_panel_tab_state SET selected_tab_id = 'files';"
-  set_launch_environment "$database_path"
-  /usr/bin/open -n "$APP_BUNDLE"
-  wait_for_window
+  launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "workspace shortcut cycling probe"
   assert_no_privacy_prompts "workspace shortcut cycling probe"
   focus_workspace_terminal
 
@@ -468,10 +493,7 @@ run_workspace_shortcut_probe() {
     return 1
   fi
 
-  terminate_e2e_app
-  set_launch_environment "$database_path"
-  /usr/bin/open -n "$APP_BUNDLE"
-  wait_for_window
+  launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "workspace Cmd+Q probe"
   assert_no_privacy_prompts "workspace Cmd+Q probe"
   focus_workspace_terminal
   send_command_shortcut "q"
@@ -488,12 +510,9 @@ run_keyboard_input_probe() {
   local expected="keyboardprobeenter"
   local screenshot_path="$SCREENSHOT_DIR/keyboard-input.png"
 
-  terminate_e2e_app
-  set_launch_environment "$database_path"
   launchctl setenv YAAW_E2E_KEYBOARD_PROBE "1"
   rm -f "$ARTIFACT_DIR/captures"/*.log
-  /usr/bin/open -n "$APP_BUNDLE"
-  wait_for_window
+  launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "keyboard input probe"
   assert_no_privacy_prompts "keyboard input probe"
   for _ in {1..80}; do
     if grep -R "YAAW_KEYBOARD_PROBE_READY" "$ARTIFACT_DIR/captures" >/dev/null 2>&1; then
@@ -546,10 +565,7 @@ run_settings_editor_probe() {
   local database_path="$ARTIFACT_DIR/states/settings-editor.sqlite"
   local screenshot_path="$SCREENSHOT_DIR/settings-editor.png"
 
-  terminate_e2e_app
-  set_launch_environment "$database_path"
-  /usr/bin/open -n "$APP_BUNDLE"
-  wait_for_window
+  launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "settings editor"
   assert_no_privacy_prompts "settings editor"
 
   if ! osascript <<APPLESCRIPT >/dev/null
