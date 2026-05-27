@@ -6,6 +6,7 @@ public enum AppModelError: Error, Equatable {
     case emptyThreadName
     case missingProjectDirectory(String)
     case selectedProjectMissing
+    case projectRequiredForThreadCreation
     case missingAgentCLI
     case threadNotFound
     case agentCLIChangeNotAllowed
@@ -100,13 +101,29 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.notificationDispatcher = notificationDispatcher
         self.badgeUpdater = badgeUpdater
         self.isApplicationActive = isApplicationActive
-        self.configuration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
+        let validatedConfiguration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
+        self.configuration = validatedConfiguration
         self.environment = environment
         self.homeDirectory = homeDirectory
         let snapshot = store.load()
+        let globalChatsDirectory = Self.globalChatsDirectory(
+            for: validatedConfiguration,
+            homeDirectory: homeDirectory
+        )
+        Self.ensureGlobalChatsDirectoryExists(
+            globalChatsDirectory,
+            diagnosticRecorder: diagnosticRecorder
+        )
+        let loadedProjects = snapshot.projects.map { project in
+            guard Self.isGlobalProject(project) else { return project }
+            var project = project
+            project.rootDirectory = globalChatsDirectory
+            return project
+        }
+        let sortedProjects = Self.sortedProjects(loadedProjects)
         let requiresLinks =
             requiresSessionLinkForLoadedUnboundThreads ?? (store is SQLiteYAAWStore)
-        self.projects = Self.sortedProjects(snapshot.projects)
+        self.projects = sortedProjects
         self.threads = snapshot.threads
         self.sessionLinkRequiredThreadIDs = []
         self.fileIndexMetadataByThreadID = snapshot.fileIndexMetadataByThreadID
@@ -127,14 +144,31 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         for projectID in cachedArchivedThreadsByProject.keys {
             cachedArchivedThreadsByProject[projectID]?.sort(by: Self.threadPrecedes)
         }
+        let fallbackProjectID =
+            sortedProjects.first { !Self.isGlobalProject($0) }?.id
+            ?? sortedProjects[0].id
         let selectedProjectID =
-            snapshot.projects.contains { $0.id == snapshot.selectedProjectID }
+            sortedProjects.contains { $0.id == snapshot.selectedProjectID }
             ? snapshot.selectedProjectID
-            : snapshot.projects[0].id
-        let selectedThreadID =
-            snapshot.threads.contains { $0.id == snapshot.selectedThreadID }
-            ? snapshot.selectedThreadID
-            : snapshot.threads.first { $0.projectID == selectedProjectID && !$0.isArchived }?.id
+            : fallbackProjectID
+        let selectedProjectIsGlobal =
+            sortedProjects.first { $0.id == selectedProjectID }.map {
+                Self.isGlobalProject($0)
+            } ?? false
+        let selectedThreadID: UUID?
+        if selectedProjectIsGlobal {
+            selectedThreadID = nil
+        } else if let snapshotSelectedThreadID = snapshot.selectedThreadID,
+            let selectedThread = snapshot.threads.first(where: { $0.id == snapshotSelectedThreadID }
+            ),
+            selectedThread.projectID == selectedProjectID,
+            !selectedThread.isArchived
+        {
+            selectedThreadID = snapshotSelectedThreadID
+        } else {
+            selectedThreadID =
+                snapshot.threads.first { $0.projectID == selectedProjectID && !$0.isArchived }?.id
+        }
         self.selectedProjectID = selectedProjectID
         self.selectedThreadID = selectedThreadID
         var expandedProjectIDs = snapshot.expandedProjectIDs
@@ -183,6 +217,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "thread_count": "\(threads.count)",
             ]
         )
+        reconcileGlobalProjectDirectory()
     }
 
     public var selectedThread: AgentThread? {
@@ -321,8 +356,90 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         cachedActiveThreadsByProject[projectID]?.first?.id
     }
 
+    private static func globalChatsDirectory(
+        for configuration: YAAWConfiguration,
+        homeDirectory: URL
+    ) -> URL {
+        configuration.projects.resolvedGlobalChatsDirectory(homeDirectory: homeDirectory)
+    }
+
+    private static func ensureGlobalChatsDirectoryExists(
+        _ directory: URL,
+        diagnosticRecorder: DiagnosticEventRecording?
+    ) {
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            diagnosticRecorder?.record(
+                DiagnosticEvent(
+                    category: "Projects",
+                    name: "global_chats_directory_create_failed",
+                    metadata: [
+                        "path": directory.path,
+                        "error": String(describing: error),
+                    ]
+                )
+            )
+        }
+    }
+
+    private static func isGlobalProject(_ project: Project) -> Bool {
+        project.displayName == "Global"
+    }
+
+    private func isGlobalProject(_ project: Project) -> Bool {
+        Self.isGlobalProject(project)
+    }
+
+    private var globalChatsDirectory: URL {
+        Self.globalChatsDirectory(for: configuration, homeDirectory: homeDirectory)
+    }
+
+    private func ensureGlobalChatsDirectoryExists() {
+        Self.ensureGlobalChatsDirectoryExists(
+            globalChatsDirectory,
+            diagnosticRecorder: diagnosticRecorder
+        )
+    }
+
+    private func reconcileGlobalProjectDirectory(previousGlobalChatsDirectory: URL? = nil) {
+        let directory = globalChatsDirectory
+        ensureGlobalChatsDirectoryExists()
+        var didChange = false
+        for index in projects.indices where isGlobalProject(projects[index]) {
+            let previousPath = projects[index].rootDirectory.standardizedFileURL.path
+            guard previousPath != directory.standardizedFileURL.path else { continue }
+            projects[index].rootDirectory = directory
+            persistProject(projects[index])
+            didChange = true
+        }
+        if didChange {
+            projects = Self.sortedProjects(projects)
+            if let selectedProject = selectedProject, isGlobalProject(selectedProject) {
+                selectedThreadID = nil
+                persistSelection()
+            }
+            recordDiagnostic(
+                category: "Projects",
+                name: "global_chats_directory_updated",
+                metadata: [
+                    "path": directory.path,
+                    "previous_path": previousGlobalChatsDirectory?.path ?? "",
+                ]
+            )
+        }
+    }
+
     private static func sortedProjects(_ projects: [Project]) -> [Project] {
         projects.sorted { lhs, rhs in
+            let lhsIsGlobal = isGlobalProject(lhs)
+            let rhsIsGlobal = isGlobalProject(rhs)
+            if lhsIsGlobal != rhsIsGlobal {
+                return !lhsIsGlobal && rhsIsGlobal
+            }
             if lhs.isPinned != rhs.isPinned {
                 return lhs.isPinned && !rhs.isPinned
             }
@@ -381,7 +498,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func reloadConfiguration(_ configuration: YAAWConfiguration) {
+        let previousGlobalChatsDirectory = globalChatsDirectory
         self.configuration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
+        reconcileGlobalProjectDirectory(previousGlobalChatsDirectory: previousGlobalChatsDirectory)
         activeProjectLaunchDescriptorsByThreadID.removeAll()
         activityPartialLinesByThreadID.removeAll()
         recordDiagnostic(
@@ -1347,11 +1466,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         now: Date = Date()
     ) throws -> UUID {
         let agentCLI = agentCLI ?? configuration.defaultAgentCLI
+        let isImplicitProjectSelection = projectID == nil
         let resolvedProjectID = projectID ?? selectedProjectID
         guard let project = projects.first(where: { $0.id == resolvedProjectID }) else {
             throw AppModelError.selectedProjectMissing
         }
-        let resolvedWorkingDirectory = workingDirectory ?? project.rootDirectory
+        if isImplicitProjectSelection, isGlobalProject(project) {
+            throw AppModelError.projectRequiredForThreadCreation
+        }
+        if isGlobalProject(project) {
+            ensureGlobalChatsDirectoryExists()
+        }
+        let resolvedWorkingDirectory =
+            workingDirectory
+            ?? (isGlobalProject(project) ? globalChatsDirectory : project.rootDirectory)
         guard isExistingDirectory(resolvedWorkingDirectory) else {
             throw AppModelError.missingProjectDirectory(resolvedWorkingDirectory.path)
         }
@@ -1654,11 +1782,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     public func selectProject(id projectID: UUID) {
-        guard projects.contains(where: { $0.id == projectID }) else { return }
+        guard let project = projects.first(where: { $0.id == projectID }) else { return }
         guard selectedProjectID != projectID else { return }
         markProjectOpened(projectID)
         selectedProjectID = projectID
-        selectedThreadID = firstActiveThreadID(forProject: projectID)
+        selectedThreadID =
+            isGlobalProject(project) ? nil : firstActiveThreadID(forProject: projectID)
         expandedProjectIDs.insert(projectID)
         resetFileBrowserForSelectedThread()
         pushCurrentSelection()

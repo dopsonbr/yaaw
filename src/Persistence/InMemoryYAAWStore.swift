@@ -223,12 +223,14 @@ public final class InMemoryYAAWStore: YAAWStore {
         let projectID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let threadID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         let createdAt = Date(timeIntervalSince1970: 0)
-        let homeDirectory = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+        let globalChatsDirectory = ProjectSettings().resolvedGlobalChatsDirectory(
+            homeDirectory: homeDirectory)
 
         let project = Project(
             id: projectID,
             displayName: "Global",
-            rootDirectory: homeDirectory,
+            rootDirectory: globalChatsDirectory,
             createdAt: createdAt,
             lastOpenedAt: createdAt
         )
@@ -237,7 +239,7 @@ public final class InMemoryYAAWStore: YAAWStore {
             id: threadID,
             displayName: "Hello World",
             projectID: projectID,
-            workingDirectory: homeDirectory,
+            workingDirectory: globalChatsDirectory,
             createdAt: createdAt,
             lastOpenedAt: createdAt,
             isArchived: false

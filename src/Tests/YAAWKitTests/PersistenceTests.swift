@@ -960,6 +960,7 @@ final class PersistenceTests: XCTestCase {
 
         XCTAssertEqual(seeded.themeName, "dracula")
         XCTAssertEqual(seeded.defaultAgentCLI, .codex)
+        XCTAssertEqual(seeded.projects.globalChatsDirectory, "~/yaaw")
         XCTAssertEqual(seeded.fileIconPack, .material)
         XCTAssertEqual(seeded.fonts.interfaceFamily, "system")
         XCTAssertEqual(seeded.fonts.interfaceSize, 13)
@@ -972,6 +973,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(seeded.ignoreRules.contains("Music"))
         XCTAssertTrue(template.contains("# YAAW settings."))
         XCTAssertTrue(template.contains("# default: [nvim, vim, vi]"))
+        XCTAssertTrue(template.contains("globalChatsDirectory: \"~/yaaw\""))
         XCTAssertTrue(template.contains("fileBrowserPack: material-file-icons"))
         XCTAssertTrue(template.contains("# supported: light-2026, light-modern"))
         XCTAssertFalse(template.contains("only dracula is implemented"))
@@ -1003,6 +1005,8 @@ final class PersistenceTests: XCTestCase {
                 version: 1
                 agent:
                   default: claude
+                projects:
+                  globalChatsDirectory: ~/custom-yaaw
                 icons:
                   fileBrowserPack: catppuccin-file-icons
                 fonts:
@@ -1016,6 +1020,7 @@ final class PersistenceTests: XCTestCase {
         )
 
         XCTAssertEqual(configuration.defaultAgentCLI, .claude)
+        XCTAssertEqual(configuration.projects.globalChatsDirectory, "~/custom-yaaw")
         XCTAssertEqual(configuration.fileIconPack, .catppuccin)
         XCTAssertEqual(configuration.fonts.interfaceFamily, "Avenir Next")
         XCTAssertEqual(configuration.fonts.interfaceSize, 14.5)
@@ -1111,6 +1116,8 @@ final class PersistenceTests: XCTestCase {
             unknownTopLevel: ignored
             agent:
               default: claude
+            projects:
+              globalChatsDirectory: /tmp/yaaw-global
             theme:
               active: dracula
             icons:
@@ -1150,6 +1157,7 @@ final class PersistenceTests: XCTestCase {
         let reloaded = store.load()
 
         XCTAssertEqual(reloaded.defaultAgentCLI, .claude)
+        XCTAssertEqual(reloaded.projects.globalChatsDirectory, "/tmp/yaaw-global")
         XCTAssertEqual(reloaded.fileIconPack, .catppuccin)
         XCTAssertEqual(reloaded.fonts.interfaceFamily, "Avenir Next")
         XCTAssertEqual(reloaded.fonts.interfaceSize, 14)

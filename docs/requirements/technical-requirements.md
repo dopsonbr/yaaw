@@ -86,7 +86,10 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 ## Projects
 
 - A project MUST represent a named local directory.
-- The built-in `global` project MUST be scoped to the user's home directory.
+- The built-in `global` project MUST be scoped to a configurable global chats directory, defaulting to `~/yaaw`.
+- The app MUST create the configured global chats directory when it is missing.
+- The built-in `global` project MUST sort below user projects.
+- Startup and implicit new-thread actions MUST NOT open or create a global chat by default; the user MUST select a project or explicitly create a chat from the global project row.
 - Each project MUST have a stable id, display name, root directory, created timestamp, and last opened timestamp.
 - Each project MUST have durable pin state and manual sort order.
 - A project MAY have multiple threads.

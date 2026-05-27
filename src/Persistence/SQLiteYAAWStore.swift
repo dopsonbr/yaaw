@@ -1548,7 +1548,12 @@ extension SQLiteYAAWStore {
                 is_pinned,
                 sort_order
             FROM projects
-            ORDER BY is_pinned DESC, sort_order, created_at, display_name
+            ORDER BY
+                CASE WHEN display_name = 'Global' THEN 1 ELSE 0 END,
+                is_pinned DESC,
+                sort_order,
+                created_at,
+                display_name
             """
         )
         defer { sqlite3_finalize(statement) }

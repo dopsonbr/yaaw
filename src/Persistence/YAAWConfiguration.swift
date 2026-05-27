@@ -4,6 +4,7 @@ import Yams
 public struct YAAWConfiguration: Codable, Equatable, Sendable {
     public var version: Int
     public var agent: AgentSettings
+    public var projects: ProjectSettings
     public var theme: ThemeSettings
     public var icons: IconSettings
     public var fonts: FontSettings
@@ -14,6 +15,7 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
     public init(
         version: Int = 1,
         agent: AgentSettings = AgentSettings(),
+        projects: ProjectSettings = ProjectSettings(),
         theme: ThemeSettings = ThemeSettings(),
         icons: IconSettings = IconSettings(),
         fonts: FontSettings = FontSettings(),
@@ -23,6 +25,7 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
     ) {
         self.version = version
         self.agent = agent
+        self.projects = projects
         self.theme = theme
         self.icons = icons
         self.fonts = fonts
@@ -36,6 +39,9 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         self.version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
         self.agent =
             try container.decodeIfPresent(AgentSettings.self, forKey: .agent) ?? AgentSettings()
+        self.projects =
+            try container.decodeIfPresent(ProjectSettings.self, forKey: .projects)
+            ?? ProjectSettings()
         self.theme =
             try container.decodeIfPresent(ThemeSettings.self, forKey: .theme) ?? ThemeSettings()
         self.icons =
@@ -91,6 +97,7 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         var configuration = self
         configuration.version = max(configuration.version, 1)
         configuration.agent = configuration.agent.validated()
+        configuration.projects = configuration.projects.validated()
         configuration.theme = configuration.theme.validated(diagnosticRecorder: diagnosticRecorder)
         configuration.icons = configuration.icons.validated(diagnosticRecorder: diagnosticRecorder)
         configuration.fonts = configuration.fonts.validated()
@@ -127,6 +134,45 @@ public struct AgentSettings: Codable, Equatable, Sendable {
 
     fileprivate func validated() -> AgentSettings {
         self
+    }
+}
+
+public struct ProjectSettings: Codable, Equatable, Sendable {
+    public static let defaultGlobalChatsDirectory = "~/yaaw"
+
+    public var globalChatsDirectory: String
+
+    public init(globalChatsDirectory: String = Self.defaultGlobalChatsDirectory) {
+        self.globalChatsDirectory = globalChatsDirectory
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.globalChatsDirectory =
+            try container.decodeIfPresent(String.self, forKey: .globalChatsDirectory)
+            ?? Self.defaultGlobalChatsDirectory
+    }
+
+    public func resolvedGlobalChatsDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        let value = globalChatsDirectory.trimmed.nonBlankOr(Self.defaultGlobalChatsDirectory)
+        if value == "~" {
+            return homeDirectory
+        }
+        if value.hasPrefix("~/") {
+            return homeDirectory.appendingPathComponent(
+                String(value.dropFirst(2)), isDirectory: true)
+        }
+        if value.hasPrefix("/") {
+            return URL(fileURLWithPath: value, isDirectory: true)
+        }
+        return homeDirectory.appendingPathComponent(value, isDirectory: true)
+    }
+
+    fileprivate func validated() -> ProjectSettings {
+        ProjectSettings(
+            globalChatsDirectory: globalChatsDirectory.nonBlankOr(Self.defaultGlobalChatsDirectory))
     }
 }
 
@@ -993,6 +1039,11 @@ public final class YAMLConfigurationStore {
               # default: codex
               # active now: used when a flow needs a default CLI choice.
               default: \(configuration.agent.default.rawValue)
+
+            projects:
+              # default: ~/yaaw
+              # active now: global chats use this working directory.
+              globalChatsDirectory: \(yamlScalar(configuration.projects.globalChatsDirectory))
 
             theme:
               # default: dracula

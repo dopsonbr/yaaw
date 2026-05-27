@@ -331,7 +331,8 @@ final class AppModelTests: XCTestCase {
     }
 
     func testToggleBottomTerminalChangesSelectedThreadVisibleState() {
-        let model = AppModel()
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
 
         model.toggleBottomTerminal()
 
@@ -439,7 +440,8 @@ final class AppModelTests: XCTestCase {
     }
 
     func testRightPanelModeSelectionIsPublicBehavior() {
-        let model = AppModel()
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
 
         model.selectRightPanelMode(.git)
 
@@ -1521,6 +1523,143 @@ final class AppModelTests: XCTestCase {
 
         model.reorderProject(id: firstID, before: thirdID)
         XCTAssertEqual(model.projects.map(\.id), [thirdID, secondID, firstID])
+    }
+
+    func testGlobalProjectSortsLastAndDoesNotSelectThreadOnLoad() throws {
+        let workID = UUID()
+        let workThreadID = UUID()
+        let globalID = UUID()
+        let globalThreadID = UUID()
+        let homeRoot = try temporaryDirectory()
+        let workRoot = try temporaryDirectory()
+        let globalChatsRoot = homeRoot.appendingPathComponent("yaaw", isDirectory: true)
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [
+                        Project(
+                            id: globalID, displayName: "Global", rootDirectory: homeRoot,
+                            isPinned: true, sortOrder: 0),
+                        Project(
+                            id: workID, displayName: "Work", rootDirectory: workRoot,
+                            sortOrder: 1),
+                    ],
+                    threads: [
+                        AgentThread(
+                            id: globalThreadID, displayName: "Global Thread",
+                            projectID: globalID, workingDirectory: homeRoot),
+                        AgentThread(
+                            id: workThreadID, displayName: "Work Thread", projectID: workID,
+                            workingDirectory: workRoot),
+                    ],
+                    selectedProjectID: globalID,
+                    selectedThreadID: globalThreadID,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            ),
+            homeDirectory: homeRoot
+        )
+
+        XCTAssertEqual(model.projects.map(\.id), [workID, globalID])
+        XCTAssertEqual(model.projects.last?.rootDirectory, globalChatsRoot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: globalChatsRoot.path))
+        XCTAssertEqual(model.selectedProjectID, globalID)
+        XCTAssertNil(model.selectedThreadID)
+    }
+
+    func testSelectingGlobalProjectDoesNotAutoSelectFirstThread() throws {
+        let workID = UUID()
+        let workThreadID = UUID()
+        let globalID = UUID()
+        let globalThreadID = UUID()
+        let homeRoot = try temporaryDirectory()
+        let workRoot = try temporaryDirectory()
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [
+                        Project(id: workID, displayName: "Work", rootDirectory: workRoot),
+                        Project(id: globalID, displayName: "Global", rootDirectory: homeRoot),
+                    ],
+                    threads: [
+                        AgentThread(
+                            id: workThreadID, displayName: "Work Thread", projectID: workID,
+                            workingDirectory: workRoot),
+                        AgentThread(
+                            id: globalThreadID, displayName: "Global Thread",
+                            projectID: globalID, workingDirectory: homeRoot),
+                    ],
+                    selectedProjectID: workID,
+                    selectedThreadID: workThreadID,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            ),
+            homeDirectory: homeRoot
+        )
+
+        model.selectProject(id: globalID)
+        XCTAssertNil(model.selectedThreadID)
+
+        model.selectThread(id: globalThreadID)
+        XCTAssertEqual(model.selectedThreadID, globalThreadID)
+
+        model.selectProject(id: workID)
+        XCTAssertEqual(model.selectedThreadID, workThreadID)
+    }
+
+    func testImplicitThreadCreationRequiresARealProjectWhenGlobalIsSelected() throws {
+        let globalID = UUID()
+        let homeRoot = try temporaryDirectory()
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [
+                        Project(id: globalID, displayName: "Global", rootDirectory: homeRoot)
+                    ],
+                    threads: [],
+                    selectedProjectID: globalID,
+                    selectedThreadID: nil,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            ),
+            homeDirectory: homeRoot
+        )
+
+        XCTAssertThrowsError(try model.createThread(agentCLI: .codex)) { error in
+            XCTAssertEqual(error as? AppModelError, .projectRequiredForThreadCreation)
+        }
+    }
+
+    func testExplicitGlobalThreadUsesConfiguredGlobalChatsDirectory() throws {
+        let globalID = UUID()
+        let homeRoot = try temporaryDirectory()
+        let configuredRoot = homeRoot.appendingPathComponent("custom-global", isDirectory: true)
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [
+                        Project(id: globalID, displayName: "Global", rootDirectory: homeRoot)
+                    ],
+                    threads: [],
+                    selectedProjectID: globalID,
+                    selectedThreadID: nil,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            ),
+            configuration: YAAWConfiguration(
+                projects: ProjectSettings(globalChatsDirectory: configuredRoot.path)),
+            homeDirectory: homeRoot
+        )
+
+        let threadID = try model.createThread(projectID: globalID, agentCLI: .codex)
+
+        XCTAssertEqual(model.selectedThreadID, threadID)
+        XCTAssertEqual(model.selectedThread?.workingDirectory, configuredRoot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: configuredRoot.path))
     }
 
     func testAgentCLIChoiceCannotChangeAfterCreate() throws {

@@ -36,7 +36,7 @@ The sidebar nests thread history under each project. Project rows can be expande
 4. The app creates the project and prepares it for agent CLI threads in that directory.
 5. The project appears in the sidebar.
 
-Each project is scoped to one directory. The built-in `global` project is scoped to the user's home directory.
+Each project is scoped to one directory. The built-in `global` project is scoped to the configured global chats directory, defaulting to `~/yaaw`.
 
 ## Start A Thread
 
@@ -239,6 +239,8 @@ Open the title-bar gear to navigate to the in-app YAML settings editor. By defau
 ```
 
 The generated YAML file includes comments showing current defaults and which fields are active now. Current active settings include theme selection, the complete key binding catalog, the default agent CLI, editor fallback order, external-open destination order, Git and diff commands, agent command names, fonts, and file indexing ignore rules.
+
+Global chat settings are represented under `projects.globalChatsDirectory` and are also editable from Settings General. The default is `~/yaaw`; YAAW creates that directory when needed. Global chats stay available from the Global project row, but YAAW does not open or create one by default.
 
 Theme settings are represented under `theme.active`. Use the Settings Appearance picker or set one of the supported theme ids in YAML: `dracula`, `dark-2026`, `dark-plus`, `dark-modern`, `monokai`, `solarized-dark`, `light-2026`, `light-modern`, `light-plus`, `quiet-light`, `solarized-light`, `dark-high-contrast`, or `light-high-contrast`. Unknown values fall back to `dracula` and record a local diagnostic event. Custom theme palettes are placeholders for future expansion.
 

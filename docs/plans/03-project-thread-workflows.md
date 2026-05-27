@@ -13,7 +13,7 @@ Build the first real user workflows on top of persisted state: create project, c
 ## Implementation
 
 - Add project creation from a local directory with user-provided display name.
-- Add the built-in `global` project scoped to the user's home directory. Treat global threads as normal threads per [Decision 003](../decisions/003-global-project-thread-behavior.md).
+- Add the built-in `global` project scoped to the configured global chats directory. Treat global threads as normal threads per [Decision 003](../decisions/003-global-project-thread-behavior.md).
 - Add a new-thread workflow that asks the user whether to invoke `codex` or `claude` before the thread is created. The prompt MUST be a modal sheet so the workflow cannot complete without an explicit choice.
 - Persist the chosen `agent_cli` on the thread record. Add a SQLite migration (version `2`) that introduces `agent_cli` as a non-null column on `threads` with a check constraint accepting only `codex` or `claude`.
 - Existing threads in the database (if any from earlier test runs) MUST be migrated forward; for the MVP this means failing fast with a clear error if migration encounters a thread with no chosen CLI, since no thread can exist without one in normal flow.
@@ -35,7 +35,7 @@ Build the first real user workflows on top of persisted state: create project, c
 ## Acceptance Criteria
 
 - A user can create a project from a local directory.
-- The built-in `global` project exists and points at the user's home directory.
+- The built-in `global` project exists and points at the configured global chats directory.
 - A user can create multiple threads under one project.
 - New thread creation prompts the user for `codex` or `claude` and cannot complete without an explicit choice.
 - The chosen `agent_cli` is persisted on the thread record and survives relaunch.

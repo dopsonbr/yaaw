@@ -541,6 +541,7 @@ private struct SettingsEditorView: View {
     @State private var selectedSection: SettingsSection = .yaml
     @State private var shortcutSearchText = ""
     @State private var currentConfiguration = YAAWConfiguration()
+    @State private var globalChatsDirectoryText = ProjectSettings.defaultGlobalChatsDirectory
 
     private var hasUnsavedChanges: Bool {
         editorText != lastSavedText
@@ -583,6 +584,9 @@ private struct SettingsEditorView: View {
             .accessibilityIdentifier("settings-section-picker")
 
             switch selectedSection {
+            case .general:
+                generalSection
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             case .appearance:
                 appearanceSection
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -773,6 +777,45 @@ private struct SettingsEditorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var generalSection: some View {
+        ScrollView {
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
+                settingsRow("Global chats") {
+                    HStack(spacing: 8) {
+                        TextField("Global chats directory", text: $globalChatsDirectoryText)
+                            .textFieldStyle(.plain)
+                            .font(fonts.interfaceFont(sizeOffset: -1))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(dracula(.currentLine))
+                            .foregroundStyle(themeUI(.controlForeground))
+                            .onSubmit(saveProjectSettings)
+                            .accessibilityIdentifier("settings-global-chats-directory-field")
+
+                        Button {
+                            chooseGlobalChatsDirectory()
+                        } label: {
+                            Image(systemName: IconRole.openDocument.icon.systemSymbolName)
+                                .frame(width: 28, height: 28)
+                        }
+                        .help("Choose global chats directory")
+                        .accessibilityLabel("Choose global chats directory")
+
+                        Button("Save") {
+                            saveProjectSettings()
+                        }
+                        .disabled(
+                            globalChatsDirectoryText.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ) == currentConfiguration.projects.globalChatsDirectory)
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
     private var filteredShortcutActions: [KeyboardShortcutAction] {
         let query = shortcutSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return KeyboardShortcutAction.allCases }
@@ -786,7 +829,7 @@ private struct SettingsEditorView: View {
     private var appearanceSection: some View {
         ScrollView {
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
-                appearanceRow("Theme") {
+                settingsRow("Theme") {
                     Picker("Theme", selection: themeSelection) {
                         ForEach(ThemeGroup.allCases) { group in
                             Section(group.displayName) {
@@ -801,7 +844,7 @@ private struct SettingsEditorView: View {
                     .accessibilityIdentifier("settings-theme-picker")
                 }
 
-                appearanceRow("Interface font") {
+                settingsRow("Interface font") {
                     fontFamilyPicker(
                         label: "Interface font family",
                         selection: interfaceFontFamilySelection,
@@ -810,7 +853,7 @@ private struct SettingsEditorView: View {
                     .accessibilityIdentifier("settings-interface-font-picker")
                 }
 
-                appearanceRow("Interface size") {
+                settingsRow("Interface size") {
                     fontSizeStepper(
                         label: "Interface font size",
                         value: interfaceFontSizeSelection,
@@ -819,7 +862,7 @@ private struct SettingsEditorView: View {
                     .accessibilityIdentifier("settings-interface-size-stepper")
                 }
 
-                appearanceRow("Editor font") {
+                settingsRow("Editor font") {
                     fontFamilyPicker(
                         label: "Editor font family",
                         selection: editorFontFamilySelection,
@@ -828,7 +871,7 @@ private struct SettingsEditorView: View {
                     .accessibilityIdentifier("settings-editor-font-picker")
                 }
 
-                appearanceRow("Editor size") {
+                settingsRow("Editor size") {
                     fontSizeStepper(
                         label: "Editor font size",
                         value: editorFontSizeSelection,
@@ -837,7 +880,7 @@ private struct SettingsEditorView: View {
                     .accessibilityIdentifier("settings-editor-size-stepper")
                 }
 
-                appearanceRow("Terminal font") {
+                settingsRow("Terminal font") {
                     fontFamilyPicker(
                         label: "Terminal font family",
                         selection: terminalFontFamilySelection,
@@ -846,7 +889,7 @@ private struct SettingsEditorView: View {
                     .accessibilityIdentifier("settings-terminal-font-picker")
                 }
 
-                appearanceRow("Terminal size") {
+                settingsRow("Terminal size") {
                     fontSizeStepper(
                         label: "Terminal font size",
                         value: terminalFontSizeSelection,
@@ -952,7 +995,7 @@ private struct SettingsEditorView: View {
     }
 
     @ViewBuilder
-    private func appearanceRow<Content: View>(
+    private func settingsRow<Content: View>(
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -963,7 +1006,7 @@ private struct SettingsEditorView: View {
                 .frame(width: 130, alignment: .trailing)
 
             content()
-                .frame(maxWidth: 380, alignment: .leading)
+                .frame(maxWidth: 520, alignment: .leading)
         }
     }
 
@@ -1050,6 +1093,7 @@ private struct SettingsEditorView: View {
                 let configuration = try onValidateText(text)
                 currentConfiguration = configuration
                 selectedThemeID = configuration.resolvedTheme.id
+                globalChatsDirectoryText = configuration.projects.globalChatsDirectory
                 validationError = nil
                 onReloadConfiguration()
                 statusMessage = "Settings reloaded from disk."
@@ -1069,6 +1113,7 @@ private struct SettingsEditorView: View {
             let configuration = try onValidateText(editorText)
             currentConfiguration = configuration
             selectedThemeID = configuration.resolvedTheme.id
+            globalChatsDirectoryText = configuration.projects.globalChatsDirectory
             lastSavedText = editorText
             validationError = nil
             statusMessage = "Settings saved and applied."
@@ -1084,6 +1129,7 @@ private struct SettingsEditorView: View {
             let configuration = try onValidateText(editorText)
             currentConfiguration = configuration
             selectedThemeID = configuration.resolvedTheme.id
+            globalChatsDirectoryText = configuration.projects.globalChatsDirectory
             validationError = nil
             statusMessage = "Unsaved edits reverted."
         } catch {
@@ -1102,12 +1148,47 @@ private struct SettingsEditorView: View {
             lastSavedText = renderedText
             currentConfiguration = nextConfiguration.validated()
             selectedThemeID = themeID
+            globalChatsDirectoryText = currentConfiguration.projects.globalChatsDirectory
             validationError = nil
             statusMessage = "Theme saved and applied."
         } catch {
             selectedThemeID = configuration.resolvedTheme.id
             validationError = "YAML validation failed: \(error)"
             statusMessage = "Theme was not changed."
+        }
+    }
+
+    private func chooseGlobalChatsDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = currentConfiguration.projects.resolvedGlobalChatsDirectory()
+        if panel.runModal() == .OK, let url = panel.url {
+            globalChatsDirectoryText = url.standardizedFileURL.path
+            saveProjectSettings()
+        }
+    }
+
+    private func saveProjectSettings() {
+        do {
+            var nextConfiguration = try onValidateText(editorText)
+            nextConfiguration.projects.globalChatsDirectory =
+                globalChatsDirectoryText.trimmingCharacters(in: .whitespacesAndNewlines)
+            nextConfiguration = nextConfiguration.validated()
+            let renderedText = YAMLConfigurationStore.render(nextConfiguration)
+            _ = try onSaveText(renderedText)
+            editorText = renderedText
+            lastSavedText = renderedText
+            currentConfiguration = nextConfiguration
+            selectedThemeID = nextConfiguration.resolvedTheme.id
+            globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
+            validationError = nil
+            statusMessage = "Project settings saved and applied."
+        } catch {
+            validationError = "YAML validation failed: \(error)"
+            statusMessage = "Project settings were not changed."
         }
     }
 
@@ -1122,6 +1203,7 @@ private struct SettingsEditorView: View {
             lastSavedText = renderedText
             currentConfiguration = nextConfiguration
             selectedThemeID = nextConfiguration.resolvedTheme.id
+            globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
             validationError = nil
             statusMessage = "Font settings saved and applied."
         } catch {
@@ -1168,6 +1250,7 @@ private struct SettingsEditorView: View {
             lastSavedText = renderedText
             currentConfiguration = nextConfiguration
             selectedThemeID = nextConfiguration.resolvedTheme.id
+            globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
             validationError = nil
             statusMessage = "Shortcut saved and applied."
         } catch {
@@ -1183,6 +1266,7 @@ private enum SettingsDiscardAction {
 }
 
 private enum SettingsSection: String, CaseIterable, Identifiable {
+    case general
     case appearance
     case keyBindings
     case yaml
@@ -1191,6 +1275,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .general:
+            "General"
         case .appearance:
             "Appearance"
         case .keyBindings:

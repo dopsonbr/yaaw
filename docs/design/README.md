@@ -73,7 +73,7 @@ The title bar includes a settings gear. The gear navigates to a full content-rou
 
 ### Project
 
-A project is a named local directory. The `global` project is a built-in project scoped to the user's home directory.
+A project is a named local directory. The `global` project is a built-in project scoped to the configured global chats directory, defaulting to `~/yaaw`.
 
 Project metadata should include:
 
