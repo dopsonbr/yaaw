@@ -84,6 +84,13 @@ public protocol YAAWStore: AnyObject {
     func setBottomTerminalExpanded(threadID: UUID, isExpanded: Bool)
     func setSelectedProject(_ projectID: UUID)
     func setSelectedThread(_ threadID: UUID?)
+    func persistSelectionChange(
+        selectedProjectID: UUID,
+        selectedThreadID: UUID?,
+        touchedProject: Project?,
+        touchedThread: AgentThread?,
+        expandedProjectID: UUID?
+    )
     func setLayoutState(_ state: LayoutState)
     func setProjectExpanded(_ projectID: UUID, isExpanded: Bool)
     func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool)
@@ -99,6 +106,8 @@ public final class InMemoryYAAWStore: YAAWStore {
     private var projectIndexByID: [UUID: Int] = [:]
     private var threadIndexByID: [UUID: Int] = [:]
     private(set) var layoutStateWriteCount = 0
+    private(set) var threadActivityWriteCount = 0
+    private(set) var selectionChangeWriteCount = 0
 
     public init(snapshot: YAAWSnapshot) {
         self.snapshot = snapshot
@@ -170,6 +179,27 @@ public final class InMemoryYAAWStore: YAAWStore {
         snapshot.selectedThreadID = threadID
     }
 
+    public func persistSelectionChange(
+        selectedProjectID: UUID,
+        selectedThreadID: UUID?,
+        touchedProject: Project?,
+        touchedThread: AgentThread?,
+        expandedProjectID: UUID?
+    ) {
+        selectionChangeWriteCount += 1
+        if let touchedProject {
+            upsertProject(touchedProject)
+        }
+        if let touchedThread {
+            upsertThread(touchedThread)
+        }
+        if let expandedProjectID {
+            setProjectExpanded(expandedProjectID, isExpanded: true)
+        }
+        setSelectedProject(selectedProjectID)
+        setSelectedThread(selectedThreadID)
+    }
+
     public func setLayoutState(_ state: LayoutState) {
         layoutStateWriteCount += 1
         snapshot.layoutState = state
@@ -196,6 +226,7 @@ public final class InMemoryYAAWStore: YAAWStore {
     }
 
     public func upsertThreadActivity(_ activity: ThreadActivityState) {
+        threadActivityWriteCount += 1
         snapshot.threadActivityByThreadID[activity.threadID] = activity
     }
 

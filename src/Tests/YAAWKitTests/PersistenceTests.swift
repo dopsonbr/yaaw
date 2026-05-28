@@ -18,6 +18,24 @@ final class PersistenceTests: XCTestCase {
                 "pending_session_rename"))
     }
 
+    func testSQLiteStoreUsesWALJournalMode() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        _ = try SQLiteYAAWStore(databasePath: path)
+
+        XCTAssertEqual(try sqliteStringPragma(path: path, name: "journal_mode"), "wal")
+    }
+
+    func testSQLiteStoreDoesNotReportWALFailureOnSupportedFilesystem() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let recorder = RecordingDiagnosticEventRecorder()
+        _ = try SQLiteYAAWStore(databasePath: path, diagnosticRecorder: recorder)
+
+        XCTAssertFalse(
+            recorder.events.contains { $0.name == "sqlite_wal_not_enabled" },
+            "WAL readback should not report a failure on a supported filesystem"
+        )
+    }
+
     func testSQLiteMigrationRecoversPartialVersionZeroSchema() throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         try withSQLiteDatabase(path: path) { database in
@@ -252,6 +270,140 @@ final class PersistenceTests: XCTestCase {
             reloaded.rightPanelStatesByThreadID[secondThreadID]?.selectedTabID,
             RightPanelTab.defaultNvimID)
         XCTAssertTrue(reloaded.isGlobalTerminalExpanded)
+    }
+
+    func testSQLiteStorePersistsSelectionChangeInBatch() throws {
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let store = try SQLiteYAAWStore(databasePath: path)
+        let firstProjectID = UUID()
+        let secondProjectID = UUID()
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
+        let createdAt = Date(timeIntervalSince1970: 42)
+        let oldOpenedAt = Date(timeIntervalSince1970: 100)
+        let newOpenedAt = Date(timeIntervalSince1970: 200)
+        let firstProject = Project(
+            id: firstProjectID,
+            displayName: "First Project",
+            rootDirectory: root,
+            createdAt: createdAt,
+            lastOpenedAt: oldOpenedAt
+        )
+        var secondProject = Project(
+            id: secondProjectID,
+            displayName: "Second Project",
+            rootDirectory: root,
+            createdAt: createdAt,
+            lastOpenedAt: oldOpenedAt
+        )
+        let firstThread = AgentThread(
+            id: firstThreadID,
+            displayName: "First",
+            projectID: firstProjectID,
+            workingDirectory: root,
+            createdAt: createdAt,
+            lastOpenedAt: oldOpenedAt
+        )
+        var secondThread = AgentThread(
+            id: secondThreadID,
+            displayName: "Second",
+            projectID: secondProjectID,
+            workingDirectory: root,
+            createdAt: createdAt,
+            lastOpenedAt: oldOpenedAt
+        )
+        store.save(
+            YAAWSnapshot(
+                projects: [firstProject, secondProject],
+                threads: [firstThread, secondThread],
+                selectedProjectID: firstProjectID,
+                selectedThreadID: firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        secondProject.lastOpenedAt = newOpenedAt
+        secondThread.lastOpenedAt = newOpenedAt
+
+        store.persistSelectionChange(
+            selectedProjectID: secondProjectID,
+            selectedThreadID: secondThreadID,
+            touchedProject: secondProject,
+            touchedThread: secondThread,
+            expandedProjectID: secondProjectID
+        )
+
+        let reloaded = try SQLiteYAAWStore(databasePath: path).load()
+        XCTAssertEqual(reloaded.selectedProjectID, secondProjectID)
+        XCTAssertEqual(reloaded.selectedThreadID, secondThreadID)
+        XCTAssertEqual(
+            reloaded.projects.first { $0.id == secondProjectID }?.lastOpenedAt,
+            newOpenedAt
+        )
+        XCTAssertEqual(
+            reloaded.threads.first { $0.id == secondThreadID }?.lastOpenedAt,
+            newOpenedAt
+        )
+        XCTAssertTrue(reloaded.expandedProjectIDs.contains(secondProjectID))
+    }
+
+    func testPersistSelectionChangeMatchesAcrossStores() throws {
+        let firstProjectID = UUID()
+        let secondProjectID = UUID()
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
+        let firstProject = Project(
+            id: firstProjectID, displayName: "First Project", rootDirectory: root)
+        var secondProject = Project(
+            id: secondProjectID, displayName: "Second Project", rootDirectory: root)
+        let firstThread = AgentThread(
+            id: firstThreadID, displayName: "First", projectID: firstProjectID,
+            workingDirectory: root)
+        var secondThread = AgentThread(
+            id: secondThreadID, displayName: "Second", projectID: secondProjectID,
+            workingDirectory: root)
+        secondProject.lastOpenedAt = Date(timeIntervalSince1970: 200)
+        secondThread.lastOpenedAt = Date(timeIntervalSince1970: 200)
+
+        func seededSnapshot() -> YAAWSnapshot {
+            YAAWSnapshot(
+                projects: [firstProject, secondProject],
+                threads: [firstThread, secondThread],
+                selectedProjectID: firstProjectID,
+                selectedThreadID: firstThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        }
+
+        let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
+        let sqliteStore = try SQLiteYAAWStore(databasePath: path)
+        sqliteStore.save(seededSnapshot())
+        let inMemoryStore = InMemoryYAAWStore(snapshot: seededSnapshot())
+
+        for store in [sqliteStore as YAAWStore, inMemoryStore as YAAWStore] {
+            store.persistSelectionChange(
+                selectedProjectID: secondProjectID,
+                selectedThreadID: secondThreadID,
+                touchedProject: secondProject,
+                touchedThread: secondThread,
+                expandedProjectID: secondProjectID
+            )
+        }
+
+        let fromSQLite = try SQLiteYAAWStore(databasePath: path).load()
+        let fromMemory = inMemoryStore.load()
+        XCTAssertEqual(fromSQLite.selectedProjectID, fromMemory.selectedProjectID)
+        XCTAssertEqual(fromSQLite.selectedThreadID, fromMemory.selectedThreadID)
+        XCTAssertEqual(fromSQLite.selectedProjectID, secondProjectID)
+        XCTAssertEqual(fromSQLite.selectedThreadID, secondThreadID)
+        XCTAssertEqual(
+            fromSQLite.expandedProjectIDs.contains(secondProjectID),
+            fromMemory.expandedProjectIDs.contains(secondProjectID)
+        )
+        XCTAssertTrue(fromSQLite.expandedProjectIDs.contains(secondProjectID))
     }
 
     func testSQLitePersistsPendingThreadRename() throws {
@@ -1407,6 +1559,17 @@ final class PersistenceTests: XCTestCase {
             defer { sqlite3_finalize(statement) }
             XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
             return Int(sqlite3_column_int(statement, 0))
+        }
+    }
+
+    private func sqliteStringPragma(path: URL, name: String) throws -> String {
+        try withSQLiteDatabase(path: path) { database in
+            var statement: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_prepare_v2(database, "PRAGMA \(name)", -1, &statement, nil), SQLITE_OK)
+            defer { sqlite3_finalize(statement) }
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
+            return String(cString: sqlite3_column_text(statement, 0))
         }
     }
 
