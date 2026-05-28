@@ -22,6 +22,27 @@ private enum FileBrowserPresentationLimits {
     static let treeRowDiagnosticThreshold = 50_000
 }
 
+private struct AgentCLIPollRequest: Sendable {
+    var thread: AgentThread
+    var offset: UInt64
+    var generation: Int
+}
+
+private struct AgentCLIPollResult: Sendable {
+    var request: AgentCLIPollRequest
+    var captured: AgentCLICapturedOutput
+}
+
+private enum AgentCLISessionSyncRequest: Sendable {
+    case exactLink(thread: AgentThread)
+    case catalogMetadata(thread: AgentThread)
+}
+
+private enum AgentCLISessionSyncResult: Sendable {
+    case exactLink(threadID: UUID, candidate: SessionLinkCandidate?)
+    case catalogMetadata(threadID: UUID, metadata: AgentCLISessionMetadata?)
+}
+
 public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var projects: [Project]
     @Published public private(set) var threads: [AgentThread]
@@ -72,6 +93,16 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var threadIndexByID: [UUID: Int] = [:]
     private var cachedActiveThreadsByProject: [UUID: [AgentThread]] = [:]
     private var cachedArchivedThreadsByProject: [UUID: [AgentThread]] = [:]
+    private let agentCLIPollQueue = DispatchQueue(
+        label: "dev.dopsonbr.yaaw.agent-cli-poll", qos: .utility)
+    // Capture/activity polling and the (potentially slow) session-catalog scan are coalesced
+    // independently so a stalled catalog read can never block the latency-sensitive capture poll.
+    private var isAgentCLICapturePollInFlight = false
+    private var isAgentCLISessionSyncInFlight = false
+    // Bumped whenever a thread's read offsets are reset (terminal close, link, new session) so an
+    // in-flight background read whose result lands after such a reset is discarded instead of
+    // resurrecting stale output for a torn-down/relinked session.
+    private var agentCLIPollGenerationByThreadID: [UUID: Int] = [:]
 
     public init(
         store: YAAWStore = InMemoryYAAWStore.helloWorld(),
@@ -847,6 +878,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 launchDescriptor = activeLaunchDescriptor
             } else {
                 captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+                bumpAgentCLIPollGeneration(for: threadID)
                 launchDescriptor = agentCLIBindings.terminalLaunchDescriptor(
                     for: thread,
                     executableNameOverride: configuration.agentExecutableName(for: thread.agentCLI)
@@ -1078,6 +1110,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         captureReadOffsetsByThreadID.removeValue(forKey: threadID)
         activityReadOffsetsByThreadID.removeValue(forKey: threadID)
         activityPartialLinesByThreadID.removeValue(forKey: threadID)
+        bumpAgentCLIPollGeneration(for: threadID)
         applyThreadActivity(
             ThreadActivityEvent(
                 threadID: threadID,
@@ -1118,35 +1151,224 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         else {
             return
         }
-        captureReadOffsetsByThreadID[thread.id] = captured.nextOffset
-        recordAgentCLIOutput(threadID: thread.id, output: captured.output)
+        applyAgentCLICaptureResult(threadID: thread.id, captured: captured)
     }
 
     public func pollAgentCLIActivityLogs() {
         for threadID in threadIDsForAgentCLIActivityPolling() {
-            guard let thread = activeThread(id: threadID) else { continue }
-            let previousOffset = activityReadOffsetsByThreadID[thread.id] ?? 0
-            guard
+            guard let thread = activeThread(id: threadID),
                 let captured = agentCLIBindings.capturedActivityEvents(
                     for: thread,
-                    after: previousOffset
+                    after: activityReadOffsetsByThreadID[thread.id] ?? 0
                 )
             else {
                 continue
             }
-            if captured.startOffset != previousOffset {
-                activityPartialLinesByThreadID.removeValue(forKey: thread.id)
-            }
-            activityReadOffsetsByThreadID[thread.id] = captured.nextOffset
-            let completeOutput = completeActivityLogOutput(
-                threadID: thread.id, output: captured.output)
-            for event in ThreadActivityEvent.helperEvents(from: completeOutput) {
-                applyThreadActivity(
-                    event,
-                    isUnread: event.status != .working && event.status != .inactive,
-                    shouldNotify: true
+            applyAgentCLIActivityResult(threadID: thread.id, captured: captured)
+        }
+    }
+
+    // Shared application logic for a capture read, used by both the synchronous poll (tests/E2E) and
+    // the off-main background poll, so there is a single source of truth for offset bookkeeping.
+    private func applyAgentCLICaptureResult(threadID: UUID, captured: AgentCLICapturedOutput) {
+        captureReadOffsetsByThreadID[threadID] = captured.nextOffset
+        recordAgentCLIOutput(threadID: threadID, output: captured.output)
+    }
+
+    // Shared application logic for an activity-log read (see applyAgentCLICaptureResult).
+    private func applyAgentCLIActivityResult(threadID: UUID, captured: AgentCLICapturedOutput) {
+        let previousOffset = activityReadOffsetsByThreadID[threadID] ?? 0
+        if captured.startOffset != previousOffset {
+            activityPartialLinesByThreadID.removeValue(forKey: threadID)
+        }
+        activityReadOffsetsByThreadID[threadID] = captured.nextOffset
+        let completeOutput = completeActivityLogOutput(threadID: threadID, output: captured.output)
+        for event in ThreadActivityEvent.helperEvents(from: completeOutput) {
+            applyThreadActivity(
+                event,
+                isUnread: event.status != .working && event.status != .inactive,
+                shouldNotify: true
+            )
+        }
+    }
+
+    public func pollAgentCLIStateInBackground() {
+        pollAgentCLICaptureAndActivityInBackground()
+        pollAgentCLISessionSyncInBackground()
+    }
+
+    private func pollAgentCLICaptureAndActivityInBackground() {
+        guard !isAgentCLICapturePollInFlight else { return }
+
+        let captureRequest = selectedThread.map { thread in
+            AgentCLIPollRequest(
+                thread: thread,
+                offset: captureReadOffsetsByThreadID[thread.id] ?? 0,
+                generation: agentCLIPollGeneration(for: thread.id)
+            )
+        }
+        let activityRequests = threadIDsForAgentCLIActivityPolling().compactMap {
+            threadID -> AgentCLIPollRequest? in
+            activeThread(id: threadID).map { thread in
+                AgentCLIPollRequest(
+                    thread: thread,
+                    offset: activityReadOffsetsByThreadID[thread.id] ?? 0,
+                    generation: agentCLIPollGeneration(for: thread.id)
                 )
             }
+        }
+        guard captureRequest != nil || !activityRequests.isEmpty else { return }
+        isAgentCLICapturePollInFlight = true
+        let agentCLIBindings = agentCLIBindings
+
+        agentCLIPollQueue.async { [agentCLIBindings] in
+            let captureResult = captureRequest.flatMap { request -> AgentCLIPollResult? in
+                agentCLIBindings.capturedOutput(for: request.thread, after: request.offset)
+                    .map { AgentCLIPollResult(request: request, captured: $0) }
+            }
+            let activityResults = activityRequests.compactMap { request -> AgentCLIPollResult? in
+                agentCLIBindings.capturedActivityEvents(for: request.thread, after: request.offset)
+                    .map { AgentCLIPollResult(request: request, captured: $0) }
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.finishAgentCLICaptureAndActivityPoll(
+                    captureResult: captureResult,
+                    activityResults: activityResults
+                )
+            }
+        }
+    }
+
+    private func pollAgentCLISessionSyncInBackground() {
+        guard !isAgentCLISessionSyncInFlight,
+            let syncRequest = selectedThreadSessionSyncRequest()
+        else { return }
+        isAgentCLISessionSyncInFlight = true
+        let agentCLIBindings = agentCLIBindings
+
+        agentCLIPollQueue.async { [agentCLIBindings] in
+            let syncResult: AgentCLISessionSyncResult
+            switch syncRequest {
+            case .exactLink(let thread):
+                syncResult = .exactLink(
+                    threadID: thread.id,
+                    candidate: agentCLIBindings.exactSessionLinkCandidate(for: thread)
+                )
+            case .catalogMetadata(let thread):
+                syncResult = .catalogMetadata(
+                    threadID: thread.id,
+                    metadata: agentCLIBindings.catalogMetadata(for: thread)
+                )
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.finishAgentCLISessionSyncPoll(syncResult)
+            }
+        }
+    }
+
+    private func finishAgentCLICaptureAndActivityPoll(
+        captureResult: AgentCLIPollResult?,
+        activityResults: [AgentCLIPollResult]
+    ) {
+        isAgentCLICapturePollInFlight = false
+
+        if let captureResult {
+            let request = captureResult.request
+            let threadID = request.thread.id
+            if captureReadOffsetsByThreadID[threadID] ?? 0 == request.offset,
+                agentCLIPollGeneration(for: threadID) == request.generation
+            {
+                applyAgentCLICaptureResult(threadID: threadID, captured: captureResult.captured)
+            }
+        }
+
+        for result in activityResults {
+            let request = result.request
+            let threadID = request.thread.id
+            guard activityReadOffsetsByThreadID[threadID] ?? 0 == request.offset,
+                agentCLIPollGeneration(for: threadID) == request.generation
+            else { continue }
+            applyAgentCLIActivityResult(threadID: threadID, captured: result.captured)
+        }
+    }
+
+    private func finishAgentCLISessionSyncPoll(_ result: AgentCLISessionSyncResult) {
+        isAgentCLISessionSyncInFlight = false
+        applySessionSyncResult(result)
+    }
+
+    public func syncSelectedThreadSessionMetadata() {
+        guard let request = selectedThreadSessionSyncRequest() else { return }
+        let result: AgentCLISessionSyncResult
+        switch request {
+        case .exactLink(let thread):
+            result = .exactLink(
+                threadID: thread.id,
+                candidate: agentCLIBindings.exactSessionLinkCandidate(for: thread)
+            )
+        case .catalogMetadata(let thread):
+            result = .catalogMetadata(
+                threadID: thread.id,
+                metadata: agentCLIBindings.catalogMetadata(for: thread)
+            )
+        }
+        applySessionSyncResult(result)
+    }
+
+    private func agentCLIPollGeneration(for threadID: UUID) -> Int {
+        agentCLIPollGenerationByThreadID[threadID] ?? 0
+    }
+
+    private func bumpAgentCLIPollGeneration(for threadID: UUID) {
+        agentCLIPollGenerationByThreadID[threadID, default: 0] += 1
+    }
+
+    private func selectedThreadSessionSyncRequest() -> AgentCLISessionSyncRequest? {
+        guard let selectedThreadID,
+            let index = threadIndexByID[selectedThreadID]
+        else { return nil }
+        let thread = threads[index]
+        if thread.sessionIdentity == nil,
+            !sessionLinkSkippedThreadIDs.contains(selectedThreadID)
+        {
+            return .exactLink(thread: thread)
+        }
+        guard !sessionLinkRequiredThreadIDs.contains(selectedThreadID),
+            thread.sessionIdentity != nil
+        else { return nil }
+        return .catalogMetadata(thread: thread)
+    }
+
+    private func applySessionSyncResult(_ result: AgentCLISessionSyncResult) {
+        switch result {
+        case .exactLink(let threadID, let candidate):
+            guard selectedThreadID == threadID,
+                let index = threadIndexByID[threadID],
+                threads[index].sessionIdentity == nil,
+                !sessionLinkSkippedThreadIDs.contains(threadID),
+                let candidate
+            else { return }
+            applySessionLink(candidate, toThreadAt: index)
+            recordDiagnostic(
+                category: "AgentCLI",
+                name: "session_auto_linked_during_sync",
+                metadata: [
+                    "thread_id": threadID.uuidString,
+                    "agent_cli": candidate.agentCLI.rawValue,
+                    "source": candidate.source,
+                ]
+            )
+        case .catalogMetadata(let threadID, let metadata):
+            guard selectedThreadID == threadID,
+                !sessionLinkRequiredThreadIDs.contains(threadID),
+                let index = threadIndexByID[threadID],
+                let metadata,
+                // The catalog was looked up by the thread's identity at snapshot time; if it no
+                // longer matches, the thread was re-linked/renamed during the poll window and this
+                // result is stale, so applying it would clobber the newer identity.
+                threads[index].sessionIdentity == metadata.identity
+            else { return }
+            applyAgentCLIMetadata(metadata, toThreadAt: index)
         }
     }
 
@@ -1583,6 +1805,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         persistThread(threads[index])
         activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
         captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+        bumpAgentCLIPollGeneration(for: threadID)
         recordDiagnostic(
             category: "AgentCLI",
             name: "thread_rename_requested",
@@ -1632,6 +1855,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         sessionLinkSkippedThreadIDs.insert(threadID)
         activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
         captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+        bumpAgentCLIPollGeneration(for: threadID)
         persistThread(threads[index])
         recordDiagnostic(
             category: "AgentCLI",
@@ -1691,27 +1915,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         sessionLinkSkippedThreadIDs.remove(threadID)
         activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
         captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+        bumpAgentCLIPollGeneration(for: threadID)
         persistThread(threads[index])
-    }
-
-    public func syncSelectedThreadSessionMetadata() {
-        guard let selectedThreadID else { return }
-        if let index = threadIndexByID[selectedThreadID],
-            threads[index].sessionIdentity == nil,
-            !sessionLinkSkippedThreadIDs.contains(selectedThreadID)
-        {
-            _ = autoLinkUnboundThreadIfExactMatch(
-                threadID: selectedThreadID,
-                diagnosticName: "session_auto_linked_during_sync"
-            )
-        }
-        if sessionLinkRequiredThreadIDs.contains(selectedThreadID) {
-            return
-        }
-        guard let index = threadIndexByID[selectedThreadID],
-            let metadata = agentCLIBindings.catalogMetadata(for: threads[index])
-        else { return }
-        applyAgentCLIMetadata(metadata, toThreadAt: index)
     }
 
     public func moveProject(id projectID: UUID, direction: ProjectMoveDirection) {
@@ -1796,9 +2001,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             name: "project_selected",
             metadata: ["project_id": projectID.uuidString]
         )
-        persistProject(projects.first { $0.id == projectID }!)
-        persistProjectExpanded(projectID: projectID)
-        persistSelection()
+        persistSelectionChange(
+            touchedProject: projects.first { $0.id == projectID },
+            expandedProjectID: projectID
+        )
     }
 
     public func selectThread(id threadID: UUID) {
@@ -1818,10 +2024,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 "agent_cli": thread.agentCLI.rawValue,
             ]
         )
-        persistProject(projects.first { $0.id == thread.projectID }!)
-        persistThread(threads[threadIndexByID[threadID]!])
-        persistProjectExpanded(projectID: thread.projectID)
-        persistSelection()
+        persistSelectionChange(
+            touchedProject: projects.first { $0.id == thread.projectID },
+            touchedThread: threadIndexByID[threadID].map { threads[$0] },
+            expandedProjectID: thread.projectID
+        )
     }
 
     public func archiveThread(id threadID: UUID) {
@@ -1859,13 +2066,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public func navigateBack() {
         guard let selection = navigationHistory.goBack() else { return }
         apply(selection)
-        persistSelection()
+        persistSelectionChange(expandedProjectID: selection.projectID)
     }
 
     public func navigateForward() {
         guard let selection = navigationHistory.goForward() else { return }
         apply(selection)
-        persistSelection()
+        persistSelectionChange(expandedProjectID: selection.projectID)
     }
 
     private func pushCurrentSelection() {
@@ -1878,7 +2085,6 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectedProjectID = selection.projectID
         selectedThreadID = selection.threadID
         expandedProjectIDs.insert(selection.projectID)
-        persistProjectExpanded(projectID: selection.projectID)
         resetFileBrowserForSelectedThread()
     }
 
@@ -1893,18 +2099,30 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let canonicalName = metadata.canonicalName
         let isPendingRenameConfirmed =
             pendingRename.map { $0 == canonicalName } ?? true
-        mutateThread(at: index) {
-            $0.sessionIdentity = metadata.identity
-            if isPendingRenameConfirmed {
-                $0.canonicalSessionName = canonicalName
-                $0.displayName = canonicalName
-                $0.pendingSessionRename = nil
+        var updatedThread = threads[index]
+        updatedThread.sessionIdentity = metadata.identity
+        if isPendingRenameConfirmed {
+            updatedThread.canonicalSessionName = canonicalName
+            updatedThread.displayName = canonicalName
+            updatedThread.pendingSessionRename = nil
+        }
+        let threadChanged = updatedThread != threads[index]
+        let linkStateChanged =
+            sessionLinkRequiredThreadIDs.contains(threadID)
+            || sessionLinkSkippedThreadIDs.contains(threadID)
+            || pendingTerminalTitlesByThreadID[threadID] != nil
+        guard threadChanged || linkStateChanged else { return }
+        if threadChanged {
+            mutateThread(at: index) {
+                $0 = updatedThread
             }
         }
         sessionLinkRequiredThreadIDs.remove(threadID)
         sessionLinkSkippedThreadIDs.remove(threadID)
         pendingTerminalTitlesByThreadID.removeValue(forKey: threadID)
-        persistThread(threads[index])
+        if threadChanged {
+            persistThread(threads[index])
+        }
     }
 
     private func refreshFileBrowser(for thread: AgentThread) {
@@ -2249,6 +2467,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         store.setSelectedThread(selectedThreadID)
     }
 
+    private func persistSelectionChange(
+        touchedProject: Project? = nil,
+        touchedThread: AgentThread? = nil,
+        expandedProjectID: UUID? = nil
+    ) {
+        store.persistSelectionChange(
+            selectedProjectID: selectedProjectID,
+            selectedThreadID: selectedThreadID,
+            touchedProject: touchedProject,
+            touchedThread: touchedThread,
+            expandedProjectID: expandedProjectID
+        )
+    }
+
     private func persistLayout() {
         store.setLayoutState(layoutState)
     }
@@ -2331,6 +2563,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             source: event.source,
             updatedAt: event.createdAt
         )
+        // Skip republishing/persisting when only the timestamp differs: identical content arriving
+        // every poll (e.g. a continuously "working" thread) would otherwise churn @Published state
+        // and SQLite on the typing/hot path. As a deliberate consequence, repeated identical activity
+        // does not advance lastOpenedAt/updatedAt; this is not user-visible because ThreadIdleAgeLabel
+        // only renders for .inactive threads, which are reached via a distinct "Terminal closed" event.
+        if Self.hasSamePublishedActivity(activity, as: currentActivity) {
+            return
+        }
         threadActivityByThreadID[event.threadID] = activity
         persistThreadActivity(activity)
         if threads[threadIndex].lastOpenedAt < event.createdAt {
@@ -2362,6 +2602,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         threadActivityByThreadID[threadID] = activity
         persistThreadActivity(activity)
         updateDockBadge()
+    }
+
+    // Equality of everything the UI publishes, ignoring updatedAt — built on the synthesized
+    // Equatable so it can't silently drift when a field is added to ThreadActivityState.
+    private static func hasSamePublishedActivity(
+        _ lhs: ThreadActivityState,
+        as rhs: ThreadActivityState
+    ) -> Bool {
+        var normalized = lhs
+        normalized.updatedAt = rhs.updatedAt
+        return normalized == rhs
     }
 
     private func shouldSuppressSystemNotification(for threadID: UUID) -> Bool {

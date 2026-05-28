@@ -31,6 +31,12 @@ public struct AgentCLISessionMetadata: Equatable, Sendable {
         self.title = title?.nilIfBlank
     }
 
+    // Single source of truth for deriving catalog metadata from a matched session candidate, shared
+    // by the adapter default metadataFromCatalog and the service's cached catalogMetadata(for:).
+    public init(from candidate: SessionLinkCandidate) {
+        self.init(identity: candidate.identity, reportedName: candidate.displayName)
+    }
+
     public var canonicalName: String {
         reportedName ?? title ?? identity
     }
@@ -121,7 +127,7 @@ extension AgentCLIAdapter {
     ) -> AgentCLISessionMetadata? {
         sessionLinkCandidates(workingDirectory: workingDirectory, homeDirectory: homeDirectory)
             .first { $0.identity == sessionIdentity }
-            .map { AgentCLISessionMetadata(identity: $0.identity, reportedName: $0.displayName) }
+            .map(AgentCLISessionMetadata.init(from:))
     }
 }
 
@@ -365,6 +371,16 @@ public struct AgentCLICapturedOutput: Equatable, Sendable {
     }
 }
 
+private struct SessionCatalogCacheKey: Hashable {
+    var kind: AgentCLIKind
+    var workingDirectoryPath: String
+}
+
+private struct SessionCatalogCacheEntry {
+    var signature: String
+    var candidates: [SessionLinkCandidate]
+}
+
 public final class AgentCLISessionBindingService: @unchecked Sendable {
     private let adaptersByKind: [AgentCLIKind: any AgentCLIAdapter]
     private let resolver: any AgentCLIExecutableResolving
@@ -373,6 +389,10 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
     private let activityDirectory: URL?
     private let helperBinDirectory: URL
     private let homeDirectory: URL
+    private let catalogCacheLock = NSLock()
+    private static let catalogCacheLimit = 64
+    private var catalogCacheByKey: [SessionCatalogCacheKey: SessionCatalogCacheEntry] = [:]
+    private var catalogCacheInsertionOrder: [SessionCatalogCacheKey] = []
 
     public init(
         adapters: [any AgentCLIAdapter] = [
@@ -518,19 +538,49 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
     }
 
     public func sessionLinkCandidates(for thread: AgentThread) -> [SessionLinkCandidate] {
-        adaptersByKind[thread.agentCLI]?.sessionLinkCandidates(
+        guard let adapter = adaptersByKind[thread.agentCLI] else { return [] }
+        let key = SessionCatalogCacheKey(
+            kind: thread.agentCLI,
+            workingDirectoryPath: thread.workingDirectory.standardizedFileURL.path
+        )
+        let signature = AgentCLISessionCatalog.signature(
+            kind: thread.agentCLI,
+            homeDirectory: homeDirectory,
+            workingDirectory: thread.workingDirectory
+        )
+        catalogCacheLock.lock()
+        if let cached = catalogCacheByKey[key], cached.signature == signature {
+            let candidates = cached.candidates
+            catalogCacheLock.unlock()
+            return candidates
+        }
+        catalogCacheLock.unlock()
+
+        let candidates = adapter.sessionLinkCandidates(
             workingDirectory: thread.workingDirectory,
             homeDirectory: homeDirectory
-        ) ?? []
+        )
+        catalogCacheLock.lock()
+        if catalogCacheByKey[key] == nil {
+            catalogCacheInsertionOrder.append(key)
+            if catalogCacheInsertionOrder.count > Self.catalogCacheLimit {
+                let evicted = catalogCacheInsertionOrder.removeFirst()
+                catalogCacheByKey.removeValue(forKey: evicted)
+            }
+        }
+        catalogCacheByKey[key] = SessionCatalogCacheEntry(
+            signature: signature,
+            candidates: candidates
+        )
+        catalogCacheLock.unlock()
+        return candidates
     }
 
     public func catalogMetadata(for thread: AgentThread) -> AgentCLISessionMetadata? {
         guard let sessionIdentity = thread.sessionIdentity else { return nil }
-        return adaptersByKind[thread.agentCLI]?.metadataFromCatalog(
-            sessionIdentity: sessionIdentity,
-            workingDirectory: thread.workingDirectory,
-            homeDirectory: homeDirectory
-        )
+        return sessionLinkCandidates(for: thread)
+            .first { $0.identity == sessionIdentity }
+            .map(AgentCLISessionMetadata.init(from:))
     }
 
     public func exactSessionLinkCandidate(for thread: AgentThread) -> SessionLinkCandidate? {
@@ -856,6 +906,67 @@ extension AgentCLIAdapter {
 }
 
 private enum AgentCLISessionCatalog {
+    static func signature(
+        kind: AgentCLIKind,
+        homeDirectory: URL,
+        workingDirectory: URL
+    ) -> String {
+        switch kind {
+        case .codex:
+            let codexDirectory =
+                homeDirectory
+                .appendingPathComponent(".codex", isDirectory: true)
+            return combinedSignature(
+                [
+                    fileSignature(
+                        for: codexDirectory.appendingPathComponent("session_index.jsonl")),
+                    fileSignature(for: codexDirectory.appendingPathComponent("history.jsonl")),
+                ])
+        case .claude:
+            let projectsDirectory =
+                homeDirectory
+                .appendingPathComponent(".claude", isDirectory: true)
+                .appendingPathComponent("projects", isDirectory: true)
+            let directories = claudeProjectDirectories(
+                root: projectsDirectory,
+                workingDirectory: workingDirectory
+            )
+            return combinedSignature(
+                directories.map { directorySignature(for: $0, extensions: ["jsonl"]) }
+                    + [fileSignature(for: projectsDirectory)]
+            )
+        case .opencode:
+            let sessionsDirectory =
+                homeDirectory
+                .appendingPathComponent(".local", isDirectory: true)
+                .appendingPathComponent("share", isDirectory: true)
+                .appendingPathComponent("opencode", isDirectory: true)
+                .appendingPathComponent("storage", isDirectory: true)
+                .appendingPathComponent("session", isDirectory: true)
+            return directorySignature(for: sessionsDirectory, extensions: ["json"])
+        case .copilot:
+            let stateDirectory =
+                homeDirectory
+                .appendingPathComponent(".copilot", isDirectory: true)
+                .appendingPathComponent("session-state", isDirectory: true)
+            guard let sessionDirectories = directoryChildren(of: stateDirectory) else {
+                return fileSignature(for: stateDirectory)
+            }
+            return combinedSignature(
+                [fileSignature(for: stateDirectory)]
+                    + sessionDirectories.flatMap { sessionDirectory in
+                        [
+                            fileSignature(
+                                for: sessionDirectory.appendingPathComponent(
+                                    "vscode.metadata.json")),
+                            fileSignature(
+                                for: sessionDirectory.appendingPathComponent("events.jsonl")),
+                        ]
+                    }
+            )
+        }
+    }
+
     static func codexCandidates(
         homeDirectory: URL,
         workingDirectory: URL
@@ -1244,6 +1355,39 @@ private enum AgentCLISessionCatalog {
             guard !line.isEmpty, let data = line.data(using: .utf8) else { return nil }
             return try? JSONSerialization.jsonObject(with: data)
         }
+    }
+
+    private static func combinedSignature(_ parts: [String]) -> String {
+        parts.sorted().joined(separator: "\n")
+    }
+
+    private static func directorySignature(for directory: URL, extensions: Set<String>) -> String {
+        let fileSignatures = enumeratedFiles(in: directory, extensions: extensions)
+            .map(fileSignature(for:))
+        return combinedSignature([fileSignature(for: directory)] + fileSignatures)
+    }
+
+    // Fingerprints a file/dir by size + modification time. contentModificationDate is sub-second on
+    // APFS, so an in-place edit is detected; the only blind spot is a same-size rewrite within one
+    // mtime tick on a coarse (1s-granularity) filesystem, which is acceptable for session catalogs.
+    private static func fileSignature(for url: URL) -> String {
+        guard
+            let values = try? url.resourceValues(forKeys: [
+                .contentModificationDateKey,
+                .fileSizeKey,
+                .isDirectoryKey,
+                .isRegularFileKey,
+            ])
+        else {
+            return "\(url.standardizedFileURL.path):missing"
+        }
+        let modified = values.contentModificationDate?.timeIntervalSince1970 ?? 0
+        let size = values.fileSize ?? 0
+        let kind =
+            values.isDirectory == true
+            ? "directory"
+            : values.isRegularFile == true ? "file" : "other"
+        return "\(url.standardizedFileURL.path):\(kind):\(size):\(modified)"
     }
 
     private static func firstString(in object: Any, keys: [String]) -> String? {

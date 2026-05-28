@@ -167,6 +167,45 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(activity.isUnread)
     }
 
+    func testDuplicateCapturedActivityDoesNotPersistAgain() {
+        let fixture = AppModelFixture()
+        let store = fixture.store
+        let model = AppModel(store: store)
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output: "Thinking...\nEsc to interrupt\n"
+        )
+        let firstWriteCount = store.threadActivityWriteCount
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.firstThreadID,
+            output: "Thinking...\nEsc to interrupt\n"
+        )
+
+        XCTAssertEqual(model.threadActivity(for: fixture.firstThreadID).status, .working)
+        XCTAssertEqual(store.threadActivityWriteCount, firstWriteCount)
+    }
+
+    func testDuplicateActivityReadDoesNotPersistAgain() {
+        let fixture = AppModelFixture()
+        let store = fixture.store
+        let model = AppModel(store: store, isApplicationActive: { true })
+
+        model.recordAgentTerminalNotification(
+            threadID: fixture.firstThreadID,
+            title: "Agent waiting",
+            body: "Agent needs input"
+        )
+        model.recordAgentTerminalFocus(threadID: fixture.firstThreadID, focused: true)
+        let firstReadWriteCount = store.threadActivityWriteCount
+
+        model.recordAgentTerminalFocus(threadID: fixture.firstThreadID, focused: true)
+
+        XCTAssertFalse(model.threadActivity(for: fixture.firstThreadID).isUnread)
+        XCTAssertEqual(store.threadActivityWriteCount, firstReadWriteCount)
+    }
+
     func testCapturedCodexPromptReadyOutputClearsStaleWorkingState() {
         let fixture = AppModelFixture()
         let model = AppModel(store: fixture.store)
@@ -322,6 +361,35 @@ final class AppModelTests: XCTestCase {
         let activity = model.threadActivity(for: thread.id)
         XCTAssertEqual(activity.status, .complete)
         XCTAssertEqual(activity.preview, "Buffered event")
+    }
+
+    func testBackgroundAgentCLIPollAppliesCaptureAndActivityOutput() throws {
+        let fixture = AppModelFixture()
+        let activityDirectory = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(
+            captureDirectory: activityDirectory,
+            activityDirectory: activityDirectory,
+            helperBinDirectory: activityDirectory
+        )
+        let model = AppModel(store: fixture.store, agentCLIBindings: service)
+        let thread = try XCTUnwrap(model.selectedThread)
+        let captureURL = try XCTUnwrap(service.captureLogURL(for: thread))
+        let activityURL = try XCTUnwrap(service.activityLogURL(for: thread))
+        try "session id: background-session\nsession name: Background Session\n".write(
+            to: captureURL, atomically: true, encoding: .utf8)
+        try """
+        {"thread_id":"\(thread.id.uuidString)","status":"complete","title":"Done","body":"Background poll","source":"helper","created_at":42}
+
+        """.write(to: activityURL, atomically: true, encoding: .utf8)
+
+        model.pollAgentCLIStateInBackground()
+
+        waitUntil {
+            model.selectedThread?.sessionIdentity == "background-session"
+                && model.threadActivity(for: thread.id).preview == "Background poll"
+        }
+        XCTAssertEqual(model.selectedThread?.displayName, "Background Session")
+        XCTAssertEqual(model.threadActivity(for: thread.id).status, .complete)
     }
 
     func testBottomTerminalStartsCollapsed() {
@@ -996,6 +1064,108 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertFalse(model.selectedThreadRequiresSessionLink)
         XCTAssertTrue(request.command[2].contains("/tmp/bin/codex"))
+    }
+
+    func testCodexSessionCatalogCacheInvalidatesWhenSourceChanges() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        let indexURL = codexDirectory.appendingPathComponent("session_index.jsonl")
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let thread = AgentThread(
+            id: fixture.firstThreadID,
+            displayName: "Thread",
+            projectID: fixture.projectID,
+            workingDirectory: fixture.root,
+            agentCLI: .codex
+        )
+        try """
+        {"id":"codex-1","thread_name":"First","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(to: indexURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(service.sessionLinkCandidates(for: thread).first?.displayName, "First")
+
+        try """
+        {"id":"codex-1","thread_name":"Second Updated","updated_at":"2026-05-26T10:01:00Z"}
+        """.write(to: indexURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            service.sessionLinkCandidates(for: thread).first?.displayName,
+            "Second Updated"
+        )
+    }
+
+    func testCodexSessionCatalogCacheReturnsCachedResultWhenSignatureUnchanged() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        let indexURL = codexDirectory.appendingPathComponent("session_index.jsonl")
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let thread = AgentThread(
+            id: fixture.firstThreadID,
+            displayName: "Thread",
+            projectID: fixture.projectID,
+            workingDirectory: fixture.root,
+            agentCLI: .codex
+        )
+        let frozenDate = Date(timeIntervalSince1970: 1_700_000_000)
+        // "First" and "Third" are the same byte length, so a rewrite that also restores the original
+        // modification time leaves the size+mtime signature identical and must be served from cache.
+        try """
+        {"id":"codex-1","thread_name":"First","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(to: indexURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: frozenDate], ofItemAtPath: indexURL.path)
+
+        XCTAssertEqual(service.sessionLinkCandidates(for: thread).first?.displayName, "First")
+
+        try """
+        {"id":"codex-1","thread_name":"Third","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(to: indexURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: frozenDate], ofItemAtPath: indexURL.path)
+
+        XCTAssertEqual(service.sessionLinkCandidates(for: thread).first?.displayName, "First")
+    }
+
+    func testCodexSessionCatalogCacheInvalidatesWhenModificationTimeChanges() throws {
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        let indexURL = codexDirectory.appendingPathComponent("session_index.jsonl")
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let thread = AgentThread(
+            id: fixture.firstThreadID,
+            displayName: "Thread",
+            projectID: fixture.projectID,
+            workingDirectory: fixture.root,
+            agentCLI: .codex
+        )
+        // Same byte length as the rewrite below, so only a changed modification time can invalidate
+        // the cache — proving mtime (not size) drives invalidation.
+        try """
+        {"id":"codex-1","thread_name":"First","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(to: indexURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_700_000_000)],
+            ofItemAtPath: indexURL.path)
+
+        XCTAssertEqual(service.sessionLinkCandidates(for: thread).first?.displayName, "First")
+
+        try """
+        {"id":"codex-1","thread_name":"Third","updated_at":"2026-05-26T10:00:00Z"}
+        """.write(to: indexURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_700_000_060)],
+            ofItemAtPath: indexURL.path)
+
+        XCTAssertEqual(service.sessionLinkCandidates(for: thread).first?.displayName, "Third")
     }
 
     func testLoadedUnboundCodexThreadAutoLinksExactNameAndResumes() throws {
@@ -2542,6 +2712,20 @@ private final class RecordingThreadActivityBadgeUpdater: ThreadActivityBadgeUpda
     func updateUnreadThreadActivityCount(_ count: Int) {
         counts.append(count)
     }
+}
+
+private func waitUntil(
+    timeout: TimeInterval = 2,
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ condition: () -> Bool
+) {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() { return }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    }
+    XCTAssertTrue(condition(), "Condition was not met before timeout", file: file, line: line)
 }
 
 extension FileHandle {

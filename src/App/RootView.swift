@@ -2122,9 +2122,7 @@ private struct MainWorkspaceView: View {
                 }
             }
             .onReceive(capturePoll) { _ in
-                model.pollSelectedAgentCLICaptureLog()
-                model.syncSelectedThreadSessionMetadata()
-                model.pollAgentCLIActivityLogs()
+                model.pollAgentCLIStateInBackground()
             }
         }
         .padding(8)

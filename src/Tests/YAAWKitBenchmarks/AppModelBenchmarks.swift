@@ -4,6 +4,16 @@ import XCTest
 @testable import YAAWKit
 
 final class AppModelBenchmarks: BenchmarkCase {
+    private var workingDirectories: [URL] = []
+
+    override func tearDown() async throws {
+        for url in workingDirectories {
+            BenchmarkSupport.removeDirectory(url)
+        }
+        workingDirectories = []
+        try await super.tearDown()
+    }
+
     func test_bench_activeThreadsForSelectedProject_1k() throws {
         let model = try makeModel(threadCount: 1_000)
         measure {
@@ -45,9 +55,46 @@ final class AppModelBenchmarks: BenchmarkCase {
         }
     }
 
+    func test_bench_selectThread_sqlite_in_1kCorpus() throws {
+        let model = try makeSQLiteModel(threadCount: 1_000)
+        let active = model.activeThreadsForSelectedProject
+        let candidates = stride(from: 0, to: active.count, by: max(active.count / 2, 1)).map {
+            active[$0].id
+        }
+        XCTAssertGreaterThanOrEqual(candidates.count, 2)
+        var index = 0
+        measure {
+            index = (index + 1) % candidates.count
+            model.selectThread(id: candidates[index])
+        }
+    }
+
+    func test_bench_duplicateActivity_in_10kCorpus() throws {
+        let model = try makeModel(threadCount: 10_000)
+        let threadID = try XCTUnwrap(model.selectedThreadID)
+        model.recordAgentCLIOutput(threadID: threadID, output: "Thinking...\nEsc to interrupt\n")
+        measure {
+            for _ in 0..<10_000 {
+                model.recordAgentCLIOutput(
+                    threadID: threadID,
+                    output: "Thinking...\nEsc to interrupt\n"
+                )
+            }
+        }
+    }
+
     private func makeModel(threadCount: Int) throws -> AppModel {
         let snapshot = Self.makeSnapshot(threadCount: threadCount)
         let store = InMemoryYAAWStore(snapshot: snapshot)
+        return AppModel(store: store)
+    }
+
+    private func makeSQLiteModel(threadCount: Int) throws -> AppModel {
+        let directory = try BenchmarkSupport.temporaryDirectory(named: "appmodel-sqlite")
+        workingDirectories.append(directory)
+        let store = try SQLiteYAAWStore(
+            databasePath: directory.appendingPathComponent("state.sqlite"))
+        store.save(Self.makeSnapshot(threadCount: threadCount))
         return AppModel(store: store)
     }
 

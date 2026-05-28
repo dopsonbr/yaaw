@@ -282,15 +282,56 @@ public final class SQLiteYAAWStore: YAAWStore {
 
     public func setSelectedThread(_ threadID: UUID?) {
         runIncremental(name: "set_selected_thread") {
-            if let threadID {
-                try upsertAppStateStatement(key: "selected_thread_id", value: threadID.uuidString)
-            } else {
-                let statement = try prepare("DELETE FROM app_state WHERE key = ?")
-                defer { sqlite3_finalize(statement) }
-                bind("selected_thread_id", at: 1, in: statement)
-                try stepDone(statement)
-            }
+            try setSelectedThreadStatement(threadID)
         }
+    }
+
+    public func persistSelectionChange(
+        selectedProjectID: UUID,
+        selectedThreadID: UUID?,
+        touchedProject: Project?,
+        touchedThread: AgentThread?,
+        expandedProjectID: UUID?
+    ) {
+        runIncremental(name: "persist_selection_change") {
+            if let touchedProject {
+                try upsertProjectStatement(touchedProject)
+            }
+            if let touchedThread {
+                try upsertThreadStatement(touchedThread)
+            }
+            if let expandedProjectID {
+                try setProjectExpandedStatement(projectID: expandedProjectID, isExpanded: true)
+            }
+            try upsertAppStateStatement(
+                key: "selected_project_id", value: selectedProjectID.uuidString)
+            try setSelectedThreadStatement(selectedThreadID)
+        }
+    }
+
+    // Persists the selected thread (or clears it) within an existing transaction; shared by
+    // setSelectedThread and persistSelectionChange so the DELETE/upsert logic lives in one place.
+    fileprivate func setSelectedThreadStatement(_ threadID: UUID?) throws {
+        if let threadID {
+            try upsertAppStateStatement(key: "selected_thread_id", value: threadID.uuidString)
+        } else {
+            let statement = try prepare("DELETE FROM app_state WHERE key = ?")
+            defer { sqlite3_finalize(statement) }
+            bind("selected_thread_id", at: 1, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    // Marks a project expanded within an existing transaction, preserving its archive-expanded
+    // flag; shared by setProjectExpanded and persistSelectionChange.
+    fileprivate func setProjectExpandedStatement(projectID: UUID, isExpanded: Bool) throws {
+        let currentArchiveState =
+            try loadSidebarProjectState(projectID: projectID)?.isArchiveExpanded ?? false
+        try upsertSidebarProjectState(
+            projectID: projectID,
+            isExpanded: isExpanded,
+            isArchiveExpanded: currentArchiveState
+        )
     }
 
     public func setLayoutState(_ state: LayoutState) {
@@ -318,13 +359,7 @@ public final class SQLiteYAAWStore: YAAWStore {
 
     public func setProjectExpanded(_ projectID: UUID, isExpanded: Bool) {
         runIncremental(name: "set_project_expanded") {
-            let currentArchiveState =
-                try loadSidebarProjectState(projectID: projectID)?.isArchiveExpanded ?? false
-            try upsertSidebarProjectState(
-                projectID: projectID,
-                isExpanded: isExpanded,
-                isArchiveExpanded: currentArchiveState
-            )
+            try setProjectExpandedStatement(projectID: projectID, isExpanded: isExpanded)
         }
     }
 
@@ -428,6 +463,24 @@ extension SQLiteYAAWStore {
     fileprivate func open() throws {
         guard sqlite3_open(databasePath.path, &database) == SQLITE_OK else {
             throw SQLiteStoreError.openFailed(errorMessage)
+        }
+        try execute("PRAGMA journal_mode = WAL")
+        try execute("PRAGMA synchronous = NORMAL")
+        // PRAGMA journal_mode returns the resulting mode and does NOT error when WAL is unsupported
+        // (e.g. some network filesystems), so verify it actually took effect instead of silently
+        // running on a rollback journal with the WAL performance assumptions unmet.
+        let journalMode = (try? querySingleString("PRAGMA journal_mode"))?.lowercased()
+        if journalMode != "wal" {
+            diagnosticRecorder.record(
+                DiagnosticEvent(
+                    category: "SQLite",
+                    name: "sqlite_wal_not_enabled",
+                    metadata: [
+                        "database": databasePath.path,
+                        "journal_mode": journalMode ?? "unknown",
+                    ]
+                )
+            )
         }
     }
 
@@ -994,6 +1047,15 @@ extension SQLiteYAAWStore {
         defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return Int(sqlite3_column_int(statement, 0))
+    }
+
+    fileprivate func querySingleString(_ sql: String) throws -> String? {
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW,
+            let text = sqlite3_column_text(statement, 0)
+        else { return nil }
+        return String(cString: text)
     }
 
     fileprivate func tableColumns(_ table: String) throws -> Set<String> {
