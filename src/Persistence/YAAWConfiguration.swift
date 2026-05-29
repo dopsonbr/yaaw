@@ -252,12 +252,19 @@ public struct IconSettings: Codable, Equatable, Sendable {
 }
 
 public struct FontSettings: Codable, Equatable, Sendable {
+    /// Sentinel family meaning "use the interface font/size" for the file browser.
+    public static let inheritFamily = "inherit"
+
     public var interfaceFamily: String
     public var interfaceSize: Double
     public var editorFamily: String
     public var editorSize: Double
     public var terminalFamily: String
     public var terminalSize: Double
+    /// File browser list font. `inherit` (the default) means follow the interface font.
+    public var fileBrowserFamily: String
+    /// File browser list size. `0` means inherit the interface size.
+    public var fileBrowserSize: Double
 
     public init(
         interfaceFamily: String = "system",
@@ -265,7 +272,9 @@ public struct FontSettings: Codable, Equatable, Sendable {
         editorFamily: String = "system-monospace",
         editorSize: Double = 13,
         terminalFamily: String = "",
-        terminalSize: Double = 12
+        terminalSize: Double = 12,
+        fileBrowserFamily: String = FontSettings.inheritFamily,
+        fileBrowserSize: Double = 0
     ) {
         self.interfaceFamily = interfaceFamily
         self.interfaceSize = interfaceSize
@@ -273,6 +282,8 @@ public struct FontSettings: Codable, Equatable, Sendable {
         self.editorSize = editorSize
         self.terminalFamily = terminalFamily
         self.terminalSize = terminalSize
+        self.fileBrowserFamily = fileBrowserFamily
+        self.fileBrowserSize = fileBrowserSize
     }
 
     public init(from decoder: Decoder) throws {
@@ -287,6 +298,11 @@ public struct FontSettings: Codable, Equatable, Sendable {
         self.terminalFamily =
             try container.decodeIfPresent(String.self, forKey: .terminalFamily) ?? ""
         self.terminalSize = try container.decodeIfPresent(Double.self, forKey: .terminalSize) ?? 12
+        self.fileBrowserFamily =
+            try container.decodeIfPresent(String.self, forKey: .fileBrowserFamily)
+            ?? FontSettings.inheritFamily
+        self.fileBrowserSize =
+            try container.decodeIfPresent(Double.self, forKey: .fileBrowserSize) ?? 0
     }
 
     fileprivate func validated() -> FontSettings {
@@ -296,7 +312,11 @@ public struct FontSettings: Codable, Equatable, Sendable {
             editorFamily: editorFamily.nonBlankOr("system-monospace"),
             editorSize: editorSize.clampedFontSize(defaultValue: 13, minimum: 9, maximum: 28),
             terminalFamily: terminalFamily.trimmed,
-            terminalSize: terminalSize.clampedFontSize(defaultValue: 12, minimum: 8, maximum: 32)
+            terminalSize: terminalSize.clampedFontSize(defaultValue: 12, minimum: 8, maximum: 32),
+            fileBrowserFamily: fileBrowserFamily.nonBlankOr(FontSettings.inheritFamily),
+            fileBrowserSize: fileBrowserSize > 0
+                ? fileBrowserSize.clampedFontSize(defaultValue: 13, minimum: 9, maximum: 28)
+                : 0
         )
     }
 }
@@ -1061,7 +1081,7 @@ public final class YAMLConfigurationStore {
 
             fonts:
               # default: system
-              # active now: controls SwiftUI chrome, settings, sidebar, and file browser text.
+              # active now: controls SwiftUI chrome, settings, sidebar, and (unless overridden below) file browser text.
               # use system for the native macOS UI font, or a real installed font family name.
               interfaceFamily: \(yamlScalar(configuration.fonts.interfaceFamily))
               # default: 13
@@ -1077,6 +1097,12 @@ public final class YAMLConfigurationStore {
               terminalFamily: \(yamlScalar(configuration.fonts.terminalFamily))
               # default: 12
               terminalSize: \(configuration.fonts.terminalSize.formattedFontSize)
+              # default: inherit, which follows interfaceFamily.
+              # active now: controls the right-panel file browser list font only.
+              # use inherit, system, system-monospace, or a real installed font family name.
+              fileBrowserFamily: \(yamlScalar(configuration.fonts.fileBrowserFamily))
+              # default: 0, which inherits interfaceSize. Set a value (9-28) to override.
+              fileBrowserSize: \(configuration.fonts.fileBrowserSize.formattedFontSize)
 
             keyboardShortcuts:
             \(renderShortcuts(configuration.keyboardShortcuts))

@@ -1120,6 +1120,8 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(seeded.fonts.editorSize, 13)
         XCTAssertEqual(seeded.fonts.terminalFamily, "")
         XCTAssertEqual(seeded.fonts.terminalSize, 12)
+        XCTAssertEqual(seeded.fonts.fileBrowserFamily, "inherit")
+        XCTAssertEqual(seeded.fonts.fileBrowserSize, 0)
         XCTAssertTrue(seeded.ignoreRules.contains(".git"))
         XCTAssertTrue(seeded.ignoreRules.contains("node_modules"))
         XCTAssertTrue(seeded.ignoreRules.contains("Music"))
@@ -1132,6 +1134,8 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(template.contains("interfaceFamily: system"))
         XCTAssertTrue(template.contains("editorFamily: system-monospace"))
         XCTAssertTrue(template.contains("terminalSize: 12"))
+        XCTAssertTrue(template.contains("fileBrowserFamily: inherit"))
+        XCTAssertTrue(template.contains("fileBrowserSize: 0"))
         XCTAssertTrue(
             template.contains(
                 "# not changeable yet: custom palettes are reserved for future expansion."))
@@ -1180,6 +1184,50 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(configuration.fonts.editorSize, 15)
         XCTAssertEqual(configuration.fonts.terminalFamily, "JetBrains Mono")
         XCTAssertEqual(configuration.fonts.terminalSize, 16)
+        // Omitted file browser font keys inherit the interface font.
+        XCTAssertEqual(configuration.fonts.fileBrowserFamily, "inherit")
+        XCTAssertEqual(configuration.fonts.fileBrowserSize, 0)
+    }
+
+    func testYAMLConfigurationFileBrowserFontOverrideAndValidation() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        // Explicit override is preserved.
+        let overridden = try store.validate(
+            text: """
+                version: 1
+                fonts:
+                  fileBrowserFamily: Fira Code
+                  fileBrowserSize: 15
+                """
+        )
+        XCTAssertEqual(overridden.fonts.fileBrowserFamily, "Fira Code")
+        XCTAssertEqual(overridden.fonts.fileBrowserSize, 15)
+
+        // A non-positive size collapses back to inherit (0); blank family becomes inherit.
+        let inherited = try store.validate(
+            text: """
+                version: 1
+                fonts:
+                  fileBrowserFamily: "  "
+                  fileBrowserSize: 0
+                """
+        )
+        XCTAssertEqual(inherited.fonts.fileBrowserFamily, "inherit")
+        XCTAssertEqual(inherited.fonts.fileBrowserSize, 0)
+
+        // An out-of-range explicit size is clamped.
+        let clamped = try store.validate(
+            text: """
+                version: 1
+                fonts:
+                  fileBrowserFamily: SF Mono
+                  fileBrowserSize: 999
+                """
+        )
+        XCTAssertEqual(clamped.fonts.fileBrowserFamily, "SF Mono")
+        XCTAssertEqual(clamped.fonts.fileBrowserSize, 28)
     }
 
     func testYAMLConfigurationSaveRendersFontSettingsAndReloadsThem() throws {

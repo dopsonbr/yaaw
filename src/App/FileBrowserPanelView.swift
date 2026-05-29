@@ -367,7 +367,7 @@ private struct FileBrowserRowContent: View {
 
             Text(displayName)
                 .font(
-                    fonts.interfaceFont(
+                    fonts.fileBrowserFont(
                         sizeOffset: -1, weight: entry.isDirectory ? .semibold : .regular)
                 )
                 .foregroundStyle(dracula(.foreground))

@@ -39,6 +39,15 @@ public struct RightPanelTab: Identifiable, Equatable, Sendable {
     public static let git = RightPanelTab(id: gitID, kind: .git, title: "Git")
     public static let defaultNvim = RightPanelTab(id: defaultNvimID, kind: .nvim, title: "nvim")
 
+    public var isClosable: Bool {
+        switch id {
+        case Self.filesID, Self.defaultBrowserID, Self.gitID, Self.defaultNvimID:
+            false
+        default:
+            kind == .browser || kind == .nvim
+        }
+    }
+
     public static func nvim(relativePath: String) -> RightPanelTab {
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         return RightPanelTab(
@@ -199,6 +208,21 @@ public struct RightPanelState: Equatable, Sendable {
         tabs = Self.normalizedTabs(tabs)
     }
 
+    @discardableResult
+    public mutating func closeTab(id tabID: String) -> RightPanelTab? {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }),
+            tabs[index].isClosable
+        else {
+            return nil
+        }
+        let removedTab = tabs.remove(at: index)
+        tabs = Self.normalizedTabs(tabs)
+        if selectedTabID == removedTab.id {
+            selectedTabID = fallbackSelection(afterClosing: removedTab, at: index)
+        }
+        return removedTab
+    }
+
     public static func normalizedTabs(_ tabs: [RightPanelTab]) -> [RightPanelTab] {
         var seenBrowser = Set<String>()
         var browserTabs: [RightPanelTab] = []
@@ -226,6 +250,25 @@ public struct RightPanelState: Equatable, Sendable {
 
         return [.files] + browserTabs + [.git] + nvimTabs
     }
+
+    private func fallbackSelection(afterClosing closedTab: RightPanelTab, at closedIndex: Int)
+        -> String
+    {
+        if let nextSameKind = tabs.dropFirst(closedIndex).first(where: {
+            $0.kind == closedTab.kind
+        }) {
+            return nextSameKind.id
+        }
+        if let previousSameKind = tabs.prefix(closedIndex).last(where: {
+            $0.kind == closedTab.kind
+        }) {
+            return previousSameKind.id
+        }
+        if tabs.contains(where: { $0.id == closedTab.kind.defaultTabID }) {
+            return closedTab.kind.defaultTabID
+        }
+        return RightPanelTab.filesID
+    }
 }
 
 extension RightPanelMode {
@@ -244,6 +287,19 @@ extension RightPanelMode {
 }
 
 extension RightPanelTabKind {
+    var defaultTabID: String {
+        switch self {
+        case .files:
+            RightPanelTab.filesID
+        case .browser:
+            RightPanelTab.defaultBrowserID
+        case .git:
+            RightPanelTab.gitID
+        case .nvim:
+            RightPanelTab.defaultNvimID
+        }
+    }
+
     fileprivate var mode: RightPanelMode {
         switch self {
         case .files:

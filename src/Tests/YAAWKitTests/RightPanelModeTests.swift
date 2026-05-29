@@ -37,4 +37,53 @@ final class RightPanelModeTests: XCTestCase {
 
         XCTAssertEqual(tab.title, "index.html")
     }
+
+    func testClosingSelectedNvimTabFallsBackToDefaultNvimTab() {
+        var state = RightPanelState.defaultState(selectedMode: .files)
+        let tab = state.openNvimTab(relativePath: "src/App/RootView.swift")
+
+        XCTAssertEqual(state.closeTab(id: tab.id), tab)
+
+        XCTAssertFalse(state.tabs.contains(tab))
+        XCTAssertEqual(state.selectedTabID, RightPanelTab.defaultNvimID)
+        XCTAssertEqual(state.selectedMode, .nvim)
+    }
+
+    func testClosingSelectedBrowserTabFallsBackToNearestBrowserTab() {
+        var state = RightPanelState.defaultState(selectedMode: .files)
+        let first = state.openBrowserTab(urlString: "https://example.com/docs")
+        let second = state.openBrowserTab(urlString: "https://example.com/status")
+        state.selectTab(id: first.id)
+
+        XCTAssertEqual(state.closeTab(id: first.id), first)
+
+        XCTAssertFalse(state.tabs.contains(first))
+        XCTAssertTrue(state.tabs.contains(second))
+        XCTAssertEqual(state.selectedTabID, second.id)
+        XCTAssertEqual(state.selectedMode, .browser)
+    }
+
+    func testPinnedRightPanelTabsCannotBeClosed() {
+        var state = RightPanelState.defaultState(selectedMode: .git)
+
+        XCTAssertNil(state.closeTab(id: RightPanelTab.filesID))
+        XCTAssertNil(state.closeTab(id: RightPanelTab.defaultBrowserID))
+        XCTAssertNil(state.closeTab(id: RightPanelTab.gitID))
+        XCTAssertNil(state.closeTab(id: RightPanelTab.defaultNvimID))
+
+        XCTAssertEqual(state.tabs, RightPanelState.defaultTabs)
+        XCTAssertEqual(state.selectedTabID, RightPanelTab.gitID)
+    }
+
+    func testClosingUnselectedTabKeepsCurrentSelection() {
+        var state = RightPanelState.defaultState(selectedMode: .files)
+        let browserTab = state.openBrowserTab(urlString: "https://example.com/docs")
+        let nvimTab = state.openNvimTab(relativePath: "README.md")
+
+        XCTAssertEqual(state.selectedTabID, nvimTab.id)
+        XCTAssertEqual(state.closeTab(id: browserTab.id), browserTab)
+
+        XCTAssertEqual(state.selectedTabID, nvimTab.id)
+        XCTAssertEqual(state.selectedMode, .nvim)
+    }
 }

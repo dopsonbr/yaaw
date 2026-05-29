@@ -87,15 +87,12 @@ struct CollapsedPanelRail: View {
 
     var body: some View {
         VStack {
-            Button(action: action) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(dracula(.cyan))
-            .help(accessibilityLabel)
-            .accessibilityLabel(accessibilityLabel)
+            ChromeIconButton(
+                systemImage: systemImage,
+                tint: dracula(.cyan),
+                help: accessibilityLabel,
+                action: action
+            )
 
             Spacer()
         }

@@ -2313,6 +2313,64 @@ final class AppModelTests: XCTestCase {
         )
     }
 
+    func testClosingSelectedBrowserTabRemovesItAndSelectsDefaultBrowserTab() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.openBrowserTab(urlString: "example.com/docs")
+        let tabID = model.selectedRightPanelTab.id
+
+        model.closeRightPanelTab(id: tabID)
+
+        XCTAssertFalse(model.selectedRightPanelState.tabs.contains { $0.id == tabID })
+        XCTAssertEqual(model.selectedRightPanelTab.id, RightPanelTab.defaultBrowserID)
+        XCTAssertEqual(model.selectedRightPanelMode, .browser)
+    }
+
+    func testClosingSelectedNvimTabRemovesItAndSelectsDefaultNvimTab() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.openFileInNvim(relativePath: "README.md")
+        let tabID = RightPanelTab.nvimTabID(relativePath: "README.md")
+
+        model.closeRightPanelTab(id: tabID)
+
+        XCTAssertFalse(model.selectedRightPanelState.tabs.contains { $0.id == tabID })
+        XCTAssertEqual(model.selectedRightPanelTab.id, RightPanelTab.defaultNvimID)
+        XCTAssertEqual(model.selectedRightPanelMode, .nvim)
+    }
+
+    func testClosingNvimTabTerminatesOnlyThatTabTerminalSession() throws {
+        let fixture = AppModelFixture()
+        let manager = PlaceholderTerminalSessionManager()
+        let resolver = StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"])
+        let model = AppModel(
+            store: fixture.store, terminalManager: manager, externalToolResolver: resolver,
+            environment: [:])
+        let readmeTabID = RightPanelTab.nvimTabID(relativePath: "README.md")
+        let rootViewTabID = RightPanelTab.nvimTabID(relativePath: "src/App/RootView.swift")
+
+        model.openFileInNvim(relativePath: "README.md")
+        _ = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
+        model.openFileInNvim(relativePath: "src/App/RootView.swift")
+        _ = try XCTUnwrap(model.activateSelectedRightPanelTerminal())
+
+        model.closeRightPanelTab(id: readmeTabID)
+
+        XCTAssertEqual(
+            model.terminalSession(
+                for: .nvimTab(threadID: fixture.firstThreadID, tabID: readmeTabID))?.state,
+            .terminated
+        )
+        XCTAssertEqual(
+            model.terminalSession(
+                for: .nvimTab(threadID: fixture.firstThreadID, tabID: rootViewTabID))?.state,
+            .active
+        )
+        XCTAssertEqual(model.selectedRightPanelTab.id, rootViewTabID)
+    }
+
     func testOpeningSupportedFileInBrowserUsesFileURLAndStaysInWorkingDirectory() throws {
         let root = try temporaryDirectory()
         let preview = root.appendingPathComponent("index.html")

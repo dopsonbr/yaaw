@@ -722,6 +722,26 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         persistRightPanelState(threadID: selectedThreadID)
     }
 
+    public func closeRightPanelTab(id tabID: String) {
+        guard let selectedThreadID else { return }
+        var state = selectedRightPanelState
+        guard let closedTab = state.closeTab(id: tabID) else { return }
+        rightPanelStatesByThreadID[selectedThreadID] = state
+        rightPanelModesByThreadID[selectedThreadID] = state.selectedMode
+        switch closedTab.kind {
+        case .browser:
+            browserUnavailableMessagesByThreadID.removeValue(forKey: selectedThreadID)
+        case .nvim:
+            terminateTerminal(role: .nvimTab(threadID: selectedThreadID, tabID: closedTab.id))
+            nvimRelaunchTokensByTabKey.removeValue(
+                forKey: nvimTabKey(threadID: selectedThreadID, tabID: closedTab.id))
+        case .files, .git:
+            break
+        }
+        persistRightPanelMode(threadID: selectedThreadID)
+        persistRightPanelState(threadID: selectedThreadID)
+    }
+
     public func cycleRightPanelModeForward() {
         selectRightPanelMode(selectedRightPanelMode.next)
     }

@@ -276,37 +276,33 @@ private struct AppChromeHeader: View {
     let onOpenSettings: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button(action: onToggleSidebar) {
-                Image(systemName: IconRole.sidebar.icon.systemSymbolName)
-                    .frame(width: 26, height: 26)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(dracula(.foreground))
-            .help(isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
-            .accessibilityLabel(isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
+        HStack(spacing: 8) {
+            // Leading group: sidebar toggle + navigation.
+            HStack(spacing: 2) {
+                ChromeIconButton(
+                    systemImage: IconRole.sidebar.icon.systemSymbolName,
+                    help: isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar",
+                    action: onToggleSidebar
+                )
 
-            Button(action: onNavigateBack) {
-                Image(systemName: IconRole.navigateBack.icon.systemSymbolName)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(dracula(.comment))
-            .help("Back")
-            .accessibilityLabel("Back")
+                ChromeIconButton(
+                    systemImage: IconRole.navigateBack.icon.systemSymbolName,
+                    tint: dracula(.comment),
+                    help: "Back",
+                    action: onNavigateBack
+                )
 
-            Button(action: onNavigateForward) {
-                Image(systemName: IconRole.navigateForward.icon.systemSymbolName)
-                    .frame(width: 24, height: 24)
+                ChromeIconButton(
+                    systemImage: IconRole.navigateForward.icon.systemSymbolName,
+                    tint: dracula(.comment),
+                    help: "Forward",
+                    action: onNavigateForward
+                )
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(dracula(.comment))
-            .help("Forward")
-            .accessibilityLabel("Forward")
 
             Divider()
                 .overlay(dracula(.currentLine))
-                .frame(height: 28)
+                .frame(height: 24)
 
             Text(title)
                 .font(fonts.interfaceFont(sizeOffset: 2, weight: .semibold))
@@ -316,56 +312,48 @@ private struct AppChromeHeader: View {
 
             Spacer()
 
-            ExternalOpenSplitButton(
-                tools: externalOpenTools,
-                defaultTool: defaultExternalOpenTool,
-                icon: externalOpenIcon,
-                onOpenDefault: onOpenDefaultExternal,
-                onOpenTool: onOpenExternalTool
-            )
+            // Trailing group: tools + window controls.
+            HStack(spacing: 2) {
+                ExternalOpenSplitButton(
+                    tools: externalOpenTools,
+                    defaultTool: defaultExternalOpenTool,
+                    icon: externalOpenIcon,
+                    onOpenDefault: onOpenDefaultExternal,
+                    onOpenTool: onOpenExternalTool
+                )
 
-            Button(action: onInstallLatestRelease) {
-                Image(systemName: IconRole.installUpdate.icon.systemSymbolName)
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(dracula(.foreground))
-            .help("Install latest release")
-            .accessibilityLabel("Install latest release")
-            .accessibilityIdentifier("install-latest-release-button")
+                ChromeIconButton(
+                    systemImage: IconRole.installUpdate.icon.systemSymbolName,
+                    help: "Install latest release",
+                    action: onInstallLatestRelease
+                )
+                .accessibilityIdentifier("install-latest-release-button")
 
-            Button(action: onOpenSettings) {
-                Image(systemName: IconRole.settings.icon.systemSymbolName)
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(dracula(.foreground))
-            .help("Settings")
-            .accessibilityLabel("Open settings")
-            .accessibilityIdentifier("open-settings-button")
+                ChromeIconButton(
+                    systemImage: IconRole.settings.icon.systemSymbolName,
+                    help: "Settings",
+                    action: onOpenSettings
+                )
+                .accessibilityIdentifier("open-settings-button")
 
-            Button(action: onToggleWorkspaceSwap) {
-                Image(systemName: IconRole.workspaceSwap.icon.systemSymbolName)
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(isWorkspaceSwapped ? dracula(.pink) : dracula(.foreground))
-            .help("Swap main and right panels")
-            .accessibilityLabel("Swap main and right panels")
-            .accessibilityIdentifier("swap-main-and-right-panels-button")
+                ChromeIconButton(
+                    systemImage: IconRole.workspaceSwap.icon.systemSymbolName,
+                    tint: isWorkspaceSwapped ? dracula(.pink) : dracula(.foreground),
+                    help: "Swap main and right panels",
+                    action: onToggleWorkspaceSwap
+                )
+                .accessibilityIdentifier("swap-main-and-right-panels-button")
 
-            Button(action: onToggleRightPanel) {
-                Image(systemName: IconRole.rightSidebar.icon.systemSymbolName)
-                    .frame(width: 28, height: 28)
+                ChromeIconButton(
+                    systemImage: IconRole.rightSidebar.icon.systemSymbolName,
+                    help: isRightPanelCollapsed
+                        ? "Expand right-side area" : "Collapse right-side area",
+                    action: onToggleRightPanel
+                )
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(dracula(.foreground))
-            .help(isRightPanelCollapsed ? "Expand right-side area" : "Collapse right-side area")
-            .accessibilityLabel(
-                isRightPanelCollapsed ? "Expand right-side area" : "Collapse right-side area")
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, 10)
     }
 }
 
@@ -408,8 +396,8 @@ private struct ExternalOpenSplitButton: View {
                 }
             } label: {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                    .font(.system(size: 10, weight: ChromeMetrics.glyphWeight))
+                    .frame(width: 26, height: 28)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -418,11 +406,11 @@ private struct ExternalOpenSplitButton: View {
             .accessibilityLabel("Choose external open destination")
             .accessibilityIdentifier("external-open-menu-button")
         }
-        .background(dracula(.currentLine).opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(dracula(.currentLine).opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(dracula(.comment).opacity(0.45), lineWidth: 1)
+            RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius)
+                .stroke(dracula(.comment).opacity(0.22), lineWidth: 1)
         )
     }
 }
@@ -439,11 +427,11 @@ private struct ExternalOpenToolIcon: View {
                 .frame(width: 16, height: 16)
         } else if let tool {
             Image(systemName: tool.systemSymbolName)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: ChromeMetrics.glyphWeight))
                 .foregroundStyle(dracula(.cyan))
         } else {
             Image(systemName: IconRole.openDocument.icon.systemSymbolName)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: ChromeMetrics.glyphWeight))
                 .foregroundStyle(dracula(.comment))
         }
     }
@@ -897,6 +885,26 @@ private struct SettingsEditorView: View {
                     )
                     .accessibilityIdentifier("settings-terminal-size-stepper")
                 }
+
+                settingsRow("File browser font") {
+                    fontFamilyPicker(
+                        label: "File browser font family",
+                        selection: fileBrowserFontFamilySelection,
+                        options: fileBrowserFontFamilyOptions
+                    )
+                    .accessibilityIdentifier("settings-file-browser-font-picker")
+                }
+
+                if effectiveFonts.fileBrowserFamily != FontSettings.inheritFamily {
+                    settingsRow("File browser size") {
+                        fontSizeStepper(
+                            label: "File browser font size",
+                            value: fileBrowserFontSizeSelection,
+                            range: 9...28
+                        )
+                        .accessibilityIdentifier("settings-file-browser-size-stepper")
+                    }
+                }
             }
             .padding(.top, 2)
         }
@@ -936,6 +944,15 @@ private struct SettingsEditorView: View {
         fontFamilyOptions(
             pinned: [
                 ("", "Ghostty default"),
+                ("system-monospace", "System monospace"),
+            ])
+    }
+
+    private var fileBrowserFontFamilyOptions: [(String, String)] {
+        fontFamilyOptions(
+            pinned: [
+                (FontSettings.inheritFamily, "Inherit interface"),
+                ("system", "System"),
                 ("system-monospace", "System monospace"),
             ])
     }
@@ -990,6 +1007,28 @@ private struct SettingsEditorView: View {
             get: { effectiveFonts.terminalSize },
             set: { newValue in
                 saveFontSettings { $0.terminalSize = newValue }
+            }
+        )
+    }
+
+    private var fileBrowserFontFamilySelection: Binding<String> {
+        Binding(
+            get: { effectiveFonts.fileBrowserFamily },
+            set: { newValue in
+                saveFontSettings { $0.fileBrowserFamily = newValue }
+            }
+        )
+    }
+
+    private var fileBrowserFontSizeSelection: Binding<Double> {
+        Binding(
+            // When no explicit size is set (0), display the inherited interface size.
+            get: {
+                effectiveFonts.fileBrowserSize > 0
+                    ? effectiveFonts.fileBrowserSize : effectiveFonts.interfaceSize
+            },
+            set: { newValue in
+                saveFontSettings { $0.fileBrowserSize = newValue }
             }
         )
     }
@@ -1397,16 +1436,20 @@ private struct ProjectSidebarSection: View {
     let onNewThread: () -> Void
     let onRenameThread: (AgentThread) -> Void
     @Environment(\.fontSettings) private var fonts
+    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let isSelected = model.selectedProjectID == project.id
+        let showActions = hovering || isSelected
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 SidebarIconButton(
                     systemImage: (model.isProjectExpanded(project.id)
                         ? IconRole.disclosureExpanded : IconRole.disclosureCollapsed).icon
                         .systemSymbolName,
                     help: model.isProjectExpanded(project.id)
-                        ? "Collapse project" : "Expand project"
+                        ? "Collapse project" : "Expand project",
+                    weight: .regular
                 ) {
                     model.setProjectExpanded(
                         project.id, isExpanded: !model.isProjectExpanded(project.id))
@@ -1444,18 +1487,26 @@ private struct ProjectSidebarSection: View {
                 ) {
                     onNewThread()
                 }
+                .opacity(showActions ? 1 : 0)
+                .allowsHitTesting(showActions)
 
                 SidebarActionsMenu(help: "Project actions") {
                     Button(project.isPinned ? "Unpin Project" : "Pin Project") {
                         model.toggleProjectPinned(id: project.id)
                     }
                 }
+                .opacity(showActions ? 1 : 0)
+                .allowsHitTesting(showActions)
             }
             .padding(.vertical, 6)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 6)
             .background(
-                model.selectedProjectID == project.id ? dracula(.currentLine) : dracula(.background)
+                RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius)
+                    .fill(ChromeMetrics.pillFill(selected: isSelected, hovering: hovering))
             )
+            .padding(.horizontal, ChromeMetrics.rowHInset)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
             .draggable(project.id.uuidString)
             .dropDestination(for: String.self) { items, _ in
                 guard let rawID = items.first,
@@ -1488,10 +1539,13 @@ private struct ActiveThreadRow: View {
     let thread: AgentThread
     let onRenameThread: (AgentThread) -> Void
     @Environment(\.fontSettings) private var fonts
+    @State private var hovering = false
 
     var body: some View {
         let activity = model.threadActivity(for: thread.id)
-        HStack(spacing: 6) {
+        let isSelected = model.selectedThreadID == thread.id
+        let showActions = hovering || isSelected
+        return HStack(spacing: 6) {
             Button {
                 model.selectThread(id: thread.id)
             } label: {
@@ -1559,12 +1613,19 @@ private struct ActiveThreadRow: View {
                     model.archiveThread(id: thread.id)
                 }
             }
+            .opacity(showActions ? 1 : 0)
+            .allowsHitTesting(showActions)
         }
         .font(fonts.interfaceFont())
         .padding(.vertical, 5)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 6)
         .background(
-            model.selectedThreadID == thread.id ? dracula(.currentLine) : dracula(.background))
+            RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius)
+                .fill(ChromeMetrics.pillFill(selected: isSelected, hovering: hovering))
+        )
+        .padding(.horizontal, ChromeMetrics.rowHInset)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }
 
@@ -1601,17 +1662,17 @@ private struct ThreadActivityIndicator: View {
                 systemName: activity.isUnread
                     ? "exclamationmark.circle.fill" : "exclamationmark.circle"
             )
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: ChromeMetrics.statusGlyph, weight: ChromeMetrics.glyphWeight))
             .foregroundStyle(dracula(.yellow))
             .help("Needs input")
         case .complete:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: ChromeMetrics.statusGlyph, weight: ChromeMetrics.glyphWeight))
                 .foregroundStyle(dracula(.green))
                 .help("Complete")
         case .inactive:
             Image(systemName: "circle")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: ChromeMetrics.statusGlyph, weight: ChromeMetrics.glyphWeight))
                 .foregroundStyle(dracula(.comment))
                 .help("Inactive")
         }
@@ -1649,15 +1710,16 @@ private struct SectionHeader: View {
 private struct SidebarIconButton: View {
     let systemImage: String
     let help: String
+    var weight: Font.Weight = ChromeMetrics.glyphWeight
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .frame(width: 18, height: 18)
+                .frame(width: ChromeMetrics.sidebarButton, height: ChromeMetrics.sidebarButton)
         }
         .buttonStyle(.plain)
-        .font(.system(size: 12, weight: .semibold))
+        .font(.system(size: ChromeMetrics.sidebarGlyph, weight: weight))
         .foregroundStyle(dracula(.cyan))
         .help(help)
         .accessibilityLabel(help)
@@ -1673,11 +1735,11 @@ private struct SidebarActionsMenu<Content: View>: View {
             content()
         } label: {
             Image(systemName: IconRole.moreActions.icon.systemSymbolName)
-                .frame(width: 18, height: 18)
+                .frame(width: ChromeMetrics.sidebarButton, height: ChromeMetrics.sidebarButton)
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
-        .font(.system(size: 12, weight: .semibold))
+        .font(.system(size: ChromeMetrics.sidebarGlyph, weight: ChromeMetrics.glyphWeight))
         .foregroundStyle(dracula(.cyan))
         .help(help)
         .accessibilityLabel(help)
@@ -1751,9 +1813,12 @@ private struct ArchivedThreadRow: View {
     let thread: AgentThread
     let onRenameThread: (AgentThread) -> Void
     @Environment(\.fontSettings) private var fonts
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        let isSelected = model.selectedThreadID == thread.id
+        let showActions = hovering || isSelected
+        return HStack(spacing: 8) {
             Button {
                 model.selectThread(id: thread.id)
             } label: {
@@ -1792,9 +1857,19 @@ private struct ArchivedThreadRow: View {
                     model.unarchiveThread(id: thread.id)
                 }
             }
+            .opacity(showActions ? 1 : 0)
+            .allowsHitTesting(showActions)
         }
         .font(fonts.interfaceFont(sizeOffset: -1))
         .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius)
+                .fill(ChromeMetrics.pillFill(selected: isSelected, hovering: hovering))
+        )
+        .padding(.horizontal, ChromeMetrics.rowHInset)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
         .help(model.projectDisplayName(for: thread.projectID))
     }
 }
@@ -2345,12 +2420,12 @@ private struct RightPanelView: View {
                                 systemImage: IconRole.rightPanelMode(.git).icon.systemSymbolName)
                         }
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 4) {
                             Image(systemName: IconRole.add.icon.systemSymbolName)
                             Image(systemName: IconRole.disclosureExpanded.icon.systemSymbolName)
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(.system(size: 9, weight: ChromeMetrics.glyphWeight))
                         }
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight))
                         .frame(width: 38, height: 32)
                         .contentShape(Rectangle())
                     }
@@ -2482,33 +2557,63 @@ private struct RightPanelView: View {
 
     private func rightPanelTabButton(_ tab: RightPanelTab) -> some View {
         let isSelected = model.selectedRightPanelTab.id == tab.id
-        return Button {
-            model.selectRightPanelTab(id: tab.id)
-        } label: {
-            HStack(spacing: 6) {
-                Image(
-                    systemName: IconRole.rightPanelMode(mode(for: tab.kind)).icon.systemSymbolName
-                )
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: 22, height: 32)
+        let showsTitle = isSelected && shouldShowTabTitle(tab)
+        return HStack(spacing: 4) {
+            Button {
+                model.selectRightPanelTab(id: tab.id)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(
+                        systemName: IconRole.rightPanelMode(mode(for: tab.kind)).icon
+                            .systemSymbolName
+                    )
+                    .font(.system(size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight))
+                    .frame(width: 22, height: 32)
 
-                if isSelected, shouldShowTabTitle(tab) {
-                    Text(tab.title)
-                        .font(fonts.interfaceFont(sizeOffset: -2, weight: .semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 150, alignment: .leading)
+                    if showsTitle {
+                        Text(tab.title)
+                            .font(fonts.interfaceFont(sizeOffset: -2, weight: .semibold))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 150, alignment: .leading)
+                    }
                 }
+                .padding(.leading, showsTitle ? 8 : 6)
+                .padding(.trailing, isSelected && tab.isClosable ? 0 : (showsTitle ? 8 : 6))
+                .frame(height: 32)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, isSelected && shouldShowTabTitle(tab) ? 8 : 6)
-            .frame(height: 32)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            if isSelected, tab.isClosable {
+                Button {
+                    model.closeRightPanelTab(id: tab.id)
+                } label: {
+                    Image(systemName: IconRole.close.icon.systemSymbolName)
+                        .font(.system(size: 11, weight: ChromeMetrics.glyphWeight))
+                        .frame(width: 18, height: 32)
+                }
+                .buttonStyle(.plain)
+                .help("Close \(tab.title) tab")
+                .accessibilityLabel("Close \(tab.title) tab")
+            }
         }
-        .buttonStyle(.plain)
-        .background(isSelected ? dracula(.currentLine) : dracula(.background))
+        .frame(height: 32)
+        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius)
+                .fill(ChromeMetrics.pillFill(selected: isSelected, hovering: false))
+        )
         .foregroundStyle(isSelected ? dracula(.pink) : dracula(.foreground))
         .help(tab.title)
         .accessibilityLabel("\(tab.title) right tool panel tab")
+        .contextMenu {
+            if tab.isClosable {
+                Button("Close Tab") {
+                    model.closeRightPanelTab(id: tab.id)
+                }
+            }
+        }
     }
 
     private func shouldShowTabTitle(_ tab: RightPanelTab) -> Bool {
@@ -2901,6 +3006,18 @@ extension FontSettings {
         swiftUIFont(
             family: editorFamily, size: editorSize + sizeOffset, weight: weight, design: .monospaced
         )
+    }
+
+    /// File browser list font. When `fileBrowserFamily` is `inherit` (the default),
+    /// this resolves to the interface font/size so behavior matches the rest of the chrome.
+    func fileBrowserFont(sizeOffset: Double = 0, weight: Font.Weight = .regular) -> Font {
+        let normalized = fileBrowserFamily.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let inherits = normalized.isEmpty || normalized == FontSettings.inheritFamily
+        let family = inherits ? interfaceFamily : fileBrowserFamily
+        let baseSize = fileBrowserSize > 0 ? fileBrowserSize : interfaceSize
+        return swiftUIFont(
+            family: family, size: baseSize + sizeOffset, weight: weight, design: .default)
     }
 
     private func swiftUIFont(
