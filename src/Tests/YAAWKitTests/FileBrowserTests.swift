@@ -9,12 +9,10 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(matcher.shouldIgnore(relativePath: ".git", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "src/node_modules", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "DerivedData/App", isDirectory: true))
-        XCTAssertTrue(matcher.shouldIgnore(relativePath: "Music", isDirectory: true))
-        XCTAssertTrue(matcher.shouldIgnore(relativePath: "Movies", isDirectory: true))
-        XCTAssertTrue(matcher.shouldIgnore(relativePath: "Pictures", isDirectory: true))
-        XCTAssertTrue(
-            matcher.shouldIgnore(
-                relativePath: "Pictures/Photos Library.photoslibrary", isDirectory: true))
+        // Home-directory noise (Music/Movies/Pictures) and `worktrees` are no longer
+        // default rules, so they are surfaced like any other directory.
+        XCTAssertFalse(matcher.shouldIgnore(relativePath: "Music", isDirectory: true))
+        XCTAssertFalse(matcher.shouldIgnore(relativePath: "worktrees", isDirectory: true))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "dist", isDirectory: false))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "src/.build", isDirectory: false))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: ".env", isDirectory: false))
@@ -238,7 +236,7 @@ final class FileBrowserTests: XCTestCase {
             ])
     }
 
-    func testTemporaryDirectoryIndexIncludesHiddenFilesAndSkipsIgnoredDirectories() throws {
+    func testTemporaryDirectoryIndexShowsIgnoredDirectoriesButPrunesDescendants() throws {
         let root = try temporaryDirectory()
         try writeFile(root.appendingPathComponent(".env"), contents: "TOKEN=example")
         try writeFile(root.appendingPathComponent("README.md"), contents: "# Project")
@@ -247,8 +245,6 @@ final class FileBrowserTests: XCTestCase {
         try writeFile(root.appendingPathComponent(".git/config"), contents: "ignored")
         try writeFile(root.appendingPathComponent("dist/app.js"), contents: "ignored")
         try writeFile(root.appendingPathComponent("DerivedData/build.log"), contents: "ignored")
-        try writeFile(
-            root.appendingPathComponent("Music/Music Library.musiclibrary/db"), contents: "ignored")
         let threadID = UUID()
 
         let result = try BackgroundFileIndexer.buildIndex(
@@ -261,7 +257,8 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(result.metadata.threadID, threadID)
         XCTAssertEqual(result.metadata.rootPath, root.standardizedFileURL.path)
         XCTAssertEqual(result.metadata.fileCount, result.entries.count)
-        XCTAssertEqual(result.metadata.ignoredDirectoryCount, 5)
+        // node_modules, .git, dist, DerivedData are pruned (collapsed) but visible.
+        XCTAssertEqual(result.metadata.ignoredDirectoryCount, 4)
         XCTAssertTrue(
             result.entries.contains(FileBrowserEntry(relativePath: ".env", isDirectory: false)))
         XCTAssertTrue(
@@ -269,11 +266,74 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(
             result.entries.contains(
                 FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false)))
-        XCTAssertFalse(result.entries.contains { $0.relativePath.contains("node_modules") })
-        XCTAssertFalse(result.entries.contains { $0.relativePath.contains(".git") })
-        XCTAssertFalse(result.entries.contains { $0.relativePath.contains("Music") })
+        // Ignored directories appear as pruned entries...
+        XCTAssertTrue(
+            result.entries.contains(
+                FileBrowserEntry(relativePath: "node_modules", isDirectory: true, isPruned: true)))
+        XCTAssertTrue(
+            result.entries.contains(
+                FileBrowserEntry(relativePath: ".git", isDirectory: true, isPruned: true)))
+        // ...but their descendants are not eagerly indexed.
+        XCTAssertFalse(result.entries.contains { $0.relativePath.contains("/") && $0.relativePath.hasPrefix("node_modules/") })
+        XCTAssertFalse(result.entries.contains { $0.relativePath.hasPrefix(".git/") })
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: root.appendingPathComponent(".yaaw").path))
+    }
+
+    func testIndexSubtreeReturnsDescendantsAndUnprunedRoot() throws {
+        let root = try temporaryDirectory()
+        try writeFile(root.appendingPathComponent("node_modules/pkg/index.js"), contents: "x")
+        try writeFile(root.appendingPathComponent("node_modules/pkg/readme.md"), contents: "y")
+        let threadID = UUID()
+
+        let result = try BackgroundFileIndexer.buildSubtreeIndex(
+            threadID: threadID,
+            root: root,
+            relativeSubpath: "node_modules",
+            ignoreRules: YAAWConfiguration.defaultIgnoreRules,
+            indexedAt: Date(timeIntervalSince1970: 1)
+        )
+
+        // The subtree root comes back un-pruned so a merge flips the collapsed node.
+        XCTAssertTrue(
+            result.entries.contains(
+                FileBrowserEntry(relativePath: "node_modules", isDirectory: true, isPruned: false)))
+        // Descendants are re-prefixed to be root-relative.
+        XCTAssertTrue(
+            result.entries.contains(
+                FileBrowserEntry(relativePath: "node_modules/pkg/index.js", isDirectory: false)))
+        XCTAssertTrue(
+            result.entries.contains(
+                FileBrowserEntry(relativePath: "node_modules/pkg", isDirectory: true)))
+    }
+
+    func testTreeBuilderMergingReplacesPrunedNodeAndSortsInPreOrder() throws {
+        let entries = [
+            FileBrowserEntry(relativePath: "AGENTS.md", isDirectory: false),
+            FileBrowserEntry(relativePath: "node_modules", isDirectory: true, isPruned: true),
+            FileBrowserEntry(relativePath: "src", isDirectory: true),
+            FileBrowserEntry(relativePath: "src/main.swift", isDirectory: false),
+        ]
+        let subtree = [
+            FileBrowserEntry(relativePath: "node_modules", isDirectory: true, isPruned: false),
+            FileBrowserEntry(relativePath: "node_modules/pkg", isDirectory: true),
+            FileBrowserEntry(relativePath: "node_modules/pkg/index.js", isDirectory: false),
+        ]
+
+        let merged = FileBrowserTreeBuilder.merging(
+            entries, withSubtree: subtree, replacingPrunedPath: "node_modules")
+
+        // The pruned placeholder is gone; the loaded node and its children are present.
+        XCTAssertFalse(merged.contains { $0.relativePath == "node_modules" && $0.isPruned })
+        XCTAssertTrue(
+            merged.contains(
+                FileBrowserEntry(relativePath: "node_modules/pkg/index.js", isDirectory: false)))
+        // Children sort immediately after their parent (depth-first pre-order).
+        let nodeModulesIndex = merged.firstIndex { $0.relativePath == "node_modules" }
+        let pkgIndex = merged.firstIndex { $0.relativePath == "node_modules/pkg" }
+        XCTAssertNotNil(nodeModulesIndex)
+        XCTAssertNotNil(pkgIndex)
+        XCTAssertEqual(pkgIndex, nodeModulesIndex.map { $0 + 1 })
     }
 
     func testCacheKeyIncludesDirectoryBranchAndIgnoreRules() throws {
@@ -469,6 +529,82 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(model.fileBrowserState.metadata?.fileCount, 1)
     }
 
+    func testExpandingPrunedDirectoryMergesLazySubtreeAndMakesItSearchable() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let prunedDir = FileBrowserEntry(
+            relativePath: "node_modules", isDirectory: true, isPruned: true)
+        let readme = FileBrowserEntry(relativePath: "README.md", isDirectory: false)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    entries: [readme, prunedDir])))
+
+        XCTAssertTrue(model.fileBrowserState.entries.contains(prunedDir))
+
+        model.expandPrunedDirectory(relativePath: "node_modules")
+        XCTAssertEqual(indexer.subtreeRequestCount, 1)
+
+        let needle = FileBrowserEntry(
+            relativePath: "node_modules/pkg/needle.js", isDirectory: false)
+        let subtree = [
+            FileBrowserEntry(relativePath: "node_modules", isDirectory: true, isPruned: false),
+            FileBrowserEntry(relativePath: "node_modules/pkg", isDirectory: true),
+            needle,
+        ]
+        indexer.completeSubtreeRequest(
+            at: 0,
+            result: .success(
+                FileIndexResult(
+                    entries: subtree,
+                    metadata: FileIndexMetadata(
+                        threadID: fixture.firstThreadID,
+                        rootPath: fixture.firstRoot.path,
+                        indexedAt: Date(timeIntervalSince1970: 5),
+                        fileCount: subtree.count,
+                        ignoredDirectoryCount: 0))))
+
+        // The pruned placeholder is replaced by the loaded contents.
+        XCTAssertFalse(model.fileBrowserState.entries.contains { $0.relativePath == "node_modules" && $0.isPruned })
+        XCTAssertTrue(model.fileBrowserState.entries.contains(needle))
+        XCTAssertEqual(model.fileBrowserState.metadata?.ignoredDirectoryCount, 0)
+
+        // Lazily-loaded files now participate in fuzzy search.
+        model.updateFileSearchQuery("needle.js")
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.map(\.relativePath), [needle.relativePath])
+    }
+
+    func testExpandingDirectoryIgnoresNonPrunedAndDuplicateRequests() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let prunedDir = FileBrowserEntry(
+            relativePath: "node_modules", isDirectory: true, isPruned: true)
+        let plainDir = FileBrowserEntry(relativePath: "src", isDirectory: true)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    entries: [plainDir, prunedDir])))
+
+        // Ordinary directories never trigger a lazy load.
+        model.expandPrunedDirectory(relativePath: "src")
+        XCTAssertEqual(indexer.subtreeRequestCount, 0)
+
+        // Repeated expands of the same pruned directory coalesce to one request.
+        model.expandPrunedDirectory(relativePath: "node_modules")
+        model.expandPrunedDirectory(relativePath: "node_modules")
+        XCTAssertEqual(indexer.subtreeRequestCount, 1)
+    }
+
     func testAppModelPublishesFullBrowseIndexAndSearchesAcrossFullIndex() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
@@ -645,11 +781,21 @@ private final class DelayedFileIndexer: FileIndexing {
         ignoreRules: [String],
         completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
     ) {}
+
+    func indexSubtree(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    ) {}
 }
 
 private final class ManualFileIndexer: FileIndexing {
     private var completions: [@Sendable (Result<FileIndexResult, Error>) -> Void] = []
+    private var subtreeCompletions: [@Sendable (Result<FileIndexResult, Error>) -> Void] = []
     var requestCount: Int { completions.count }
+    var subtreeRequestCount: Int { subtreeCompletions.count }
 
     func indexFiles(
         threadID: UUID,
@@ -660,8 +806,22 @@ private final class ManualFileIndexer: FileIndexing {
         completions.append(completion)
     }
 
+    func indexSubtree(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    ) {
+        subtreeCompletions.append(completion)
+    }
+
     func completeRequest(at index: Int, result: Result<FileIndexResult, Error>) {
         completions[index](result)
+    }
+
+    func completeSubtreeRequest(at index: Int, result: Result<FileIndexResult, Error>) {
+        subtreeCompletions[index](result)
     }
 
     func result(threadID: UUID, root: URL, entries: [FileBrowserEntry]) -> FileIndexResult {

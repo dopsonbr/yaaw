@@ -187,6 +187,75 @@ public final class FileIndexCacheCoordinator: @unchecked Sendable {
         }
     }
 
+    /// Lazily indexes a pruned subtree and merges it into the persisted full index
+    /// so the directory's contents become available (and searchable) without a full
+    /// re-enumeration. Coalesces concurrent expands of the same subtree.
+    public func refreshSubtree(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        key: FileIndexCacheKey,
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    ) {
+        let dedupKey = "\(key.value)|subtree:\(relativeSubpath)"
+        let consumer = PendingFileIndexConsumer(threadID: threadID, completion: completion)
+        lock.lock()
+        if inFlightByCacheKey[dedupKey] != nil {
+            inFlightByCacheKey[dedupKey, default: []].append(consumer)
+            lock.unlock()
+            return
+        }
+        inFlightByCacheKey[dedupKey] = [consumer]
+        lock.unlock()
+
+        fileIndexer.indexSubtree(
+            threadID: threadID, root: root, relativeSubpath: relativeSubpath,
+            ignoreRules: ignoreRules
+        ) { [weak self] result in
+            self?.finishSubtreeRefresh(
+                result: result, key: key, dedupKey: dedupKey, prunedPath: relativeSubpath)
+        }
+    }
+
+    private func finishSubtreeRefresh(
+        result: Result<FileIndexResult, Error>,
+        key: FileIndexCacheKey,
+        dedupKey: String,
+        prunedPath: String
+    ) {
+        lock.lock()
+        let consumers = inFlightByCacheKey.removeValue(forKey: dedupKey) ?? []
+        lock.unlock()
+
+        switch result {
+        case .success(let subtreeResult):
+            // Merge into the persisted full index when present so a later re-expand
+            // (after a thread switch) reuses the cached contents.
+            if let cached = store.cachedFileIndex(cacheKey: key.value) {
+                let mergedEntries = FileBrowserTreeBuilder.merging(
+                    cached.entries, withSubtree: subtreeResult.entries,
+                    replacingPrunedPath: prunedPath)
+                var metadata = cached.metadata
+                metadata.fileCount = mergedEntries.count
+                store.upsertCachedFileIndex(
+                    CachedFileIndex(metadata: metadata, entries: mergedEntries))
+            }
+            for consumer in consumers {
+                consumer.completion(
+                    .success(
+                        FileIndexResult(
+                            entries: subtreeResult.entries,
+                            metadata: subtreeResult.metadata.forThread(consumer.threadID)
+                        )))
+            }
+        case .failure(let error):
+            for consumer in consumers {
+                consumer.completion(.failure(error))
+            }
+        }
+    }
+
     private func finishRefresh(result: Result<FileIndexResult, Error>, key: FileIndexCacheKey) {
         lock.lock()
         let consumers = inFlightByCacheKey.removeValue(forKey: key.value) ?? []

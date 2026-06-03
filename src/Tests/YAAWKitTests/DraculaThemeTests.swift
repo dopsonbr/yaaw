@@ -15,6 +15,7 @@ final class DraculaThemeTests: XCTestCase {
                 "quiet-light",
                 "solarized-light",
                 "dracula",
+                "ghostty-default",
                 "dark-2026",
                 "dark-plus",
                 "dark-modern",

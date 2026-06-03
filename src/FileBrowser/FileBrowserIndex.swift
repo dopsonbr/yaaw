@@ -21,6 +21,18 @@ public protocol FileIndexing: AnyObject {
         ignoreRules: [String],
         completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
     )
+
+    /// Indexes a single pruned subtree on demand. `relativeSubpath` is the path of
+    /// the pruned directory relative to `root`. The returned entries (including the
+    /// subtree root itself, un-pruned) use paths relative to `root`, so they can be
+    /// merged directly into the full index.
+    func indexSubtree(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    )
 }
 
 public final class BackgroundFileIndexer: FileIndexing {
@@ -62,6 +74,85 @@ public final class BackgroundFileIndexer: FileIndexing {
         }
     }
 
+    public func indexSubtree(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    ) {
+        let root = root.standardizedFileURL
+        let subpath = FilePathNormalizer.normalizedRelativePath(relativeSubpath)
+        queue.async {
+            do {
+                let result = try Self.buildSubtreeIndex(
+                    threadID: threadID,
+                    root: root,
+                    relativeSubpath: subpath,
+                    ignoreRules: ignoreRules,
+                    fileManager: .default
+                )
+                DispatchQueue.main.async {
+                    completion(.success(result))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    /// Indexes the subtree rooted at `relativeSubpath`, re-applying ignore rules
+    /// within it (so nested heavy directories stay pruned), and returns entries
+    /// whose paths are relative to `root`. Includes the subtree root itself as an
+    /// un-pruned directory so a merge flips the original pruned node to "loaded".
+    public static func buildSubtreeIndex(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        fileManager: FileManager = .default,
+        indexedAt: Date = Date()
+    ) throws -> FileIndexResult {
+        guard !relativeSubpath.isEmpty else {
+            return try buildIndex(
+                threadID: threadID, root: root, ignoreRules: ignoreRules,
+                fileManager: fileManager, indexedAt: indexedAt)
+        }
+        let subRoot = root.appendingPathComponent(relativeSubpath).standardizedFileURL
+        let subResult = try buildIndex(
+            threadID: threadID, root: subRoot, ignoreRules: ignoreRules,
+            fileManager: fileManager, indexedAt: indexedAt)
+        var entries = reprefix(entries: subResult.entries, under: relativeSubpath)
+        entries.insert(
+            FileBrowserEntry(relativePath: relativeSubpath, isDirectory: true, isPruned: false),
+            at: 0)
+        entries.sort(by: FileBrowserTreeBuilder.sortEntriesForTree)
+        return FileIndexResult(
+            entries: entries,
+            metadata: FileIndexMetadata(
+                threadID: threadID,
+                rootPath: root.path,
+                indexedAt: indexedAt,
+                fileCount: entries.count,
+                ignoredDirectoryCount: subResult.metadata.ignoredDirectoryCount
+            )
+        )
+    }
+
+    private static func reprefix(entries: [FileBrowserEntry], under prefix: String)
+        -> [FileBrowserEntry]
+    {
+        entries.map { entry in
+            FileBrowserEntry(
+                relativePath: "\(prefix)/\(entry.relativePath)",
+                isDirectory: entry.isDirectory,
+                isPruned: entry.isPruned
+            )
+        }
+    }
+
     public static func buildIndex(
         threadID: UUID,
         root: URL,
@@ -99,6 +190,13 @@ public final class BackgroundFileIndexer: FileIndexing {
                 ignoreMatcher.shouldIgnore(relativePath: normalizedPath, isDirectory: true)
             {
                 ignoredDirectoryCount += 1
+                // Show the directory (collapsed) but do not descend into it. Its
+                // contents are indexed lazily when the user expands it, so a heavy
+                // directory like node_modules never bloats the eager index, yet the
+                // directory is never hidden from the tree.
+                entries.append(
+                    FileBrowserEntry(
+                        relativePath: normalizedPath, isDirectory: true, isPruned: true))
                 enumerator.skipDescendants()
                 continue
             }

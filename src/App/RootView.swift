@@ -944,6 +944,7 @@ private struct SettingsEditorView: View {
         fontFamilyOptions(
             pinned: [
                 ("", "Ghostty default"),
+                ("JetBrains Mono", "JetBrains Mono"),
                 ("system-monospace", "System monospace"),
             ])
     }
@@ -2573,6 +2574,9 @@ private struct RightPanelView: View {
                     defaultExternalEditorTool: defaultExternalEditorTool,
                     onOpenExternally: onOpenFileExternally,
                     onCopyPath: onCopyPath,
+                    onExpandDirectory: { entry in
+                        model.expandPrunedDirectory(relativePath: entry.relativePath)
+                    },
                     onTreeBuilt: model.recordFileBrowserTreeBuilt(entryCount:rowCount:durationMS:)
                 )
                 .onAppear {

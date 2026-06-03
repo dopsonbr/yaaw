@@ -1206,6 +1206,26 @@ private final class ImmediateFileIndexer: FileIndexing {
             completion(.failure(error))
         }
     }
+
+    func indexSubtree(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    ) {
+        do {
+            let result = try BackgroundFileIndexer.buildSubtreeIndex(
+                threadID: threadID,
+                root: root,
+                relativeSubpath: relativeSubpath,
+                ignoreRules: ignoreRules
+            )
+            completion(.success(result))
+        } catch {
+            completion(.failure(error))
+        }
+    }
 }
 
 extension [String] {

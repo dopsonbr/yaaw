@@ -197,6 +197,26 @@ public enum FileBrowserTreeBuilder {
         return left.name.localizedStandardCompare(right.name) == .orderedAscending
     }
 
+    /// Merges a lazily-indexed subtree into the full entry list: drops the pruned
+    /// placeholder for `prunedPath`, removes any stale entries beneath it, appends
+    /// the subtree entries (which include `prunedPath` itself, un-pruned), and
+    /// re-sorts into depth-first pre-order so the tree builder sees a consistent
+    /// ordering. Idempotent: re-merging the same subtree replaces it cleanly.
+    public static func merging(
+        _ entries: [FileBrowserEntry],
+        withSubtree subtree: [FileBrowserEntry],
+        replacingPrunedPath prunedPath: String
+    ) -> [FileBrowserEntry] {
+        let descendantPrefix = "\(prunedPath)/"
+        var merged = entries.filter { entry in
+            entry.relativePath != prunedPath
+                && !entry.relativePath.hasPrefix(descendantPrefix)
+        }
+        merged.append(contentsOf: subtree)
+        merged.sort(by: sortEntriesForTree)
+        return merged
+    }
+
     public static func sortEntriesForTree(_ left: FileBrowserEntry, _ right: FileBrowserEntry)
         -> Bool
     {

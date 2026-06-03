@@ -1134,13 +1134,13 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(seeded.fonts.interfaceSize, 13)
         XCTAssertEqual(seeded.fonts.editorFamily, "system-monospace")
         XCTAssertEqual(seeded.fonts.editorSize, 13)
-        XCTAssertEqual(seeded.fonts.terminalFamily, "")
-        XCTAssertEqual(seeded.fonts.terminalSize, 12)
+        XCTAssertEqual(seeded.fonts.terminalFamily, "JetBrains Mono")
+        XCTAssertEqual(seeded.fonts.terminalSize, 15)
         XCTAssertEqual(seeded.fonts.fileBrowserFamily, "inherit")
         XCTAssertEqual(seeded.fonts.fileBrowserSize, 0)
         XCTAssertTrue(seeded.ignoreRules.contains(".git"))
         XCTAssertTrue(seeded.ignoreRules.contains("node_modules"))
-        XCTAssertTrue(seeded.ignoreRules.contains("Music"))
+        XCTAssertFalse(seeded.ignoreRules.contains("Music"))
         XCTAssertTrue(template.contains("# YAAW settings."))
         XCTAssertTrue(template.contains("# default: [nvim, vim, vi]"))
         XCTAssertTrue(template.contains("globalChatsDirectory: \"~/yaaw\""))
@@ -1149,7 +1149,8 @@ final class PersistenceTests: XCTestCase {
         XCTAssertFalse(template.contains("only dracula is implemented"))
         XCTAssertTrue(template.contains("interfaceFamily: system"))
         XCTAssertTrue(template.contains("editorFamily: system-monospace"))
-        XCTAssertTrue(template.contains("terminalSize: 12"))
+        XCTAssertTrue(template.contains("terminalFamily: \"JetBrains Mono\""))
+        XCTAssertTrue(template.contains("terminalSize: 15"))
         XCTAssertTrue(template.contains("fileBrowserFamily: inherit"))
         XCTAssertTrue(template.contains("fileBrowserSize: 0"))
         XCTAssertTrue(
@@ -1390,8 +1391,10 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.tools.git.preferred, "tig")
         XCTAssertEqual(reloaded.tools.diff.fallback, ["delta", "--diff"])
         XCTAssertEqual(reloaded.tools.agents.codex, "codex-nightly")
-        XCTAssertTrue(reloaded.ignoreRules.contains("vendor"))
-        XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
+        // An explicit ignoreRules list is now respected verbatim — defaults the
+        // user omitted (e.g. .build) are NOT silently re-added.
+        XCTAssertEqual(reloaded.ignoreRules, [".git", "node_modules", "vendor"])
+        XCTAssertFalse(reloaded.ignoreRules.contains(".build"))
     }
 
     func testYAMLConfigurationRendersEveryKeyboardShortcutAction() throws {
@@ -1481,7 +1484,7 @@ final class PersistenceTests: XCTestCase {
         )
     }
 
-    func testYAMLConfigurationMergesMissingDefaults() throws {
+    func testYAMLConfigurationRespectsExplicitIgnoreRulesWithoutReinjectingDefaults() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -1502,12 +1505,28 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.tools.externalOpen.defaultToolID, .zed)
         XCTAssertEqual(
             reloaded.tools.externalOpen.preferredToolIDs, ExternalOpenSettings.defaultPreferred)
-        XCTAssertTrue(reloaded.ignoreRules.contains(".git"))
-        XCTAssertTrue(reloaded.ignoreRules.contains("node_modules"))
-        XCTAssertTrue(reloaded.ignoreRules.contains("Music"))
-        XCTAssertTrue(reloaded.ignoreRules.contains("Movies"))
-        XCTAssertTrue(reloaded.ignoreRules.contains("Pictures"))
-        XCTAssertTrue(reloaded.ignoreRules.contains("Photos Library.photoslibrary"))
+        // The user's explicit list is respected verbatim — omitted defaults stay omitted.
+        XCTAssertEqual(reloaded.ignoreRules, [".git", "node_modules"])
+        XCTAssertFalse(reloaded.ignoreRules.contains("dist"))
+    }
+
+    func testYAMLConfigurationSeedsDefaultIgnoreRulesWhenKeyAbsent() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(
+            """
+            agent:
+              default: codex
+            """.utf8
+        ).write(to: path)
+        let store = YAMLConfigurationStore(path: path)
+
+        let reloaded = store.load()
+
+        // No ignoreRules key: defaults are seeded.
+        XCTAssertEqual(reloaded.ignoreRules, FileIndexingSettings.defaultIgnoreRules)
+        XCTAssertFalse(reloaded.ignoreRules.contains("worktrees"))
     }
 
     func testYAMLConfigurationClampsFontSizesAndFallbacksBlankFamilies() throws {

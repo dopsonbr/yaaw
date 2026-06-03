@@ -112,6 +112,27 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
     }
 
     public var terminalANSIPalette: [String] {
+        if id == "ghostty-default" {
+            return [
+                "#1d1f21",
+                "#cc6666",
+                "#b5bd68",
+                "#f0c674",
+                "#81a2be",
+                "#b294bb",
+                "#8abeb7",
+                "#c5c8c6",
+                "#666666",
+                "#d54e53",
+                "#b9ca4a",
+                "#e7c547",
+                "#7aa6da",
+                "#c397d8",
+                "#70c0b1",
+                "#eaeaea",
+            ]
+        }
+
         if id == ThemeCatalog.defaultID {
             return [
                 "#21222c",
@@ -353,6 +374,22 @@ public enum ThemeCatalog {
             purple: "#bd93f9",
             red: "#ff5555",
             yellow: "#f1fa8c"
+        ),
+        theme(
+            id: "ghostty-default",
+            displayName: "Ghostty Default",
+            group: .dark,
+            background: "#282c34",
+            currentLine: "#373b41",
+            foreground: "#ffffff",
+            comment: "#969896",
+            cyan: "#8abeb7",
+            green: "#b5bd68",
+            orange: "#de935f",
+            pink: "#b294bb",
+            purple: "#81a2be",
+            red: "#cc6666",
+            yellow: "#f0c674"
         ),
         theme(
             id: "dark-2026",

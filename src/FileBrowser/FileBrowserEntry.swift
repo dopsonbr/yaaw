@@ -4,16 +4,22 @@ public struct FileBrowserEntry: Identifiable, Equatable, Sendable {
     public let id: String
     public let relativePath: String
     public let isDirectory: Bool
+    /// A directory that matched an ignore rule: it is shown in the tree (collapsed)
+    /// but its descendants are not eagerly indexed. Expanding it indexes the subtree
+    /// on demand. `false` for everything else, including directories whose contents
+    /// have already been loaded.
+    public let isPruned: Bool
 
-    public init(relativePath: String, isDirectory: Bool) {
+    public init(relativePath: String, isDirectory: Bool, isPruned: Bool = false) {
         self.id = relativePath
         self.relativePath = relativePath
         self.isDirectory = isDirectory
+        self.isPruned = isPruned
     }
 }
 
 public struct FileIndexMetadata: Equatable, Sendable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public var threadID: UUID
     public var cacheKey: String?

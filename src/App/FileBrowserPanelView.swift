@@ -13,6 +13,7 @@ struct FileBrowserPanel: View {
     let defaultExternalEditorTool: ExternalOpenToolID?
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
     let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
+    let onExpandDirectory: (FileBrowserEntry) -> Void
     let onTreeBuilt: (Int, Int, Int) -> Void
     @State private var expandedFolders: Set<String> = []
     @State private var typedQuery: String = ""
@@ -90,7 +91,8 @@ struct FileBrowserPanel: View {
                                 onOpenInBrowser: onOpenInBrowser,
                                 defaultExternalEditorTool: defaultExternalEditorTool,
                                 onOpenExternally: onOpenExternally,
-                                onCopyPath: onCopyPath
+                                onCopyPath: onCopyPath,
+                                onExpandDirectory: onExpandDirectory
                             )
                         }
                     } else {
@@ -135,7 +137,7 @@ struct FileBrowserPanel: View {
         }
         let ignored =
             metadata.ignoredDirectoryCount == 1
-            ? "1 ignored directory" : "\(metadata.ignoredDirectoryCount) ignored directories"
+            ? "1 collapsed directory" : "\(metadata.ignoredDirectoryCount) collapsed directories"
         let isSearching = !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if isSearching {
             if state.isVisibleEntryLimitApplied {
@@ -196,6 +198,7 @@ private struct FileBrowserTreeRowView: View {
     let defaultExternalEditorTool: ExternalOpenToolID?
     let onOpenExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
     let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
+    let onExpandDirectory: (FileBrowserEntry) -> Void
 
     var body: some View {
         Button {
@@ -233,6 +236,11 @@ private struct FileBrowserTreeRowView: View {
             expandedFolders.remove(row.entry.relativePath)
         } else {
             expandedFolders.insert(row.entry.relativePath)
+            // Pruned directories have no indexed children yet; request a lazy load
+            // so the folder fills in. AppModel ignores this for ordinary folders.
+            if row.entry.isPruned {
+                onExpandDirectory(row.entry)
+            }
         }
     }
 
@@ -387,9 +395,11 @@ private struct FileBrowserRowContent: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+        .opacity(entry.isPruned ? 0.55 : 1)
         .padding(.leading, CGFloat(depth) * 14)
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .help(entry.isPruned ? "Not indexed — expand to load and search its contents" : "")
         .background(
             isHovered
                 ? AnyShapeStyle(dracula(.currentLine).opacity(0.45)) : AnyShapeStyle(Color.clear)

@@ -375,6 +375,14 @@ private final class NeverCompletingFileIndexer: FileIndexing {
         ignoreRules: [String],
         completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
     ) {}
+
+    func indexSubtree(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    ) {}
 }
 
 private struct BenchmarkExecutableResolver: AgentCLIExecutableResolving {

@@ -115,7 +115,6 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
             )
         }
         configuration.tools = configuration.tools.validated()
-        configuration.fileIndexing = configuration.fileIndexing.mergingMissingDefaultIgnoreRules()
         return configuration
     }
 }
@@ -271,8 +270,8 @@ public struct FontSettings: Codable, Equatable, Sendable {
         interfaceSize: Double = 13,
         editorFamily: String = "system-monospace",
         editorSize: Double = 13,
-        terminalFamily: String = "",
-        terminalSize: Double = 12,
+        terminalFamily: String = "JetBrains Mono",
+        terminalSize: Double = 15,
         fileBrowserFamily: String = FontSettings.inheritFamily,
         fileBrowserSize: Double = 0
     ) {
@@ -296,8 +295,8 @@ public struct FontSettings: Codable, Equatable, Sendable {
             try container.decodeIfPresent(String.self, forKey: .editorFamily) ?? "system-monospace"
         self.editorSize = try container.decodeIfPresent(Double.self, forKey: .editorSize) ?? 13
         self.terminalFamily =
-            try container.decodeIfPresent(String.self, forKey: .terminalFamily) ?? ""
-        self.terminalSize = try container.decodeIfPresent(Double.self, forKey: .terminalSize) ?? 12
+            try container.decodeIfPresent(String.self, forKey: .terminalFamily) ?? "JetBrains Mono"
+        self.terminalSize = try container.decodeIfPresent(Double.self, forKey: .terminalSize) ?? 15
         self.fileBrowserFamily =
             try container.decodeIfPresent(String.self, forKey: .fileBrowserFamily)
             ?? FontSettings.inheritFamily
@@ -312,7 +311,7 @@ public struct FontSettings: Codable, Equatable, Sendable {
             editorFamily: editorFamily.nonBlankOr("system-monospace"),
             editorSize: editorSize.clampedFontSize(defaultValue: 13, minimum: 9, maximum: 28),
             terminalFamily: terminalFamily.trimmed,
-            terminalSize: terminalSize.clampedFontSize(defaultValue: 12, minimum: 8, maximum: 32),
+            terminalSize: terminalSize.clampedFontSize(defaultValue: 15, minimum: 8, maximum: 32),
             fileBrowserFamily: fileBrowserFamily.nonBlankOr(FontSettings.inheritFamily),
             fileBrowserSize: fileBrowserSize > 0
                 ? fileBrowserSize.clampedFontSize(defaultValue: 13, minimum: 9, maximum: 28)
@@ -956,22 +955,7 @@ public struct FileIndexingSettings: Codable, Equatable, Sendable {
         "vendor",
         ".idea",
         ".vscode",
-        "worktrees",
-        "Music",
-        "Movies",
-        "Pictures",
-        "Photos Library.photoslibrary",
     ]
-
-    fileprivate func mergingMissingDefaultIgnoreRules() -> FileIndexingSettings {
-        var mergedRules = ignoreRules.nonBlankValues
-        let existingRules = Set(mergedRules.map(FilePathNormalizer.normalizedRule))
-        for rule in Self.defaultIgnoreRules
-        where !existingRules.contains(FilePathNormalizer.normalizedRule(rule)) {
-            mergedRules.append(rule)
-        }
-        return FileIndexingSettings(ignoreRules: mergedRules)
-    }
 }
 
 public final class YAMLConfigurationStore {
@@ -1092,10 +1076,10 @@ public final class YAMLConfigurationStore {
               editorFamily: \(yamlScalar(configuration.fonts.editorFamily))
               # default: 13
               editorSize: \(configuration.fonts.editorSize.formattedFontSize)
-              # default: empty, which leaves Ghostty's configured terminal font family unchanged.
+              # default: JetBrains Mono (Ghostty's embedded terminal font). Use empty to leave Ghostty's configured font unchanged.
               # active now: set to an installed terminal font family such as "JetBrains Mono".
               terminalFamily: \(yamlScalar(configuration.fonts.terminalFamily))
-              # default: 12
+              # default: 15
               terminalSize: \(configuration.fonts.terminalSize.formattedFontSize)
               # default: inherit, which follows interfaceFamily.
               # active now: controls the right-panel file browser list font only.

@@ -87,6 +87,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var fileBrowserEntriesByThreadID: [UUID: [FileBrowserEntry]] = [:]
     private var fileBrowserPresentationByThreadID: [UUID: FileBrowserPresentationCacheEntry] = [:]
     private var latestFileBrowserRequestIDByThreadID: [UUID: UUID] = [:]
+    private var pendingSubtreeLoadsByThreadID: [UUID: Set<String>] = [:]
     private var nvimRelativePathsByThreadID: [UUID: String] = [:]
     private var nvimRelaunchTokensByThreadID: [UUID: UUID] = [:]
     private var nvimRelaunchTokensByTabKey: [String: UUID] = [:]
@@ -2210,6 +2211,84 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Lazily indexes a pruned (ignore-matched) directory's contents when the user
+    /// expands it, then merges the results into the published index so the folder
+    /// fills in and its files become searchable. No-op for ordinary directories.
+    public func expandPrunedDirectory(relativePath: String) {
+        guard let thread = selectedThread else { return }
+        let threadID = thread.id
+        guard let entries = fileBrowserEntriesByThreadID[threadID],
+            let entry = entries.first(where: { $0.relativePath == relativePath }),
+            entry.isDirectory, entry.isPruned
+        else { return }
+        guard !(pendingSubtreeLoadsByThreadID[threadID]?.contains(relativePath) ?? false) else {
+            return
+        }
+        guard isExistingDirectory(thread.workingDirectory) else { return }
+
+        pendingSubtreeLoadsByThreadID[threadID, default: []].insert(relativePath)
+        let requestID = latestFileBrowserRequestIDByThreadID[threadID]
+        let cacheKey = fileIndexCacheCoordinator.cacheKey(
+            root: thread.workingDirectory,
+            ignoreRules: configuration.ignoreRules
+        )
+        fileIndexCacheCoordinator.refreshSubtree(
+            threadID: threadID,
+            root: thread.workingDirectory,
+            relativeSubpath: relativePath,
+            ignoreRules: configuration.ignoreRules,
+            key: cacheKey
+        ) { [weak self] result in
+            self?.finishSubtreeExpansion(
+                threadID: threadID,
+                relativePath: relativePath,
+                requestID: requestID,
+                result: result
+            )
+        }
+    }
+
+    private func finishSubtreeExpansion(
+        threadID: UUID,
+        relativePath: String,
+        requestID: UUID?,
+        result: Result<FileIndexResult, Error>
+    ) {
+        pendingSubtreeLoadsByThreadID[threadID]?.remove(relativePath)
+        // A full reindex or thread switch since the expand bumps the request ID;
+        // discard stale subtree results so we never merge into a replaced index.
+        guard latestFileBrowserRequestIDByThreadID[threadID] == requestID else { return }
+        guard case .success(let subtreeResult) = result,
+            let existingEntries = fileBrowserEntriesByThreadID[threadID]
+        else { return }
+
+        let mergedEntries = FileBrowserTreeBuilder.merging(
+            existingEntries, withSubtree: subtreeResult.entries,
+            replacingPrunedPath: relativePath)
+        fileBrowserEntriesByThreadID[threadID] = mergedEntries
+        fileBrowserPresentationByThreadID.removeValue(forKey: threadID)
+
+        var metadata = fileIndexMetadataByThreadID[threadID]
+        if var metadata {
+            metadata.fileCount = mergedEntries.count
+            metadata.ignoredDirectoryCount =
+                mergedEntries.filter { $0.isPruned }.count
+            fileIndexMetadataByThreadID[threadID] = metadata
+        }
+        metadata = fileIndexMetadataByThreadID[threadID]
+
+        guard selectedThreadID == threadID, let index = threadIndexByID[threadID] else { return }
+        publishFileBrowserState(
+            for: threads[index],
+            entries: mergedEntries,
+            metadata: metadata,
+            cacheKeyValue: metadata?.cacheKey,
+            searchQuery: fileBrowserState.searchQuery,
+            isIndexing: false,
+            allowCachedPresentation: false
+        )
+    }
+
     private func refreshFileBrowser(for thread: AgentThread, publishCachedSnapshot: Bool = true) {
         let requestID = UUID()
         latestFileBrowserRequestIDByThreadID[thread.id] = requestID
@@ -2273,6 +2352,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         result: Result<FileIndexResult, Error>
     ) {
         guard latestFileBrowserRequestIDByThreadID[threadID] == requestID else { return }
+        // A fresh full index re-collapses pruned directories, so any in-flight or
+        // remembered lazy-expand state for this thread no longer applies.
+        pendingSubtreeLoadsByThreadID.removeValue(forKey: threadID)
         switch result {
         case .success(let result):
             fileIndexMetadataByThreadID[threadID] = result.metadata
