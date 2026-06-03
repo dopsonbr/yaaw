@@ -19,7 +19,7 @@ private struct SidebarProjectStateRow {
 }
 
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 14
+    public static let schemaVersion = 15
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -577,6 +577,12 @@ extension SQLiteYAAWStore {
                 try execute("PRAGMA user_version = 14")
             }
         }
+        if currentVersion < 15 {
+            try transaction {
+                try migrateToVersionFifteen()
+                try execute("PRAGMA user_version = 15")
+            }
+        }
     }
 
     fileprivate func migrateToVersionNine() throws {
@@ -704,6 +710,13 @@ extension SQLiteYAAWStore {
         let threadColumns = try tableColumns("threads")
         if !threadColumns.contains("pending_session_rename") {
             try execute("ALTER TABLE threads ADD COLUMN pending_session_rename TEXT")
+        }
+    }
+
+    fileprivate func migrateToVersionFifteen() throws {
+        let threadColumns = try tableColumns("threads")
+        if !threadColumns.contains("launch_options_json") {
+            try execute("ALTER TABLE threads ADD COLUMN launch_options_json TEXT")
         }
     }
 
@@ -1129,9 +1142,10 @@ extension SQLiteYAAWStore {
                 session_identity,
                 canonical_session_name,
                 pending_session_rename,
-                is_pinned
+                is_pinned,
+                launch_options_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
                 project_id = excluded.project_id,
@@ -1143,7 +1157,8 @@ extension SQLiteYAAWStore {
                 session_identity = excluded.session_identity,
                 canonical_session_name = excluded.canonical_session_name,
                 pending_session_rename = excluded.pending_session_rename,
-                is_pinned = excluded.is_pinned
+                is_pinned = excluded.is_pinned,
+                launch_options_json = excluded.launch_options_json
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -1159,6 +1174,7 @@ extension SQLiteYAAWStore {
         bindOptional(thread.canonicalSessionName, at: 10, in: statement)
         bindOptional(thread.pendingSessionRename, at: 11, in: statement)
         sqlite3_bind_int(statement, 12, thread.isPinned ? 1 : 0)
+        bindOptional(launchOptionsJSON(for: thread), at: 13, in: statement)
         try stepDone(statement)
     }
 
@@ -1229,9 +1245,10 @@ extension SQLiteYAAWStore {
                 session_identity,
                 canonical_session_name,
                 pending_session_rename,
-                is_pinned
+                is_pinned,
+                launch_options_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -1247,6 +1264,7 @@ extension SQLiteYAAWStore {
         bindOptional(thread.canonicalSessionName, at: 10, in: statement)
         bindOptional(thread.pendingSessionRename, at: 11, in: statement)
         sqlite3_bind_int(statement, 12, thread.isPinned ? 1 : 0)
+        bindOptional(launchOptionsJSON(for: thread), at: 13, in: statement)
         try stepDone(statement)
     }
 
@@ -1655,7 +1673,8 @@ extension SQLiteYAAWStore {
                 session_identity,
                 canonical_session_name,
                 pending_session_rename,
-                is_pinned
+                is_pinned,
+                launch_options_json
             FROM threads
             ORDER BY created_at, display_name
             """
@@ -1677,6 +1696,10 @@ extension SQLiteYAAWStore {
                     workingDirectory: URL(
                         fileURLWithPath: text(at: 3, in: statement), isDirectory: true),
                     agentCLI: agentCLI,
+                    launchOptions: launchOptions(
+                        fromJSON: optionalText(at: 12, in: statement),
+                        agentCLI: agentCLI
+                    ),
                     sessionIdentity: optionalText(at: 8, in: statement),
                     canonicalSessionName: optionalText(at: 9, in: statement),
                     pendingSessionRename: optionalText(at: 10, in: statement),
@@ -1944,6 +1967,25 @@ extension SQLiteYAAWStore {
             )
         }
         return CachedFileIndex(metadata: metadata, entries: entries)
+    }
+
+    fileprivate func launchOptionsJSON(for thread: AgentThread) -> String? {
+        let options = thread.launchOptions.validated(for: thread.agentCLI)
+        guard !options.isEmpty else { return nil }
+        guard let data = try? JSONEncoder().encode(options) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    fileprivate func launchOptions(fromJSON value: String?, agentCLI: AgentCLIKind)
+        -> AgentLaunchOptions
+    {
+        guard let value,
+            let data = value.data(using: .utf8),
+            let options = try? JSONDecoder().decode(AgentLaunchOptions.self, from: data)
+        else {
+            return AgentLaunchOptions()
+        }
+        return options.validated(for: agentCLI)
     }
 
     fileprivate func bind(_ value: String, at index: Int32, in statement: OpaquePointer?) {

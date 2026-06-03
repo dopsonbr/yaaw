@@ -1711,10 +1711,12 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         projectID: UUID? = nil,
         agentCLI: AgentCLIKind?,
         displayName: String? = nil,
+        launchOptions: AgentLaunchOptions = AgentLaunchOptions(),
         workingDirectory: URL? = nil,
         now: Date = Date()
     ) throws -> UUID {
         let agentCLI = agentCLI ?? configuration.defaultAgentCLI
+        let resolvedLaunchOptions = launchOptions.validated(for: agentCLI)
         let isImplicitProjectSelection = projectID == nil
         let resolvedProjectID = projectID ?? selectedProjectID
         guard let project = projects.first(where: { $0.id == resolvedProjectID }) else {
@@ -1748,6 +1750,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             projectID: project.id,
             workingDirectory: resolvedWorkingDirectory,
             agentCLI: agentCLI,
+            launchOptions: resolvedLaunchOptions,
             pendingSessionRename: pendingSessionRename,
             createdAt: now,
             lastOpenedAt: now
@@ -1767,6 +1770,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             metadata: [
                 "thread_id": thread.id.uuidString,
                 "agent_cli": thread.agentCLI.rawValue,
+                "custom_launch_options": thread.launchOptions.isEmpty ? "false" : "true",
             ]
         )
         persistThread(thread)

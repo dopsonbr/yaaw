@@ -490,16 +490,20 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
     public func invocation(for thread: AgentThread, executableNameOverride: String? = nil)
         -> AgentCLIInvocation
     {
+        let launchOptions = thread.launchOptions.validated(for: thread.agentCLI)
+        let resolvedExecutableNameOverride =
+            launchOptions.executableName ?? executableNameOverride
         guard let adapter = adaptersByKind[thread.agentCLI] else {
-            let executableName = executableNameOverride ?? thread.agentCLI.rawValue
+            let executableName = resolvedExecutableNameOverride ?? thread.agentCLI.rawValue
             return AgentCLIInvocation(
                 executableName: executableName,
                 resolvedExecutablePath: resolver.executablePath(
                     named: executableName, environment: environment),
-                arguments: []
+                arguments: launchOptions.permissionArguments(for: thread.agentCLI)
+                    + launchOptions.additionalArguments
             )
         }
-        let executableName = executableNameOverride ?? adapter.executableName
+        let executableName = resolvedExecutableNameOverride ?? adapter.executableName
         let resolvedPath = resolver.executablePath(named: executableName, environment: environment)
         let invocation = adapter.invocation(
             sessionIdentity: thread.sessionIdentity,
@@ -509,7 +513,9 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         return AgentCLIInvocation(
             executableName: executableName,
             resolvedExecutablePath: invocation.resolvedExecutablePath,
-            arguments: invocation.arguments
+            arguments: launchOptions.permissionArguments(for: thread.agentCLI)
+                + launchOptions.additionalArguments
+                + invocation.arguments
         )
     }
 

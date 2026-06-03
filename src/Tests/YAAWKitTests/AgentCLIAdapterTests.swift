@@ -22,6 +22,80 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(command, ["/tmp/bin/codex", "resume", "codex-session-123"])
     }
 
+    func testLaunchOptionsPrependPermissionAndAdditionalArgumentsBeforeResume() {
+        let service = AgentCLISessionBindingService(
+            resolver: StaticExecutableResolver(paths: ["codex-beta": "/tmp/bin/codex-beta"]),
+            captureDirectory: nil
+        )
+        let thread = AgentThread(
+            displayName: "Existing",
+            projectID: UUID(),
+            workingDirectory: FileManager.default.temporaryDirectory,
+            agentCLI: .codex,
+            launchOptions: AgentLaunchOptions(
+                executableName: "codex-beta",
+                permissionModeID: "codex-on-request",
+                additionalArguments: ["--model", "gpt-5"]
+            ),
+            sessionIdentity: "codex-session-123"
+        )
+
+        let command = service.terminalCommand(for: thread)
+
+        XCTAssertEqual(
+            command,
+            [
+                "/tmp/bin/codex-beta",
+                "--ask-for-approval",
+                "on-request",
+                "--model",
+                "gpt-5",
+                "resume",
+                "codex-session-123",
+            ]
+        )
+    }
+
+    func testLaunchOptionsIgnoreUnsupportedPermissionModeForAgent() {
+        let service = AgentCLISessionBindingService(
+            resolver: StaticExecutableResolver(paths: ["opencode": "/tmp/bin/opencode"]),
+            captureDirectory: nil
+        )
+        let thread = AgentThread(
+            displayName: "OpenCode",
+            projectID: UUID(),
+            workingDirectory: FileManager.default.temporaryDirectory,
+            agentCLI: .opencode,
+            launchOptions: AgentLaunchOptions(
+                permissionModeID: "codex-on-request",
+                additionalArguments: ["--model", "anthropic/claude-sonnet-4"]
+            )
+        )
+
+        let command = service.terminalCommand(for: thread)
+
+        XCTAssertEqual(command, ["/tmp/bin/opencode", "--model", "anthropic/claude-sonnet-4"])
+    }
+
+    func testLaunchOptionsArgumentParserSupportsQuotesAndEscapes() throws {
+        let arguments = try AgentLaunchOptions.parseAdditionalArguments(
+            #"--model gpt-5 --profile "Work Profile" '--flag=value' escaped\ value"#
+        )
+
+        XCTAssertEqual(
+            arguments,
+            ["--model", "gpt-5", "--profile", "Work Profile", "--flag=value", "escaped value"]
+        )
+    }
+
+    func testLaunchOptionsArgumentParserRejectsUnclosedQuote() {
+        XCTAssertThrowsError(
+            try AgentLaunchOptions.parseAdditionalArguments(#"--model "gpt 5"#)
+        ) { error in
+            XCTAssertEqual(error as? AgentLaunchOptionsArgumentError, .unclosedQuote)
+        }
+    }
+
     func testMissingExecutableFallsBackToRawCommandNameForShellErrorOutput() {
         let service = AgentCLISessionBindingService(
             resolver: StaticExecutableResolver(paths: [:]),

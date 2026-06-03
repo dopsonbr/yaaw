@@ -6,6 +6,7 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
     public var projectID: UUID
     public var workingDirectory: URL
     public var agentCLI: AgentCLIKind
+    public var launchOptions: AgentLaunchOptions
     public var sessionIdentity: String?
     public var canonicalSessionName: String?
     public var pendingSessionRename: String?
@@ -20,6 +21,7 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
         projectID: UUID,
         workingDirectory: URL,
         agentCLI: AgentCLIKind = .codex,
+        launchOptions: AgentLaunchOptions = AgentLaunchOptions(),
         sessionIdentity: String? = nil,
         canonicalSessionName: String? = nil,
         pendingSessionRename: String? = nil,
@@ -33,6 +35,7 @@ public struct AgentThread: Identifiable, Equatable, Sendable {
         self.projectID = projectID
         self.workingDirectory = workingDirectory
         self.agentCLI = agentCLI
+        self.launchOptions = launchOptions.validated(for: agentCLI)
         self.sessionIdentity = sessionIdentity
         self.canonicalSessionName = canonicalSessionName
         let trimmedPendingRename =

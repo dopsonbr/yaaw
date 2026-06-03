@@ -16,6 +16,8 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(
             try sqliteTableColumns(path: path, table: "threads").contains(
                 "pending_session_rename"))
+        XCTAssertTrue(
+            try sqliteTableColumns(path: path, table: "threads").contains("launch_options_json"))
     }
 
     func testSQLiteStoreUsesWALJournalMode() throws {
@@ -240,6 +242,11 @@ final class PersistenceTests: XCTestCase {
                     projectID: projectID,
                     workingDirectory: root,
                     agentCLI: .claude,
+                    launchOptions: AgentLaunchOptions(
+                        executableName: "claude-dev",
+                        permissionModeID: "claude-plan",
+                        additionalArguments: ["--model", "sonnet"]
+                    ),
                     createdAt: createdAt,
                     lastOpenedAt: createdAt
                 ),
@@ -258,6 +265,15 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.threads.map(\.id), snapshot.threads.map(\.id))
         XCTAssertEqual(reloaded.threads.map(\.isArchived), [true, false])
         XCTAssertEqual(reloaded.threads.map(\.agentCLI), [.codex, .claude])
+        XCTAssertEqual(reloaded.threads[0].launchOptions, AgentLaunchOptions())
+        XCTAssertEqual(
+            reloaded.threads[1].launchOptions,
+            AgentLaunchOptions(
+                executableName: "claude-dev",
+                permissionModeID: "claude-plan",
+                additionalArguments: ["--model", "sonnet"]
+            )
+        )
         XCTAssertEqual(reloaded.threads.map(\.sessionIdentity), [nil, nil])
         XCTAssertEqual(reloaded.threads.map(\.pendingSessionRename), [nil, nil])
         XCTAssertEqual(reloaded.selectedProjectID, projectID)

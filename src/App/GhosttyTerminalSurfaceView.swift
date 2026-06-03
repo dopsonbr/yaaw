@@ -671,9 +671,9 @@ private final class ManagedAgentTerminal {
             !startupInput.isEmpty,
             let data = startupInput.data(using: .utf8)
         else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-            self?.process.write(data)
-        }
+        // AgentTerminalProcess buffers this until the agent TUI is interactive,
+        // so the rename injection no longer needs a fixed startup delay.
+        process.write(data)
     }
 }
 

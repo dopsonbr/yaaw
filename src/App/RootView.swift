@@ -1993,7 +1993,17 @@ private struct ThreadChoiceSheet: View {
     let project: Project
     @Environment(\.dismiss) private var dismiss
     @State private var displayName = ""
+    @State private var selectedAgentCLI: AgentCLIKind
+    @State private var executableName = ""
+    @State private var permissionModeID = AgentLaunchOptions.defaultPermissionModeID
+    @State private var additionalArgumentsText = ""
     @State private var errorMessage: String?
+
+    init(model: AppModel, project: Project) {
+        self.model = model
+        self.project = project
+        _selectedAgentCLI = State(initialValue: model.defaultAgentCLI)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -2014,20 +2024,78 @@ private struct ThreadChoiceSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityLabel("Optional thread name")
 
-            HStack(spacing: 12) {
-                ForEach(AgentCLIKind.allCases) { agentCLI in
-                    Button {
-                        createThread(agentCLI: agentCLI)
-                    } label: {
-                        HStack(spacing: 6) {
-                            AgentCLIIcon(agentCLI: agentCLI)
-                                .frame(width: 16, height: 16)
-                            Text(agentCLI.displayName)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Agent")
+                    .font(.caption)
+                    .foregroundStyle(dracula(.comment))
+                HStack(spacing: 8) {
+                    ForEach(AgentCLIKind.allCases) { agentCLI in
+                        Button {
+                            selectedAgentCLI = agentCLI
+                            resetUnsupportedPermissionMode()
+                        } label: {
+                            HStack(spacing: 6) {
+                                AgentCLIIcon(agentCLI: agentCLI)
+                                    .frame(width: 16, height: 16)
+                                Text(agentCLI.displayName)
+                            }
+                            .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            selectedAgentCLI == agentCLI
+                                ? dracula(.purple)
+                                : dracula(.currentLine)
+                        )
+                        .foregroundStyle(dracula(.foreground))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .accessibilityLabel("Select \(agentCLI.displayName)")
                     }
-                    .keyboardShortcut(agentCLI == model.defaultAgentCLI ? .defaultAction : nil)
-                    .accessibilityLabel("Create \(agentCLI.displayName) thread")
                 }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Command")
+                    .font(.caption)
+                    .foregroundStyle(dracula(.comment))
+                TextField(defaultExecutableName, text: $executableName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(dracula(.currentLine))
+                    .foregroundStyle(dracula(.foreground))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .accessibilityLabel("Agent executable")
+            }
+
+            if !permissionModes.isEmpty {
+                Picker("Permissions", selection: $permissionModeID) {
+                    Text("Default").tag(AgentLaunchOptions.defaultPermissionModeID)
+                    ForEach(permissionModes) { mode in
+                        Text(mode.displayName).tag(mode.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(dracula(.foreground))
+                .foregroundStyle(dracula(.foreground))
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Arguments")
+                    .font(.caption)
+                    .foregroundStyle(dracula(.comment))
+                TextField("--flag value", text: $additionalArgumentsText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(dracula(.currentLine))
+                    .foregroundStyle(dracula(.foreground))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .accessibilityLabel("Additional agent arguments")
             }
 
             if let errorMessage {
@@ -2035,20 +2103,62 @@ private struct ThreadChoiceSheet: View {
                     .font(.caption)
                     .foregroundStyle(dracula(.red))
             }
+
+            HStack {
+                Spacer()
+                Button {
+                    createThread()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                        Text("Create")
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .accessibilityLabel("Create thread")
+            }
         }
         .padding(24)
-        .frame(width: 420)
+        .frame(width: 460)
         .background(dracula(.background))
     }
 
-    private func createThread(agentCLI: AgentCLIKind) {
+    private var defaultExecutableName: String {
+        model.configuration.agentExecutableName(for: selectedAgentCLI)
+    }
+
+    private var permissionModes: [AgentPermissionMode] {
+        AgentPermissionMode.supportedModes(for: selectedAgentCLI)
+    }
+
+    private func resetUnsupportedPermissionMode() {
+        guard permissionModeID != AgentLaunchOptions.defaultPermissionModeID else { return }
+        let supportedModeIDs = Set(permissionModes.map(\.id))
+        if !supportedModeIDs.contains(permissionModeID) {
+            permissionModeID = AgentLaunchOptions.defaultPermissionModeID
+        }
+    }
+
+    private func createThread() {
         do {
+            let additionalArguments =
+                try AgentLaunchOptions.parseAdditionalArguments(additionalArgumentsText)
+            let launchOptions = AgentLaunchOptions(
+                executableName: executableName,
+                permissionModeID: permissionModeID == AgentLaunchOptions.defaultPermissionModeID
+                    ? nil
+                    : permissionModeID,
+                additionalArguments: additionalArguments
+            )
             try model.createThread(
                 projectID: project.id,
-                agentCLI: agentCLI,
-                displayName: displayName
+                agentCLI: selectedAgentCLI,
+                displayName: displayName,
+                launchOptions: launchOptions
             )
             dismiss()
+        } catch is AgentLaunchOptionsArgumentError {
+            errorMessage = "Arguments are not valid."
         } catch {
             errorMessage = "Thread could not be created."
         }

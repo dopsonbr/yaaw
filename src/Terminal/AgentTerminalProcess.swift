@@ -36,6 +36,21 @@ public final class AgentTerminalProcess: @unchecked Sendable {
     private var childPID: pid_t = -1
     private var started = false
     private var finished = false
+    /// Latches true once the child has produced output and the readiness settle
+    /// delay has elapsed, meaning its interactive TUI is mounted and accepting input.
+    private var inputReady = false
+    /// True while `flushPendingInput` is draining `pendingInput`; concurrent
+    /// writes buffer behind it so replay stays in exact arrival order.
+    private var draining = false
+    /// True once the post-first-output settle flush has been scheduled, so it runs once.
+    private var readinessScheduled = false
+    /// Raw keystrokes received before readiness, replayed once in order on flush.
+    private var pendingInput = Data()
+
+    /// Delay after the child's first output before treating it as ready for input.
+    /// Anchored to real output (not spawn time) so it tolerates slow shell startup
+    /// while letting the agent TUI finish mounting its input handler.
+    private static let inputReadySettleDelay: TimeInterval = 0.25
 
     public init(
         command: [String],
@@ -148,8 +163,23 @@ public final class AgentTerminalProcess: @unchecked Sendable {
 
     public func write(_ data: Data) {
         guard !data.isEmpty else { return }
-        let fd = currentMasterFileDescriptor()
-        guard fd >= 0 else { return }
+        lock.lock()
+        if finished {
+            lock.unlock()
+            return
+        }
+        if !inputReady || draining || masterFileDescriptor < 0 {
+            pendingInput.append(data)
+            lock.unlock()
+            return
+        }
+        let fd = masterFileDescriptor
+        lock.unlock()
+        writeRaw(data, to: fd)
+    }
+
+    private func writeRaw(_ data: Data, to fd: Int32) {
+        guard fd >= 0, !data.isEmpty else { return }
         data.withUnsafeBytes { buffer in
             guard let baseAddress = buffer.baseAddress else { return }
             var offset = 0
@@ -194,6 +224,7 @@ public final class AgentTerminalProcess: @unchecked Sendable {
         let pid = childPID
         let fd = masterFileDescriptor
         masterFileDescriptor = -1
+        pendingInput = Data()
         lock.unlock()
 
         if pid > 0 {
@@ -218,6 +249,7 @@ public final class AgentTerminalProcess: @unchecked Sendable {
                 Darwin.read(fd, rawBuffer.baseAddress, rawBuffer.count)
             }
             if count > 0 {
+                scheduleInputReadyIfNeeded()
                 outputHandler(Data(buffer.prefix(count)))
             } else {
                 break
@@ -228,6 +260,47 @@ public final class AgentTerminalProcess: @unchecked Sendable {
         _ = waitpid(pid, &status, 0)
         markFinished(masterFileDescriptor: fd)
         exitHandler(Self.exitCode(from: status))
+    }
+
+    /// On the child's first output, schedule a one-shot flush of buffered input
+    /// after a short settle delay. Runs off `readQueue` (which is blocked in the
+    /// read loop) so the deferred work is not starved.
+    private func scheduleInputReadyIfNeeded() {
+        lock.lock()
+        if finished || inputReady || readinessScheduled {
+            lock.unlock()
+            return
+        }
+        readinessScheduled = true
+        lock.unlock()
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(
+            deadline: .now() + Self.inputReadySettleDelay
+        ) { [weak self] in
+            self?.flushPendingInput()
+        }
+    }
+
+    /// Replay buffered input once, in arrival order, then mark the process ready
+    /// so later writes go straight through. Writes that race in during the drain
+    /// are buffered behind `draining` and picked up by the loop.
+    private func flushPendingInput() {
+        lock.lock()
+        if finished || inputReady {
+            lock.unlock()
+            return
+        }
+        draining = true
+        while !pendingInput.isEmpty, masterFileDescriptor >= 0 {
+            let chunk = pendingInput
+            pendingInput = Data()
+            let fd = masterFileDescriptor
+            lock.unlock()
+            writeRaw(chunk, to: fd)
+            lock.lock()
+        }
+        inputReady = true
+        draining = false
+        lock.unlock()
     }
 
     private func currentMasterFileDescriptor() -> Int32 {
@@ -249,6 +322,7 @@ public final class AgentTerminalProcess: @unchecked Sendable {
             masterFileDescriptor = -1
         }
         finished = true
+        pendingInput = Data()
         lock.unlock()
         if shouldClose, let fd {
             _ = Darwin.close(fd)

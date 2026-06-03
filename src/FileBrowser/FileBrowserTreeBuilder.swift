@@ -103,9 +103,23 @@ public enum FileBrowserTreeBuilder {
         }
 
         let directoryBudget = max(1, limit * 2 / 3)
-        for entry in entries where entry.isDirectory {
+        // Select directories breadth-first (shallowest levels first). The input is
+        // sorted depth-first, so iterating it directly lets one large early branch
+        // exhaust the budget before its sibling directories are reached, dropping
+        // them from the collapsed tree. Visiting by depth guarantees every sibling
+        // at a level is considered before descending into any one subtree.
+        let directoriesByBreadth =
+            entries
+            .lazy
+            .filter(\.isDirectory)
+            .map { (entry: $0, depth: Self.pathDepth($0.relativePath)) }
+            .sorted { lhs, rhs in
+                if lhs.depth != rhs.depth { return lhs.depth < rhs.depth }
+                return Self.sortEntriesForTree(lhs.entry, rhs.entry)
+            }
+        for item in directoriesByBreadth {
             guard selected.count < directoryBudget else { break }
-            append(entry)
+            append(item.entry)
         }
 
         var visibleFileCount = selected.lazy.filter { !$0.isDirectory }.prefix(visibleFileFloor)
@@ -228,6 +242,14 @@ public enum FileBrowserTreeBuilder {
 
     private static func isRootEntry(_ entry: FileBrowserEntry) -> Bool {
         !entry.relativePath.contains("/")
+    }
+
+    private static func pathDepth(_ relativePath: String) -> Int {
+        var depth = 1
+        for character in relativePath where character == "/" {
+            depth += 1
+        }
+        return depth
     }
 
     private static func isHiddenName(_ name: String) -> Bool {

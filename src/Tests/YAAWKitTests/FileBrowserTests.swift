@@ -160,6 +160,48 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(visiblePaths.contains("README.md"))
     }
 
+    func testPresentationEntriesKeepNestedSiblingsWhenEarlyChildHasDeepSubtree() {
+        // Regression: a `repos` directory with many child repos, where the first few
+        // children each contain thousands of nested directories. Depth-first budget
+        // exhaustion dropped the later sibling repos (e.g. order-up, usom-*) entirely.
+        let repoNames = [
+            "content-manager-gateway", "hia-pdf", "order-eligibility-api",
+            "order-modify-api", "order-up", "order-up-actions", "order-up-events",
+            "usom-customer", "usom-order", "usom-vendor",
+        ]
+        var entries = [FileBrowserEntry(relativePath: "repos", isDirectory: true)]
+        for repo in repoNames {
+            entries.append(FileBrowserEntry(relativePath: "repos/\(repo)", isDirectory: true))
+        }
+        // The first three repos each carry a deep nested directory tree that would
+        // consume the directory budget under depth-first selection.
+        for repo in repoNames.prefix(3) {
+            for index in 0..<6_000 {
+                entries.append(
+                    FileBrowserEntry(
+                        relativePath: String(format: "repos/\(repo)/nested_%05d", index),
+                        isDirectory: true
+                    ))
+            }
+        }
+        entries.sort(by: FileBrowserTreeBuilder.sortEntriesForTree)
+
+        let presented = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
+        let rows = FileBrowserTreeBuilder.visibleRows(
+            from: presented,
+            expandedFolders: ["repos"],
+            limit: 10_000
+        )
+        let visiblePaths = Set(rows.map(\.entry.relativePath))
+
+        for repo in repoNames {
+            XCTAssertTrue(
+                visiblePaths.contains("repos/\(repo)"),
+                "Expected sibling repo \(repo) to remain visible"
+            )
+        }
+    }
+
     func testPresentationEntriesKeepRegularRootItemsAheadOfHiddenLargeBranches() throws {
         var entries = [
             FileBrowserEntry(relativePath: ".agents", isDirectory: true),

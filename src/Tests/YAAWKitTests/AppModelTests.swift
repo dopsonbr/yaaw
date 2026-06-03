@@ -1963,6 +1963,40 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(launch.command[2].contains("/tools/codex-nightly"))
     }
 
+    func testThreadLaunchOptionsOverrideExecutableAndApplyArguments() throws {
+        let fixture = AppModelFixture()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: [
+                "codex-beta": "/tools/codex-beta"
+            ]),
+            captureDirectory: nil
+        )
+        let model = AppModel(store: fixture.store, agentCLIBindings: service)
+
+        let threadID = try model.createThread(
+            agentCLI: .codex,
+            launchOptions: AgentLaunchOptions(
+                executableName: "codex-beta",
+                permissionModeID: "codex-never",
+                additionalArguments: ["--model", "gpt-5"]
+            )
+        )
+
+        let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
+        XCTAssertEqual(thread.launchOptions.executableName, "codex-beta")
+        XCTAssertEqual(thread.launchOptions.permissionModeID, "codex-never")
+        XCTAssertEqual(thread.launchOptions.additionalArguments, ["--model", "gpt-5"])
+
+        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .project(threadID: threadID)))
+        guard case .agentPTY(let launch) = request.backend else {
+            return XCTFail("project terminal should use agentPTY")
+        }
+        XCTAssertTrue(
+            launch.command[2].contains(
+                "/tools/codex-beta --ask-for-approval never --model gpt-5")
+        )
+    }
+
     func testReloadConfigurationAppliesThemeAndRecordsDiagnostic() throws {
         let fixture = AppModelFixture()
         let recorder = RecordingDiagnosticEventRecorder()
