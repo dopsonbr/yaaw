@@ -124,6 +124,17 @@ private final class E2ERunner {
             contents: """
                 #!/usr/bin/env bash
                 set -euo pipefail
+                if [[ "${1:-}" == "--help" ]]; then
+                  printf '%s\\n' 'Usage: codex [OPTIONS]'
+                  printf '%s\\n' '  --ask-for-approval <POLICY>  untrusted, on-failure, on-request, never'
+                  printf '%s\\n' '  --sandbox <MODE>             read-only, workspace-write, danger-full-access'
+                  printf '%s\\n' '  --dangerously-bypass-approvals-and-sandbox'
+                  exit 0
+                fi
+                if [[ "${1:-}" == "--version" ]]; then
+                  printf 'codex 0.136.0\\n'
+                  exit 0
+                fi
                 if [[ "${YAAW_E2E_KEYBOARD_PROBE:-}" == "1" ]]; then
                   printf 'YAAW_KEYBOARD_PROBE_READY\\n'
                   IFS= read -r line
@@ -148,6 +159,15 @@ private final class E2ERunner {
             contents: """
                 #!/usr/bin/env bash
                 set -euo pipefail
+                if [[ "${1:-}" == "--help" ]]; then
+                  printf '%s\\n' 'Usage: claude [options]'
+                  printf '%s\\n' '  --permission-mode <mode>  plan, auto, acceptEdits, dontAsk, bypassPermissions'
+                  exit 0
+                fi
+                if [[ "${1:-}" == "--version" ]]; then
+                  printf 'claude 2.1.161\\n'
+                  exit 0
+                fi
                 if [[ "${1:-}" == "--resume" ]]; then
                   printf 'YAAW_SESSION_ID=%s\\n' "$2"
                   printf 'YAAW_SESSION_NAME=Claude Resumed %s\\n' "$2"
@@ -165,6 +185,16 @@ private final class E2ERunner {
             contents: """
                 #!/usr/bin/env bash
                 set -euo pipefail
+                if [[ "${1:-}" == "--help" ]]; then
+                  printf '%s\\n' 'Usage: opencode [command] [options]'
+                  printf '%s\\n' '  run'
+                  printf '%s\\n' '  serve'
+                  exit 0
+                fi
+                if [[ "${1:-}" == "--version" ]]; then
+                  printf 'opencode 1.4.6\\n'
+                  exit 0
+                fi
                 if [[ "${1:-}" == "--session" ]]; then
                   printf 'YAAW_SESSION_ID=%s\\n' "$2"
                   printf 'YAAW_SESSION_NAME=OpenCode Resumed %s\\n' "$2"
@@ -182,6 +212,19 @@ private final class E2ERunner {
             contents: """
                 #!/usr/bin/env bash
                 set -euo pipefail
+                if [[ "${1:-}" == "--help" ]]; then
+                  printf '%s\\n' 'Usage: copilot [options]'
+                  printf '%s\\n' '  --plan'
+                  printf '%s\\n' '  --autopilot'
+                  printf '%s\\n' '  --allow-all-tools'
+                  printf '%s\\n' '  --allow-all'
+                  printf '%s\\n' '  --yolo'
+                  exit 0
+                fi
+                if [[ "${1:-}" == "--version" ]]; then
+                  printf 'copilot 1.0.51\\n'
+                  exit 0
+                fi
                 if [[ "${1:-}" == --resume=* ]]; then
                   session="${1#--resume=}"
                   printf 'YAAW_SESSION_ID=%s\\n' "$session"
@@ -272,8 +315,8 @@ private final class E2ERunner {
             settingsText.contains("editorFamily: system-monospace"),
             "settings YAML exposes the editor font family")
         try assert(
-            settingsText.contains("terminalFamily: \"\""),
-            "settings YAML exposes the Ghostty-default terminal font family")
+            settingsText.contains("terminalFamily: \"JetBrains Mono\""),
+            "settings YAML exposes the default terminal font family")
         let detectedExternalTools: Set<ExternalOpenToolID> = [.vscode, .finder]
         try assert(
             ExternalOpenToolResolver.defaultTool(
@@ -332,6 +375,70 @@ private final class E2ERunner {
             model.activeThreads(for: sandboxProjectID).first?.id == sandboxThreadID,
             "pinned thread sorted first")
         model.selectProject(id: e2eProjectID)
+
+        let refreshedCatalog = model.refreshAgentCLIOptionCatalog()
+        try assert(
+            refreshedCatalog.permissionPresets(for: .codex).contains {
+                $0.id == "codex-bypass"
+            },
+            "CLI option refresh captured codex bypass preset"
+        )
+        try assert(
+            refreshedCatalog.permissionPresets(for: .copilot).contains {
+                $0.id == "copilot-yolo"
+            },
+            "CLI option refresh captured copilot yolo preset"
+        )
+        model.reloadConfiguration(
+            YAAWConfiguration(
+                agent: AgentSettings(
+                    default: .copilot,
+                    launchDefaults: AgentLaunchDefaultsSettings(
+                        copilot: AgentLaunchDefaultSettings(
+                            permissionModeID: "copilot-yolo",
+                            additionalArguments: ["--model", "gpt-5"]
+                        )
+                    )
+                ),
+                tools: ToolSettings(agents: AgentToolSettings(copilot: "copilot"))
+            )
+        )
+        try assert(
+            model.defaultAgentCLI == .copilot,
+            "settings default agent drives the new-thread picker default badge source"
+        )
+        try assert(
+            model.configuredLaunchOptions(for: .copilot).permissionModeID == "copilot-yolo",
+            "new-thread picker summary reads configured copilot permission default"
+        )
+        let configuredDefaultThreadID = try model.createThread(
+            agentCLI: nil,
+            displayName: "Configured Default"
+        )
+        let configuredDefaultThread = try unwrap(
+            model.threads.first { $0.id == configuredDefaultThreadID },
+            "configured default thread"
+        )
+        try assert(
+            configuredDefaultThread.agentCLI == .copilot,
+            "new-thread default agent created a copilot-backed thread"
+        )
+        try assert(
+            configuredDefaultThread.launchOptions.permissionModeID == "copilot-yolo",
+            "new-thread creation captured configured permission default"
+        )
+        try assert(
+            configuredDefaultThread.launchOptions.additionalArguments == ["--model", "gpt-5"],
+            "new-thread creation captured configured extra args"
+        )
+        let configuredLaunch = try unwrap(
+            model.terminalLaunchRequest(for: .project(threadID: configuredDefaultThreadID)),
+            "configured default launch"
+        )
+        try assert(
+            configuredLaunch.command.joined(separator: " ").contains("--yolo --model gpt-5"),
+            "configured default launch command included permission and extra args"
+        )
 
         let codexThreadID = try model.createThread(agentCLI: .codex)
         try assert(
@@ -1061,6 +1168,9 @@ private final class E2ERunner {
         return AppModel(
             store: store,
             agentCLIBindings: makeAgentCLIService(),
+            agentCLIOptionCatalogService: AgentCLIOptionCatalogService(
+                cachePath: paths.stateDirectory.appendingPathComponent("agent-cli-options.json")
+            ),
             fileIndexer: ImmediateFileIndexer(),
             configuration: configuration,
             environment: environment

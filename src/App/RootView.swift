@@ -53,6 +53,7 @@ struct RootView: View {
                 if isSettingsOpen {
                     SettingsEditorView(
                         configuration: model.configuration,
+                        agentCLIOptionCatalog: model.agentCLIOptionCatalog,
                         fonts: model.configuration.fonts,
                         settingsPath: settingsPath,
                         onLoadText: onLoadSettingsText,
@@ -60,6 +61,9 @@ struct RootView: View {
                         onSaveText: onSaveSettingsText,
                         onOpenExternal: onOpenSettingsFile,
                         onReloadConfiguration: onReloadSettings,
+                        onRefreshAgentCLIOptions: {
+                            model.refreshAgentCLIOptionCatalog()
+                        },
                         onBack: { isSettingsOpen = false }
                     )
                 } else {
@@ -437,7 +441,7 @@ private struct ExternalOpenToolIcon: View {
     }
 }
 
-private struct AgentCLIIcon: View {
+struct AgentCLIIcon: View {
     let agentCLI: AgentCLIKind
 
     var body: some View {
@@ -509,6 +513,7 @@ private struct AgentCLIIcon: View {
 
 private struct SettingsEditorView: View {
     let configuration: YAAWConfiguration
+    let agentCLIOptionCatalog: AgentCLIOptionCatalog
     let fonts: FontSettings
     let settingsPath: URL
     let onLoadText: () throws -> String
@@ -516,6 +521,7 @@ private struct SettingsEditorView: View {
     let onSaveText: (String) throws -> YAAWConfiguration
     let onOpenExternal: () -> Void
     let onReloadConfiguration: () -> Void
+    let onRefreshAgentCLIOptions: () -> AgentCLIOptionCatalog
     let onBack: () -> Void
 
     @State private var editorText = ""
@@ -530,6 +536,8 @@ private struct SettingsEditorView: View {
     @State private var shortcutSearchText = ""
     @State private var currentConfiguration = YAAWConfiguration()
     @State private var globalChatsDirectoryText = ProjectSettings.defaultGlobalChatsDirectory
+    @State private var agentCommandTextByKind: [AgentCLIKind: String] = [:]
+    @State private var agentArgumentsTextByKind: [AgentCLIKind: String] = [:]
 
     private var hasUnsavedChanges: Bool {
         editorText != lastSavedText
@@ -768,6 +776,42 @@ private struct SettingsEditorView: View {
     private var generalSection: some View {
         ScrollView {
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
+                settingsRow("Default agent") {
+                    Picker("Default agent", selection: defaultAgentSelection) {
+                        ForEach(AgentCLIKind.allCases) { kind in
+                            Text(kind.displayName).tag(kind)
+                        }
+                    }
+                    .settingsMenuControl(maxWidth: 260)
+                    .accessibilityIdentifier("settings-default-agent-picker")
+                }
+
+                settingsRow("Markdown/HTML") {
+                    Picker("Markdown and HTML primary open", selection: markdownHTMLDefaultSelection)
+                    {
+                        Text("Preview").tag(FileBrowserMarkdownAndHTMLDefault.browserPreview)
+                        Text("Editor").tag(FileBrowserMarkdownAndHTMLDefault.editor)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 260)
+                    .accessibilityIdentifier("settings-markdown-html-open-picker")
+                }
+
+                settingsRow("CLI options") {
+                    Button {
+                        refreshAgentCLIOptions()
+                    } label: {
+                        Label("Refresh", systemImage: IconRole.reload.icon.systemSymbolName)
+                    }
+                    .accessibilityIdentifier("settings-refresh-cli-options-button")
+                }
+
+                ForEach(AgentCLIKind.allCases) { kind in
+                    settingsRow(kind.displayName) {
+                        agentLaunchDefaultsRow(for: kind)
+                    }
+                }
+
                 settingsRow("Global chats") {
                     HStack(spacing: 8) {
                         TextField("Global chats directory", text: $globalChatsDirectoryText)
@@ -802,6 +846,183 @@ private struct SettingsEditorView: View {
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var defaultAgentSelection: Binding<AgentCLIKind> {
+        Binding(
+            get: { currentConfiguration.agent.default },
+            set: { newValue in
+                saveConfigurationMutation(
+                    successStatus: "Default agent saved and applied.",
+                    failureStatus: "Default agent was not changed."
+                ) {
+                    $0.agent.default = newValue
+                }
+            }
+        )
+    }
+
+    private var markdownHTMLDefaultSelection: Binding<FileBrowserMarkdownAndHTMLDefault> {
+        Binding(
+            get: { currentConfiguration.fileBrowser.markdownAndHTMLDefault },
+            set: { newValue in
+                saveConfigurationMutation(
+                    successStatus: "File browser setting saved and applied.",
+                    failureStatus: "File browser setting was not changed."
+                ) {
+                    $0.fileBrowser.markdownAndHTMLDefault = newValue
+                }
+            }
+        )
+    }
+
+    private func agentLaunchDefaultsRow(for kind: AgentCLIKind) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Command")
+                        .font(fonts.interfaceFont(sizeOffset: -2, weight: .semibold))
+                        .foregroundStyle(themeUI(.secondaryLabel))
+                    TextField(kind.rawValue, text: agentCommandBinding(for: kind))
+                        .textFieldStyle(.plain)
+                        .font(fonts.interfaceFont(sizeOffset: -1))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(dracula(.currentLine))
+                        .foregroundStyle(themeUI(.controlForeground))
+                        .frame(width: 170)
+                        .accessibilityIdentifier("settings-\(kind.rawValue)-command-field")
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Permissions")
+                        .font(fonts.interfaceFont(sizeOffset: -2, weight: .semibold))
+                        .foregroundStyle(themeUI(.secondaryLabel))
+                    Picker("Permissions", selection: agentPermissionSelection(for: kind)) {
+                        Text("CLI default").tag(AgentLaunchOptions.defaultPermissionModeID)
+                        ForEach(permissionModesForSettings(kind)) { mode in
+                            Text(mode.displayName).tag(mode.id)
+                        }
+                        if let customMode = customPermissionModeID(for: kind) {
+                            Text("Custom: \(customMode)").tag(customMode)
+                        }
+                    }
+                    .settingsMenuControl(maxWidth: 190)
+                    .accessibilityIdentifier("settings-\(kind.rawValue)-permission-picker")
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Arguments")
+                        .font(fonts.interfaceFont(sizeOffset: -2, weight: .semibold))
+                        .foregroundStyle(themeUI(.secondaryLabel))
+                    TextField("--flag value", text: agentArgumentsBinding(for: kind))
+                        .textFieldStyle(.plain)
+                        .font(fonts.interfaceFont(sizeOffset: -1))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(dracula(.currentLine))
+                        .foregroundStyle(themeUI(.controlForeground))
+                        .frame(width: 220)
+                        .accessibilityIdentifier("settings-\(kind.rawValue)-arguments-field")
+                }
+
+                Button("Save") {
+                    saveAgentLaunchSettings(for: kind)
+                }
+                .padding(.top, 19)
+                .accessibilityIdentifier("settings-\(kind.rawValue)-launch-save-button")
+            }
+        }
+    }
+
+    private func agentCommandBinding(for kind: AgentCLIKind) -> Binding<String> {
+        Binding(
+            get: {
+                agentCommandTextByKind[kind] ?? currentConfiguration.agentExecutableName(for: kind)
+            },
+            set: { agentCommandTextByKind[kind] = $0 }
+        )
+    }
+
+    private func agentArgumentsBinding(for kind: AgentCLIKind) -> Binding<String> {
+        Binding(
+            get: {
+                agentArgumentsTextByKind[kind]
+                    ?? AgentLaunchOptions.formatAdditionalArguments(
+                        currentConfiguration.agent.launchDefaults.defaults(for: kind)
+                            .additionalArguments
+                    )
+            },
+            set: { agentArgumentsTextByKind[kind] = $0 }
+        )
+    }
+
+    private func agentPermissionSelection(for kind: AgentCLIKind) -> Binding<String> {
+        Binding(
+            get: {
+                currentConfiguration.agent.launchDefaults.defaults(for: kind).permissionModeID
+                    ?? AgentLaunchOptions.defaultPermissionModeID
+            },
+            set: { newValue in
+                saveConfigurationMutation(
+                    successStatus: "\(kind.displayName) permission default saved and applied.",
+                    failureStatus: "\(kind.displayName) permission default was not changed."
+                ) {
+                    var defaults = $0.agent.launchDefaults.defaults(for: kind)
+                    defaults.permissionModeID =
+                        newValue == AgentLaunchOptions.defaultPermissionModeID ? nil : newValue
+                    $0.agent.launchDefaults.setDefaults(defaults, for: kind)
+                }
+            }
+        )
+    }
+
+    private func permissionModesForSettings(_ kind: AgentCLIKind) -> [AgentPermissionMode] {
+        agentCLIOptionCatalog.permissionPresets(for: kind)
+    }
+
+    private func customPermissionModeID(for kind: AgentCLIKind) -> String? {
+        guard
+            let modeID = currentConfiguration.agent.launchDefaults.defaults(for: kind)
+                .permissionModeID,
+            !permissionModesForSettings(kind).contains(where: { $0.id == modeID })
+        else {
+            return nil
+        }
+        return modeID
+    }
+
+    private func refreshAgentCLIOptions() {
+        let catalog = onRefreshAgentCLIOptions()
+        statusMessage =
+            "CLI options refreshed for \(catalog.entries.count) agent commands."
+        validationError = nil
+    }
+
+    private func saveAgentLaunchSettings(for kind: AgentCLIKind) {
+        do {
+            let additionalArguments = try AgentLaunchOptions.parseAdditionalArguments(
+                agentArgumentsTextByKind[kind] ?? "")
+            saveConfigurationMutation(
+                successStatus: "\(kind.displayName) launch defaults saved and applied.",
+                failureStatus: "\(kind.displayName) launch defaults were not changed."
+            ) {
+                $0.tools.agents.setExecutableName(
+                    (agentCommandTextByKind[kind] ?? "").trimmingCharacters(
+                        in: .whitespacesAndNewlines),
+                    for: kind
+                )
+                var defaults = $0.agent.launchDefaults.defaults(for: kind)
+                defaults.additionalArguments = additionalArguments
+                $0.agent.launchDefaults.setDefaults(defaults, for: kind)
+            }
+        } catch is AgentLaunchOptionsArgumentError {
+            validationError = "\(kind.displayName) arguments are not valid."
+            statusMessage = "\(kind.displayName) launch defaults were not changed."
+        } catch {
+            validationError = "YAML validation failed: \(error)"
+            statusMessage = "\(kind.displayName) launch defaults were not changed."
+        }
     }
 
     private var filteredShortcutActions: [KeyboardShortcutAction] {
@@ -1043,10 +1264,10 @@ private struct SettingsEditorView: View {
             Text(title)
                 .font(fonts.interfaceFont(sizeOffset: -1, weight: .semibold))
                 .foregroundStyle(themeUI(.secondaryLabel))
-                .frame(width: 130, alignment: .trailing)
+                .frame(width: 150, alignment: .trailing)
 
             content()
-                .frame(maxWidth: 520, alignment: .leading)
+                .frame(maxWidth: 760, alignment: .leading)
         }
     }
 
@@ -1134,6 +1355,7 @@ private struct SettingsEditorView: View {
                 currentConfiguration = configuration
                 selectedThemeID = configuration.resolvedTheme.id
                 globalChatsDirectoryText = configuration.projects.globalChatsDirectory
+                syncAgentLaunchTextFields(with: configuration)
                 validationError = nil
                 onReloadConfiguration()
                 statusMessage = "Settings reloaded from disk."
@@ -1154,6 +1376,7 @@ private struct SettingsEditorView: View {
             currentConfiguration = configuration
             selectedThemeID = configuration.resolvedTheme.id
             globalChatsDirectoryText = configuration.projects.globalChatsDirectory
+            syncAgentLaunchTextFields(with: configuration)
             lastSavedText = editorText
             validationError = nil
             statusMessage = "Settings saved and applied."
@@ -1170,12 +1393,55 @@ private struct SettingsEditorView: View {
             currentConfiguration = configuration
             selectedThemeID = configuration.resolvedTheme.id
             globalChatsDirectoryText = configuration.projects.globalChatsDirectory
+            syncAgentLaunchTextFields(with: configuration)
             validationError = nil
             statusMessage = "Unsaved edits reverted."
         } catch {
             validationError = "YAML validation failed: \(error)"
             statusMessage = "Reverted to the last loaded file contents."
         }
+    }
+
+    private func saveConfigurationMutation(
+        successStatus: String,
+        failureStatus: String,
+        mutate: (inout YAAWConfiguration) -> Void
+    ) {
+        do {
+            var nextConfiguration = try onValidateText(editorText)
+            mutate(&nextConfiguration)
+            nextConfiguration = nextConfiguration.validated()
+            let renderedText = YAMLConfigurationStore.render(nextConfiguration)
+            _ = try onSaveText(renderedText)
+            editorText = renderedText
+            lastSavedText = renderedText
+            currentConfiguration = nextConfiguration
+            selectedThemeID = nextConfiguration.resolvedTheme.id
+            globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
+            syncAgentLaunchTextFields(with: nextConfiguration)
+            validationError = nil
+            statusMessage = successStatus
+        } catch {
+            validationError = "YAML validation failed: \(error)"
+            statusMessage = failureStatus
+        }
+    }
+
+    private func syncAgentLaunchTextFields(with configuration: YAAWConfiguration) {
+        agentCommandTextByKind = Dictionary(
+            uniqueKeysWithValues: AgentCLIKind.allCases.map {
+                ($0, configuration.agentExecutableName(for: $0))
+            }
+        )
+        agentArgumentsTextByKind = Dictionary(
+            uniqueKeysWithValues: AgentCLIKind.allCases.map { kind in
+                (
+                    kind,
+                    AgentLaunchOptions.formatAdditionalArguments(
+                        configuration.agent.launchDefaults.defaults(for: kind).additionalArguments)
+                )
+            }
+        )
     }
 
     private func saveThemeSelection(_ themeID: String) {
@@ -1189,6 +1455,7 @@ private struct SettingsEditorView: View {
             currentConfiguration = nextConfiguration.validated()
             selectedThemeID = themeID
             globalChatsDirectoryText = currentConfiguration.projects.globalChatsDirectory
+            syncAgentLaunchTextFields(with: currentConfiguration)
             validationError = nil
             statusMessage = "Theme saved and applied."
         } catch {
@@ -1224,6 +1491,7 @@ private struct SettingsEditorView: View {
             currentConfiguration = nextConfiguration
             selectedThemeID = nextConfiguration.resolvedTheme.id
             globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
+            syncAgentLaunchTextFields(with: nextConfiguration)
             validationError = nil
             statusMessage = "Project settings saved and applied."
         } catch {
@@ -1244,6 +1512,7 @@ private struct SettingsEditorView: View {
             currentConfiguration = nextConfiguration
             selectedThemeID = nextConfiguration.resolvedTheme.id
             globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
+            syncAgentLaunchTextFields(with: nextConfiguration)
             validationError = nil
             statusMessage = "Font settings saved and applied."
         } catch {
@@ -1291,6 +1560,7 @@ private struct SettingsEditorView: View {
             currentConfiguration = nextConfiguration
             selectedThemeID = nextConfiguration.resolvedTheme.id
             globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
+            syncAgentLaunchTextFields(with: nextConfiguration)
             validationError = nil
             statusMessage = "Shortcut saved and applied."
         } catch {
@@ -1989,183 +2259,6 @@ private struct ProjectCreationSheet: View {
     }
 }
 
-private struct ThreadChoiceSheet: View {
-    @ObservedObject var model: AppModel
-    let project: Project
-    @Environment(\.dismiss) private var dismiss
-    @State private var displayName = ""
-    @State private var selectedAgentCLI: AgentCLIKind
-    @State private var executableName = ""
-    @State private var permissionModeID = AgentLaunchOptions.defaultPermissionModeID
-    @State private var additionalArgumentsText = ""
-    @State private var errorMessage: String?
-
-    init(model: AppModel, project: Project) {
-        self.model = model
-        self.project = project
-        _selectedAgentCLI = State(initialValue: model.defaultAgentCLI)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New Thread")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(dracula(.purple))
-
-            Text(project.displayName)
-                .foregroundStyle(dracula(.comment))
-
-            TextField("Optional thread name", text: $displayName)
-                .textFieldStyle(.plain)
-                .font(.system(size: 15))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(dracula(.currentLine))
-                .foregroundStyle(dracula(.foreground))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .accessibilityLabel("Optional thread name")
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Agent")
-                    .font(.caption)
-                    .foregroundStyle(dracula(.comment))
-                HStack(spacing: 8) {
-                    ForEach(AgentCLIKind.allCases) { agentCLI in
-                        Button {
-                            selectedAgentCLI = agentCLI
-                            resetUnsupportedPermissionMode()
-                        } label: {
-                            HStack(spacing: 6) {
-                                AgentCLIIcon(agentCLI: agentCLI)
-                                    .frame(width: 16, height: 16)
-                                Text(agentCLI.displayName)
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(
-                            selectedAgentCLI == agentCLI
-                                ? dracula(.purple)
-                                : dracula(.currentLine)
-                        )
-                        .foregroundStyle(dracula(.foreground))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .accessibilityLabel("Select \(agentCLI.displayName)")
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Command")
-                    .font(.caption)
-                    .foregroundStyle(dracula(.comment))
-                TextField(defaultExecutableName, text: $executableName)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(dracula(.currentLine))
-                    .foregroundStyle(dracula(.foreground))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .accessibilityLabel("Agent executable")
-            }
-
-            if !permissionModes.isEmpty {
-                Picker("Permissions", selection: $permissionModeID) {
-                    Text("Default").tag(AgentLaunchOptions.defaultPermissionModeID)
-                    ForEach(permissionModes) { mode in
-                        Text(mode.displayName).tag(mode.id)
-                    }
-                }
-                .pickerStyle(.menu)
-                .tint(dracula(.foreground))
-                .foregroundStyle(dracula(.foreground))
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Arguments")
-                    .font(.caption)
-                    .foregroundStyle(dracula(.comment))
-                TextField("--flag value", text: $additionalArgumentsText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(dracula(.currentLine))
-                    .foregroundStyle(dracula(.foreground))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .accessibilityLabel("Additional agent arguments")
-            }
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(dracula(.red))
-            }
-
-            HStack {
-                Spacer()
-                Button {
-                    createThread()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                        Text("Create")
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .accessibilityLabel("Create thread")
-            }
-        }
-        .padding(24)
-        .frame(width: 460)
-        .background(dracula(.background))
-    }
-
-    private var defaultExecutableName: String {
-        model.configuration.agentExecutableName(for: selectedAgentCLI)
-    }
-
-    private var permissionModes: [AgentPermissionMode] {
-        AgentPermissionMode.supportedModes(for: selectedAgentCLI)
-    }
-
-    private func resetUnsupportedPermissionMode() {
-        guard permissionModeID != AgentLaunchOptions.defaultPermissionModeID else { return }
-        let supportedModeIDs = Set(permissionModes.map(\.id))
-        if !supportedModeIDs.contains(permissionModeID) {
-            permissionModeID = AgentLaunchOptions.defaultPermissionModeID
-        }
-    }
-
-    private func createThread() {
-        do {
-            let additionalArguments =
-                try AgentLaunchOptions.parseAdditionalArguments(additionalArgumentsText)
-            let launchOptions = AgentLaunchOptions(
-                executableName: executableName,
-                permissionModeID: permissionModeID == AgentLaunchOptions.defaultPermissionModeID
-                    ? nil
-                    : permissionModeID,
-                additionalArguments: additionalArguments
-            )
-            try model.createThread(
-                projectID: project.id,
-                agentCLI: selectedAgentCLI,
-                displayName: displayName,
-                launchOptions: launchOptions
-            )
-            dismiss()
-        } catch is AgentLaunchOptionsArgumentError {
-            errorMessage = "Arguments are not valid."
-        } catch {
-            errorMessage = "Thread could not be created."
-        }
-    }
-}
-
 private struct ThreadRenameSheet: View {
     @ObservedObject var model: AppModel
     let thread: AgentThread
@@ -2566,7 +2659,7 @@ private struct RightPanelView: View {
                         model.selectFile(relativePath: entry.relativePath)
                     },
                     onOpenFile: { entry in
-                        model.openFileInNvim(relativePath: entry.relativePath)
+                        model.openFileFromBrowserPrimary(relativePath: entry.relativePath)
                     },
                     onOpenInBrowser: { entry in
                         model.openFileInBrowser(relativePath: entry.relativePath)

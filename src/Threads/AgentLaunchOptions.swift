@@ -23,10 +23,15 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
         executableName == nil && permissionModeID == nil && additionalArguments.isEmpty
     }
 
-    public func validated(for agentCLI: AgentCLIKind) -> AgentLaunchOptions {
-        let supportedModeIDs = Set(AgentPermissionMode.supportedModes(for: agentCLI).map(\.id))
-        let modeID =
-            permissionModeID.flatMap { supportedModeIDs.contains($0) ? $0 : nil }
+    public func validated(
+        for agentCLI: AgentCLIKind,
+        permissionModes: [AgentPermissionMode]? = nil
+    ) -> AgentLaunchOptions {
+        let modeID = permissionModeID.flatMap { id in
+            guard let permissionModes else { return id }
+            let supportedModeIDs = Set(permissionModes.map(\.id))
+            return supportedModeIDs.isEmpty || supportedModeIDs.contains(id) ? id : nil
+        }
         return AgentLaunchOptions(
             executableName: executableName,
             permissionModeID: modeID,
@@ -34,9 +39,13 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
         )
     }
 
-    public func permissionArguments(for agentCLI: AgentCLIKind) -> [String] {
+    public func permissionArguments(
+        for agentCLI: AgentCLIKind,
+        permissionModes: [AgentPermissionMode]? = nil
+    ) -> [String] {
         guard let permissionModeID else { return [] }
-        return AgentPermissionMode.supportedModes(for: agentCLI)
+        let supportedModes = permissionModes ?? AgentPermissionMode.supportedModes(for: agentCLI)
+        return supportedModes
             .first { $0.id == permissionModeID }?
             .arguments ?? []
     }
@@ -113,7 +122,7 @@ public enum AgentLaunchOptionsArgumentError: Error, Equatable, Sendable {
     case unclosedQuote
 }
 
-public struct AgentPermissionMode: Identifiable, Equatable, Sendable {
+public struct AgentPermissionMode: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var displayName: String
     public var arguments: [String]
@@ -125,6 +134,10 @@ public struct AgentPermissionMode: Identifiable, Equatable, Sendable {
     }
 
     public static func supportedModes(for agentCLI: AgentCLIKind) -> [AgentPermissionMode] {
+        builtInModes(for: agentCLI)
+    }
+
+    public static func builtInModes(for agentCLI: AgentCLIKind) -> [AgentPermissionMode] {
         switch agentCLI {
         case .codex:
             [
@@ -137,6 +150,11 @@ public struct AgentPermissionMode: Identifiable, Equatable, Sendable {
                     id: "codex-never",
                     displayName: "Never ask",
                     arguments: ["--ask-for-approval", "never"]
+                ),
+                AgentPermissionMode(
+                    id: "codex-on-failure",
+                    displayName: "On failure",
+                    arguments: ["--ask-for-approval", "on-failure"]
                 ),
                 AgentPermissionMode(
                     id: "codex-untrusted",
@@ -157,6 +175,11 @@ public struct AgentPermissionMode: Identifiable, Equatable, Sendable {
                     id: "codex-full-access",
                     displayName: "Full access",
                     arguments: ["--sandbox", "danger-full-access"]
+                ),
+                AgentPermissionMode(
+                    id: "codex-bypass",
+                    displayName: "Bypass",
+                    arguments: ["--dangerously-bypass-approvals-and-sandbox"]
                 ),
             ]
         case .claude:
@@ -210,6 +233,11 @@ public struct AgentPermissionMode: Identifiable, Equatable, Sendable {
                     id: "copilot-allow-all",
                     displayName: "Allow all",
                     arguments: ["--allow-all"]
+                ),
+                AgentPermissionMode(
+                    id: "copilot-yolo",
+                    displayName: "YOLO",
+                    arguments: ["--yolo"]
                 ),
             ]
         }

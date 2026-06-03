@@ -1138,10 +1138,13 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(seeded.fonts.terminalSize, 15)
         XCTAssertEqual(seeded.fonts.fileBrowserFamily, "inherit")
         XCTAssertEqual(seeded.fonts.fileBrowserSize, 0)
+        XCTAssertEqual(seeded.fileBrowser.markdownAndHTMLDefault, .browserPreview)
+        XCTAssertEqual(seeded.agent.launchDefaults.codex, AgentLaunchDefaultSettings())
         XCTAssertTrue(seeded.ignoreRules.contains(".git"))
         XCTAssertTrue(seeded.ignoreRules.contains("node_modules"))
         XCTAssertFalse(seeded.ignoreRules.contains("Music"))
         XCTAssertTrue(template.contains("# YAAW settings."))
+        XCTAssertTrue(template.contains("launchDefaults:"))
         XCTAssertTrue(template.contains("# default: [nvim, vim, vi]"))
         XCTAssertTrue(template.contains("globalChatsDirectory: \"~/yaaw\""))
         XCTAssertTrue(template.contains("fileBrowserPack: material-file-icons"))
@@ -1153,6 +1156,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(template.contains("terminalSize: 15"))
         XCTAssertTrue(template.contains("fileBrowserFamily: inherit"))
         XCTAssertTrue(template.contains("fileBrowserSize: 0"))
+        XCTAssertTrue(template.contains("markdownAndHTMLDefault: browserPreview"))
         XCTAssertTrue(
             template.contains(
                 "# not changeable yet: custom palettes are reserved for future expansion."))
@@ -1178,10 +1182,16 @@ final class PersistenceTests: XCTestCase {
                 version: 1
                 agent:
                   default: claude
+                  launchDefaults:
+                    codex:
+                      permissionModeID: codex-never
+                      additionalArguments: [--model, gpt-5]
                 projects:
                   globalChatsDirectory: ~/custom-yaaw
                 icons:
                   fileBrowserPack: catppuccin-file-icons
+                fileBrowser:
+                  markdownAndHTMLDefault: editor
                 fonts:
                   interfaceFamily: Avenir Next
                   interfaceSize: 14.5
@@ -1193,8 +1203,16 @@ final class PersistenceTests: XCTestCase {
         )
 
         XCTAssertEqual(configuration.defaultAgentCLI, .claude)
+        XCTAssertEqual(
+            configuration.agent.launchDefaults.codex,
+            AgentLaunchDefaultSettings(
+                permissionModeID: "codex-never",
+                additionalArguments: ["--model", "gpt-5"]
+            )
+        )
         XCTAssertEqual(configuration.projects.globalChatsDirectory, "~/custom-yaaw")
         XCTAssertEqual(configuration.fileIconPack, .catppuccin)
+        XCTAssertEqual(configuration.fileBrowser.markdownAndHTMLDefault, .editor)
         XCTAssertEqual(configuration.fonts.interfaceFamily, "Avenir Next")
         XCTAssertEqual(configuration.fonts.interfaceSize, 14.5)
         XCTAssertEqual(configuration.fonts.editorFamily, "SF Mono")
@@ -1245,6 +1263,36 @@ final class PersistenceTests: XCTestCase {
         )
         XCTAssertEqual(clamped.fonts.fileBrowserFamily, "SF Mono")
         XCTAssertEqual(clamped.fonts.fileBrowserSize, 28)
+    }
+
+    func testYAMLConfigurationFileBrowserModeAndAgentLaunchDefaultValidation() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        let configuration = try store.validate(
+            text: """
+                version: 1
+                agent:
+                  launchDefaults:
+                    claude:
+                      permissionModeID: default
+                      additionalArguments: ["  --model  ", "", sonnet]
+                    copilot:
+                      permissionModeID: copilot-yolo
+                      additionalArguments: [--fast]
+                fileBrowser:
+                  markdownAndHTMLDefault: unsupported
+                """
+        )
+
+        XCTAssertNil(configuration.agent.launchDefaults.claude.permissionModeID)
+        XCTAssertEqual(
+            configuration.agent.launchDefaults.claude.additionalArguments,
+            ["--model", "sonnet"]
+        )
+        XCTAssertEqual(configuration.agent.launchDefaults.copilot.permissionModeID, "copilot-yolo")
+        XCTAssertEqual(configuration.agent.launchDefaults.copilot.additionalArguments, ["--fast"])
+        XCTAssertEqual(configuration.fileBrowser.markdownAndHTMLDefault, .browserPreview)
     }
 
     func testYAMLConfigurationSaveRendersFontSettingsAndReloadsThem() throws {
@@ -1333,6 +1381,10 @@ final class PersistenceTests: XCTestCase {
             unknownTopLevel: ignored
             agent:
               default: claude
+              launchDefaults:
+                codex:
+                  permissionModeID: codex-on-request
+                  additionalArguments: [--model, gpt-5]
             projects:
               globalChatsDirectory: /tmp/yaaw-global
             theme:
@@ -1362,6 +1414,8 @@ final class PersistenceTests: XCTestCase {
                 fallback: [delta, "--diff"]
               agents:
                 codex: codex-nightly
+            fileBrowser:
+              markdownAndHTMLDefault: editor
             fileIndexing:
               ignoreRules:
                 - .git
@@ -1374,8 +1428,16 @@ final class PersistenceTests: XCTestCase {
         let reloaded = store.load()
 
         XCTAssertEqual(reloaded.defaultAgentCLI, .claude)
+        XCTAssertEqual(
+            reloaded.agent.launchDefaults.codex,
+            AgentLaunchDefaultSettings(
+                permissionModeID: "codex-on-request",
+                additionalArguments: ["--model", "gpt-5"]
+            )
+        )
         XCTAssertEqual(reloaded.projects.globalChatsDirectory, "/tmp/yaaw-global")
         XCTAssertEqual(reloaded.fileIconPack, .catppuccin)
+        XCTAssertEqual(reloaded.fileBrowser.markdownAndHTMLDefault, .editor)
         XCTAssertEqual(reloaded.fonts.interfaceFamily, "Avenir Next")
         XCTAssertEqual(reloaded.fonts.interfaceSize, 14)
         XCTAssertEqual(reloaded.fonts.editorFamily, "SF Mono")

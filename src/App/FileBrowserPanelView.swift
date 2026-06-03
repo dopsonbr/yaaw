@@ -218,7 +218,7 @@ private struct FileBrowserTreeRowView: View {
             )
         }
         .buttonStyle(.plain)
-        .help(row.entry.isDirectory ? row.entry.relativePath : "Open in nvim")
+        .help(row.entry.isDirectory ? row.entry.relativePath : "Open file")
         .contextMenu {
             externalOpenMenuItems(for: row.entry)
         }
@@ -318,7 +318,7 @@ private struct FileBrowserSearchRow: View {
             }
             .buttonStyle(.plain)
             .background(isSelected ? dracula(.currentLine) : dracula(.background))
-            .help("Open in nvim")
+            .help("Open file")
             .contextMenu {
                 fileMenuItems(for: entry)
             }

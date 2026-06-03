@@ -10,6 +10,7 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
     public var fonts: FontSettings
     public var keyboardShortcuts: KeyboardShortcutSettings
     public var tools: ToolSettings
+    public var fileBrowser: FileBrowserSettings
     public var fileIndexing: FileIndexingSettings
 
     public init(
@@ -21,6 +22,7 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         fonts: FontSettings = FontSettings(),
         keyboardShortcuts: KeyboardShortcutSettings = KeyboardShortcutSettings(),
         tools: ToolSettings = ToolSettings(),
+        fileBrowser: FileBrowserSettings = FileBrowserSettings(),
         fileIndexing: FileIndexingSettings = FileIndexingSettings()
     ) {
         self.version = version
@@ -31,6 +33,7 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         self.fonts = fonts
         self.keyboardShortcuts = keyboardShortcuts
         self.tools = tools
+        self.fileBrowser = fileBrowser
         self.fileIndexing = fileIndexing
     }
 
@@ -55,6 +58,9 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
             ) ?? KeyboardShortcutSettings()
         self.tools =
             try container.decodeIfPresent(ToolSettings.self, forKey: .tools) ?? ToolSettings()
+        self.fileBrowser =
+            try container.decodeIfPresent(FileBrowserSettings.self, forKey: .fileBrowser)
+            ?? FileBrowserSettings()
         self.fileIndexing =
             try container.decodeIfPresent(
                 FileIndexingSettings.self,
@@ -88,6 +94,15 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         tools.agents.executableName(for: kind)
     }
 
+    public func defaultLaunchOptions(for kind: AgentCLIKind) -> AgentLaunchOptions {
+        let defaults = agent.launchDefaults.defaults(for: kind)
+        return AgentLaunchOptions(
+            executableName: agentExecutableName(for: kind),
+            permissionModeID: defaults.permissionModeID,
+            additionalArguments: defaults.additionalArguments
+        )
+    }
+
     public func shortcut(for action: KeyboardShortcutAction) -> KeyboardShortcutDefinition {
         keyboardShortcuts.definition(for: action)
     }
@@ -115,24 +130,132 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
             )
         }
         configuration.tools = configuration.tools.validated()
+        configuration.fileBrowser = configuration.fileBrowser.validated()
         return configuration
     }
 }
 
 public struct AgentSettings: Codable, Equatable, Sendable {
     public var `default`: AgentCLIKind
+    public var launchDefaults: AgentLaunchDefaultsSettings
 
-    public init(default: AgentCLIKind = .codex) {
+    public init(
+        default: AgentCLIKind = .codex,
+        launchDefaults: AgentLaunchDefaultsSettings = AgentLaunchDefaultsSettings()
+    ) {
         self.default = `default`
+        self.launchDefaults = launchDefaults
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.default = try container.decodeIfPresent(AgentCLIKind.self, forKey: .default) ?? .codex
+        self.launchDefaults =
+            try container.decodeIfPresent(
+                AgentLaunchDefaultsSettings.self,
+                forKey: .launchDefaults
+            ) ?? AgentLaunchDefaultsSettings()
     }
 
     fileprivate func validated() -> AgentSettings {
-        self
+        AgentSettings(default: `default`, launchDefaults: launchDefaults.validated())
+    }
+}
+
+public struct AgentLaunchDefaultSettings: Codable, Equatable, Sendable {
+    public var permissionModeID: String?
+    public var additionalArguments: [String]
+
+    public init(permissionModeID: String? = nil, additionalArguments: [String] = []) {
+        self.permissionModeID = permissionModeID?.configurationNilIfBlank
+        self.additionalArguments = additionalArguments.map(\.trimmed).filter { !$0.isEmpty }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.permissionModeID =
+            try container.decodeIfPresent(String.self, forKey: .permissionModeID)?
+            .configurationNilIfBlank
+        self.additionalArguments =
+            try container.decodeIfPresent([String].self, forKey: .additionalArguments) ?? []
+    }
+
+    fileprivate func validated() -> AgentLaunchDefaultSettings {
+        AgentLaunchDefaultSettings(
+            permissionModeID: permissionModeID,
+            additionalArguments: additionalArguments
+        )
+    }
+}
+
+public struct AgentLaunchDefaultsSettings: Codable, Equatable, Sendable {
+    public var codex: AgentLaunchDefaultSettings
+    public var claude: AgentLaunchDefaultSettings
+    public var opencode: AgentLaunchDefaultSettings
+    public var copilot: AgentLaunchDefaultSettings
+
+    public init(
+        codex: AgentLaunchDefaultSettings = AgentLaunchDefaultSettings(),
+        claude: AgentLaunchDefaultSettings = AgentLaunchDefaultSettings(),
+        opencode: AgentLaunchDefaultSettings = AgentLaunchDefaultSettings(),
+        copilot: AgentLaunchDefaultSettings = AgentLaunchDefaultSettings()
+    ) {
+        self.codex = codex
+        self.claude = claude
+        self.opencode = opencode
+        self.copilot = copilot
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.codex =
+            try container.decodeIfPresent(AgentLaunchDefaultSettings.self, forKey: .codex)
+            ?? AgentLaunchDefaultSettings()
+        self.claude =
+            try container.decodeIfPresent(AgentLaunchDefaultSettings.self, forKey: .claude)
+            ?? AgentLaunchDefaultSettings()
+        self.opencode =
+            try container.decodeIfPresent(AgentLaunchDefaultSettings.self, forKey: .opencode)
+            ?? AgentLaunchDefaultSettings()
+        self.copilot =
+            try container.decodeIfPresent(AgentLaunchDefaultSettings.self, forKey: .copilot)
+            ?? AgentLaunchDefaultSettings()
+    }
+
+    public func defaults(for kind: AgentCLIKind) -> AgentLaunchDefaultSettings {
+        switch kind {
+        case .codex:
+            codex
+        case .claude:
+            claude
+        case .opencode:
+            opencode
+        case .copilot:
+            copilot
+        }
+    }
+
+    public mutating func setDefaults(_ defaults: AgentLaunchDefaultSettings, for kind: AgentCLIKind)
+    {
+        switch kind {
+        case .codex:
+            codex = defaults
+        case .claude:
+            claude = defaults
+        case .opencode:
+            opencode = defaults
+        case .copilot:
+            copilot = defaults
+        }
+    }
+
+    fileprivate func validated() -> AgentLaunchDefaultsSettings {
+        AgentLaunchDefaultsSettings(
+            codex: codex.validated(),
+            claude: claude.validated(),
+            opencode: opencode.validated(),
+            copilot: copilot.validated()
+        )
     }
 }
 
@@ -915,6 +1038,19 @@ public struct AgentToolSettings: Codable, Equatable, Sendable {
         }
     }
 
+    public mutating func setExecutableName(_ executableName: String, for kind: AgentCLIKind) {
+        switch kind {
+        case .codex:
+            codex = executableName
+        case .claude:
+            claude = executableName
+        case .opencode:
+            opencode = executableName
+        case .copilot:
+            copilot = executableName
+        }
+    }
+
     fileprivate func validated() -> AgentToolSettings {
         AgentToolSettings(
             codex: codex.nonBlankOr("codex"),
@@ -922,6 +1058,44 @@ public struct AgentToolSettings: Codable, Equatable, Sendable {
             opencode: opencode.nonBlankOr("opencode"),
             copilot: copilot.nonBlankOr("copilot")
         )
+    }
+}
+
+public enum FileBrowserMarkdownAndHTMLDefault: String, CaseIterable, Codable, Equatable, Sendable {
+    case browserPreview
+    case editor
+
+    public var displayName: String {
+        switch self {
+        case .browserPreview:
+            "Browser preview"
+        case .editor:
+            "Built-in editor"
+        }
+    }
+}
+
+public struct FileBrowserSettings: Codable, Equatable, Sendable {
+    public var markdownAndHTMLDefault: FileBrowserMarkdownAndHTMLDefault
+
+    public init(
+        markdownAndHTMLDefault: FileBrowserMarkdownAndHTMLDefault = .browserPreview
+    ) {
+        self.markdownAndHTMLDefault = markdownAndHTMLDefault
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rawValue =
+            try container.decodeIfPresent(String.self, forKey: .markdownAndHTMLDefault)
+            ?? FileBrowserMarkdownAndHTMLDefault.browserPreview.rawValue
+        self.markdownAndHTMLDefault =
+            FileBrowserMarkdownAndHTMLDefault(rawValue: rawValue)
+            ?? .browserPreview
+    }
+
+    fileprivate func validated() -> FileBrowserSettings {
+        self
     }
 }
 
@@ -1043,6 +1217,8 @@ public final class YAMLConfigurationStore {
               # default: codex
               # active now: used when a flow needs a default CLI choice.
               default: \(configuration.agent.default.rawValue)
+              launchDefaults:
+            \(renderAgentLaunchDefaults(configuration.agent.launchDefaults))
 
             projects:
               # default: ~/yaaw
@@ -1118,6 +1294,12 @@ public final class YAMLConfigurationStore {
                 opencode: \(yamlScalar(configuration.tools.agents.opencode))
                 copilot: \(yamlScalar(configuration.tools.agents.copilot))
 
+            fileBrowser:
+              # default: browserPreview
+              # active now: primary row open for Markdown and HTML files.
+              # supported: browserPreview, editor
+              markdownAndHTMLDefault: \(configuration.fileBrowser.markdownAndHTMLDefault.rawValue)
+
             fileIndexing:
               # active now.
               ignoreRules:
@@ -1152,6 +1334,21 @@ public final class YAMLConfigurationStore {
         .joined(separator: "\n")
     }
 
+    private static func renderAgentLaunchDefaults(_ settings: AgentLaunchDefaultsSettings) -> String
+    {
+        AgentCLIKind.allCases.map { kind in
+            let defaults = settings.defaults(for: kind)
+            let mode = defaults.permissionModeID ?? AgentLaunchOptions.defaultPermissionModeID
+            return """
+                  \(kind.rawValue):
+                    # default: permissionModeID default, additionalArguments []
+                    permissionModeID: \(yamlScalar(mode))
+                    additionalArguments: \(inlineList(defaults.additionalArguments))
+                """
+        }
+        .joined(separator: "\n")
+    }
+
     private static func inlineList(_ values: [String]) -> String {
         "[\(values.map(yamlScalar).joined(separator: ", "))]"
     }
@@ -1182,6 +1379,11 @@ extension Array where Element == String {
 extension String {
     fileprivate var trimmed: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    fileprivate var configurationNilIfBlank: String? {
+        let value = trimmed
+        return value.isEmpty || value == AgentLaunchOptions.defaultPermissionModeID ? nil : value
     }
 
     fileprivate func nonBlankOr(_ fallback: String) -> String {

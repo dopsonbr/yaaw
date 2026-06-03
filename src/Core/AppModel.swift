@@ -63,6 +63,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var selectedFileRelativePath: String?
     @Published public private(set) var browserUnavailableMessagesByThreadID: [UUID: String]
     @Published public private(set) var configuration: YAAWConfiguration
+    @Published public private(set) var agentCLIOptionCatalog: AgentCLIOptionCatalog
     @Published public private(set) var expandedProjectIDs: Set<UUID>
     @Published public private(set) var expandedArchivedProjectIDs: Set<UUID>
     @Published public private(set) var threadActivityByThreadID: [UUID: ThreadActivityState]
@@ -73,6 +74,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private let store: YAAWStore
     private let terminalManager: TerminalSessionManaging
     private let agentCLIBindings: AgentCLISessionBindingService
+    private let agentCLIOptionCatalogService: any AgentCLIOptionCatalogServicing
     private let fileIndexer: FileIndexing
     private let fileIndexCacheCoordinator: FileIndexCacheCoordinator
     private let fileIndexDirectoryWatcher: FileIndexDirectoryWatcher
@@ -117,6 +119,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         store: YAAWStore = InMemoryYAAWStore.helloWorld(),
         terminalManager: TerminalSessionManaging = PlaceholderTerminalSessionManager(),
         agentCLIBindings: AgentCLISessionBindingService = AgentCLISessionBindingService(),
+        agentCLIOptionCatalogService: any AgentCLIOptionCatalogServicing =
+            AgentCLIOptionCatalogService(),
         fileIndexer: FileIndexing = BackgroundFileIndexer(),
         externalToolResolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
         configuration: YAAWConfiguration = YAAWConfiguration(),
@@ -132,6 +136,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.store = store
         self.terminalManager = terminalManager
         self.agentCLIBindings = agentCLIBindings
+        self.agentCLIOptionCatalogService = agentCLIOptionCatalogService
         self.fileIndexer = fileIndexer
         self.fileIndexCacheCoordinator = FileIndexCacheCoordinator(
             store: store, fileIndexer: fileIndexer)
@@ -143,6 +148,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.isApplicationActive = isApplicationActive
         let validatedConfiguration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
         self.configuration = validatedConfiguration
+        self.agentCLIOptionCatalog = agentCLIOptionCatalogService.loadCatalog()
         self.environment = environment
         self.homeDirectory = homeDirectory
         let snapshot = store.load()
@@ -523,6 +529,33 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public var defaultAgentCLI: AgentCLIKind {
         configuration.defaultAgentCLI
+    }
+
+    public func permissionModes(for agentCLI: AgentCLIKind) -> [AgentPermissionMode] {
+        agentCLIOptionCatalog.permissionPresets(for: agentCLI)
+    }
+
+    public func configuredLaunchOptions(for agentCLI: AgentCLIKind) -> AgentLaunchOptions {
+        configuration.defaultLaunchOptions(for: agentCLI)
+            .validated(for: agentCLI, permissionModes: permissionModes(for: agentCLI))
+    }
+
+    @discardableResult
+    public func refreshAgentCLIOptionCatalog() -> AgentCLIOptionCatalog {
+        let catalog = agentCLIOptionCatalogService.refreshCatalog(
+            configuration: configuration,
+            resolver: externalToolResolver,
+            environment: environment
+        )
+        agentCLIOptionCatalog = catalog
+        recordDiagnostic(
+            category: "AgentCLIOptions",
+            name: "catalog_refreshed",
+            metadata: [
+                "agent_count": "\(catalog.entries.count)"
+            ]
+        )
+        return catalog
     }
 
     public func keyboardShortcutDefinition(for action: KeyboardShortcutAction)
@@ -910,7 +943,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 bumpAgentCLIPollGeneration(for: threadID)
                 launchDescriptor = agentCLIBindings.terminalLaunchDescriptor(
                     for: thread,
-                    executableNameOverride: configuration.agentExecutableName(for: thread.agentCLI)
+                    executableNameOverride: configuration.agentExecutableName(for: thread.agentCLI),
+                    permissionModes: permissionModes(for: thread.agentCLI)
                 )
             }
             activeProjectLaunchDescriptorsByThreadID[threadID] = launchDescriptor
@@ -1602,6 +1636,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         persistRightPanelState(threadID: selectedThreadID)
     }
 
+    public func openFileFromBrowserPrimary(relativePath: String) {
+        let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
+        guard
+            configuration.fileBrowser.markdownAndHTMLDefault == .browserPreview,
+            Self.isMarkdownOrHTML(relativePath: normalizedPath),
+            openFileInBrowser(relativePath: normalizedPath)
+        else {
+            openFileInNvim(relativePath: relativePath)
+            return
+        }
+    }
+
     public func openBrowserTab(urlString: String? = nil) {
         guard let selectedThreadID else { return }
         var state = selectedRightPanelState
@@ -1688,6 +1734,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             URL(fileURLWithPath: normalizedPath).pathExtension.lowercased())
     }
 
+    public static func isMarkdownOrHTML(relativePath: String) -> Bool {
+        let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
+        return ["md", "markdown", "html", "htm"].contains(
+            URL(fileURLWithPath: normalizedPath).pathExtension.lowercased()
+        )
+    }
+
     @discardableResult
     public func createProject(
         displayName: String,
@@ -1740,7 +1793,15 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         now: Date = Date()
     ) throws -> UUID {
         let agentCLI = agentCLI ?? configuration.defaultAgentCLI
-        let resolvedLaunchOptions = launchOptions.validated(for: agentCLI)
+        var candidateLaunchOptions =
+            launchOptions.isEmpty ? configuredLaunchOptions(for: agentCLI) : launchOptions
+        if candidateLaunchOptions.executableName == nil {
+            candidateLaunchOptions.executableName = configuration.agentExecutableName(for: agentCLI)
+        }
+        let resolvedLaunchOptions = candidateLaunchOptions.validated(
+            for: agentCLI,
+            permissionModes: permissionModes(for: agentCLI)
+        )
         let isImplicitProjectSelection = projectID == nil
         let resolvedProjectID = projectID ?? selectedProjectID
         guard let project = projects.first(where: { $0.id == resolvedProjectID }) else {

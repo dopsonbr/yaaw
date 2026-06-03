@@ -446,24 +446,36 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             .appendingPathComponent("HelperBin", isDirectory: true)
     }
 
-    public func terminalCommand(for thread: AgentThread, executableNameOverride: String? = nil)
-        -> [String]
-    {
+    public func terminalCommand(
+        for thread: AgentThread,
+        executableNameOverride: String? = nil,
+        permissionModes: [AgentPermissionMode]? = nil
+    ) -> [String] {
         if captureLogURL(for: thread) == nil {
-            return invocation(for: thread, executableNameOverride: executableNameOverride)
+            return invocation(
+                for: thread,
+                executableNameOverride: executableNameOverride,
+                permissionModes: permissionModes
+            )
                 .command
         }
         return terminalLaunchDescriptor(
             for: thread,
-            executableNameOverride: executableNameOverride
+            executableNameOverride: executableNameOverride,
+            permissionModes: permissionModes
         ).command
     }
 
     public func terminalLaunchDescriptor(
         for thread: AgentThread,
-        executableNameOverride: String? = nil
+        executableNameOverride: String? = nil,
+        permissionModes: [AgentPermissionMode]? = nil
     ) -> AgentTerminalLaunchDescriptor {
-        let command = invocation(for: thread, executableNameOverride: executableNameOverride)
+        let command = invocation(
+            for: thread,
+            executableNameOverride: executableNameOverride,
+            permissionModes: permissionModes
+        )
             .command
         let helperBinURL = installNotifyHelperIfNeeded()
         let activityLogURL = activityLogURL(for: thread)
@@ -495,10 +507,15 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         )
     }
 
-    public func invocation(for thread: AgentThread, executableNameOverride: String? = nil)
-        -> AgentCLIInvocation
-    {
-        let launchOptions = thread.launchOptions.validated(for: thread.agentCLI)
+    public func invocation(
+        for thread: AgentThread,
+        executableNameOverride: String? = nil,
+        permissionModes: [AgentPermissionMode]? = nil
+    ) -> AgentCLIInvocation {
+        let launchOptions = thread.launchOptions.validated(
+            for: thread.agentCLI,
+            permissionModes: permissionModes
+        )
         let resolvedExecutableNameOverride =
             launchOptions.executableName ?? executableNameOverride
         guard let adapter = adaptersByKind[thread.agentCLI] else {
@@ -507,7 +524,10 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
                 executableName: executableName,
                 resolvedExecutablePath: resolver.executablePath(
                     named: executableName, environment: environment),
-                arguments: launchOptions.permissionArguments(for: thread.agentCLI)
+                arguments: launchOptions.permissionArguments(
+                    for: thread.agentCLI,
+                    permissionModes: permissionModes
+                )
                     + launchOptions.additionalArguments
             )
         }
@@ -521,7 +541,10 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         return AgentCLIInvocation(
             executableName: executableName,
             resolvedExecutablePath: invocation.resolvedExecutablePath,
-            arguments: launchOptions.permissionArguments(for: thread.agentCLI)
+            arguments: launchOptions.permissionArguments(
+                for: thread.agentCLI,
+                permissionModes: permissionModes
+            )
                 + launchOptions.additionalArguments
                 + invocation.arguments
         )

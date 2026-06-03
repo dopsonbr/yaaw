@@ -2046,6 +2046,51 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(launch.command[2].contains("/tools/codex-nightly"))
     }
 
+    func testCreateThreadCapturesConfiguredLaunchDefaults() throws {
+        let fixture = AppModelFixture()
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: [
+                "codex-nightly": "/tools/codex-nightly",
+                "codex-stable": "/tools/codex-stable",
+            ]),
+            captureDirectory: nil
+        )
+        let model = AppModel(
+            store: fixture.store,
+            agentCLIBindings: service,
+            configuration: YAAWConfiguration(
+                agent: AgentSettings(
+                    launchDefaults: AgentLaunchDefaultsSettings(
+                        codex: AgentLaunchDefaultSettings(
+                            permissionModeID: "codex-never",
+                            additionalArguments: ["--model", "gpt-5"]
+                        )
+                    )
+                ),
+                tools: ToolSettings(agents: AgentToolSettings(codex: "codex-nightly"))
+            )
+        )
+
+        let threadID = try model.createThread(agentCLI: .codex)
+        let thread = try XCTUnwrap(model.threads.first { $0.id == threadID })
+        XCTAssertEqual(thread.launchOptions.executableName, "codex-nightly")
+        XCTAssertEqual(thread.launchOptions.permissionModeID, "codex-never")
+        XCTAssertEqual(thread.launchOptions.additionalArguments, ["--model", "gpt-5"])
+
+        model.reloadConfiguration(
+            YAAWConfiguration(tools: ToolSettings(agents: AgentToolSettings(codex: "codex-stable")))
+        )
+        let request = try XCTUnwrap(model.terminalLaunchRequest(for: .project(threadID: threadID)))
+        guard case .agentPTY(let launch) = request.backend else {
+            return XCTFail("project terminal should use agentPTY")
+        }
+        XCTAssertTrue(
+            launch.command[2].contains(
+                "/tools/codex-nightly --ask-for-approval never --model gpt-5")
+        )
+        XCTAssertFalse(launch.command[2].contains("/tools/codex-stable"))
+    }
+
     func testThreadLaunchOptionsOverrideExecutableAndApplyArguments() throws {
         let fixture = AppModelFixture()
         let service = AgentCLISessionBindingService(
@@ -2645,6 +2690,127 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(
             model.selectedRightPanelTab.urlString, preview.standardizedFileURL.absoluteString)
         XCTAssertNil(model.selectedBrowserUnavailableMessage)
+    }
+
+    func testFileBrowserPrimaryOpenRoutesMarkdownAndHTMLToBrowserByDefault() throws {
+        let root = try temporaryDirectory()
+        try "# Preview\n".write(
+            to: root.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "<h1>Preview</h1>\n".write(
+            to: root.appendingPathComponent("index.html"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let projectID = UUID()
+        let threadID = UUID()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(
+                        id: threadID, displayName: "Thread", projectID: projectID,
+                        workingDirectory: root)
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(store: store)
+
+        model.openFileFromBrowserPrimary(relativePath: "README.md")
+
+        XCTAssertEqual(model.selectedRightPanelMode, .browser)
+        XCTAssertEqual(model.selectedRightPanelTab.relativePath, "README.md")
+
+        model.selectRightPanelMode(.files)
+        model.openFileFromBrowserPrimary(relativePath: "index.html")
+
+        XCTAssertEqual(model.selectedRightPanelMode, .browser)
+        XCTAssertEqual(model.selectedRightPanelTab.relativePath, "index.html")
+    }
+
+    func testFileBrowserPrimaryOpenUsesEditorWhenConfigured() throws {
+        let root = try temporaryDirectory()
+        try "# Preview\n".write(
+            to: root.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let projectID = UUID()
+        let threadID = UUID()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(
+                        id: threadID, displayName: "Thread", projectID: projectID,
+                        workingDirectory: root)
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(
+            store: store,
+            externalToolResolver: StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"]),
+            configuration: YAAWConfiguration(
+                fileBrowser: FileBrowserSettings(markdownAndHTMLDefault: .editor)
+            ),
+            environment: [:]
+        )
+
+        model.openFileFromBrowserPrimary(relativePath: "README.md")
+
+        let tabID = RightPanelTab.nvimTabID(relativePath: "README.md")
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .nvimTab(threadID: threadID, tabID: tabID)))
+        XCTAssertEqual(model.selectedRightPanelMode, .nvim)
+        XCTAssertEqual(model.selectedRightPanelTab.id, tabID)
+        XCTAssertEqual(request.command, ["/tools/nvim", "README.md"])
+    }
+
+    func testFileBrowserPrimaryOpenFallsBackToEditorWhenPreviewCannotOpen() throws {
+        let root = try temporaryDirectory()
+        let projectID = UUID()
+        let threadID = UUID()
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                threads: [
+                    AgentThread(
+                        id: threadID, displayName: "Thread", projectID: projectID,
+                        workingDirectory: root)
+                ],
+                selectedProjectID: projectID,
+                selectedThreadID: threadID,
+                rightPanelModesByThreadID: [threadID: .files],
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let model = AppModel(
+            store: store,
+            externalToolResolver: StaticAppModelExecutableResolver(paths: ["nvim": "/tools/nvim"]),
+            environment: [:]
+        )
+
+        model.openFileFromBrowserPrimary(relativePath: "draft.md")
+
+        let tabID = RightPanelTab.nvimTabID(relativePath: "draft.md")
+        let request = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .nvimTab(threadID: threadID, tabID: tabID)))
+        XCTAssertEqual(model.selectedRightPanelMode, .nvim)
+        XCTAssertEqual(model.selectedRightPanelTab.id, tabID)
+        XCTAssertEqual(request.command, ["/tools/nvim", "draft.md"])
     }
 
     func testBrowserRejectsUnsupportedAndEscapingFilePathsWithoutChangingTab() throws {
