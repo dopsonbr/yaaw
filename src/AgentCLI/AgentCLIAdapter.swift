@@ -1250,14 +1250,23 @@ private enum AgentCLISessionCatalog {
             identity =
                 firstString(in: object, keys: ["sessionId", "session_id", "id", "uuid"])
                 ?? identity
-            name =
-                firstString(
-                    in: object,
-                    keys: [
-                        "agent-name", "agentName", "custom-title", "customTitle", "ai-title",
-                        "aiTitle", "title", "name", "summary",
-                    ]
-                ) ?? name
+            // The session title lives in dedicated top-level metadata lines
+            // (`{"type":"custom-title","customTitle":...}`, `{"type":"agent-name",...}`,
+            // and `summary`). We must read it *only* from the matching top-level key, never
+            // recursively: `assistant` lines embed `tool_use` blocks whose `name` is the tool
+            // ("Read"/"Bash"/...), and a recursive search would let the last tool call win,
+            // mislabeling the thread (e.g. "tool use"). Custom title takes precedence, then
+            // agent name, then summary.
+            switch topLevelString(in: object, key: "type") {
+            case "custom-title":
+                name = topLevelString(in: object, key: "customTitle") ?? name
+            case "agent-name":
+                name = name ?? topLevelString(in: object, key: "agentName")
+            case "summary":
+                name = name ?? topLevelString(in: object, key: "summary")
+            default:
+                break
+            }
             directory =
                 firstURL(
                     in: object,
@@ -1479,6 +1488,22 @@ private enum AgentCLISessionCatalog {
         return nil
     }
 
+    /// Reads `key` only from the object's own top-level dictionary (no recursion).
+    /// Use this when a key (e.g. `name`) is ambiguous inside nested message/tool content.
+    private static func topLevelString(in object: Any, key: String) -> String? {
+        guard let dictionary = object as? [String: Any] else { return nil }
+        for (candidateKey, value) in dictionary
+        where candidateKey.caseInsensitiveCompare(key) == .orderedSame {
+            if let string = coercedString(value) {
+                return string
+            }
+        }
+        return nil
+    }
+
+    // NOTE: this search recurses into nested dictionaries/arrays, so a generic key like
+    // "name" can match deep inside message/tool content. For session titles prefer
+    // `topLevelString(in:key:)` gated on the line's top-level `type`.
     private static func stringValue(in object: Any, key: String) -> String? {
         if let dictionary = object as? [String: Any] {
             for (candidateKey, value) in dictionary

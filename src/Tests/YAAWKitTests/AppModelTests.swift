@@ -558,6 +558,84 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.hasArchivedThreadsForSelectedProject)
     }
 
+    private func projectArchivingModel(
+        firstProjectID: UUID,
+        secondProjectID: UUID,
+        globalProjectID: UUID
+    ) -> AppModel {
+        let root = FileManager.default.temporaryDirectory
+        return AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [
+                        Project(id: firstProjectID, displayName: "First", rootDirectory: root),
+                        Project(id: secondProjectID, displayName: "Second", rootDirectory: root),
+                        Project(id: globalProjectID, displayName: "Global", rootDirectory: root),
+                    ],
+                    threads: [],
+                    selectedProjectID: firstProjectID,
+                    selectedThreadID: nil,
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            )
+        )
+    }
+
+    func testArchiveProjectHidesItAndMovesSelection() {
+        let firstProjectID = UUID()
+        let secondProjectID = UUID()
+        let globalProjectID = UUID()
+        let model = projectArchivingModel(
+            firstProjectID: firstProjectID,
+            secondProjectID: secondProjectID,
+            globalProjectID: globalProjectID
+        )
+
+        model.archiveProject(id: firstProjectID)
+
+        XCTAssertFalse(model.activeProjects.contains { $0.id == firstProjectID })
+        XCTAssertEqual(model.archivedProjects.map(\.id), [firstProjectID])
+        // Selection moves off the archived project to another non-global active project.
+        XCTAssertEqual(model.selectedProjectID, secondProjectID)
+    }
+
+    func testUnarchiveProjectRestoresAndSelectsIt() {
+        let firstProjectID = UUID()
+        let secondProjectID = UUID()
+        let globalProjectID = UUID()
+        let model = projectArchivingModel(
+            firstProjectID: firstProjectID,
+            secondProjectID: secondProjectID,
+            globalProjectID: globalProjectID
+        )
+
+        model.archiveProject(id: firstProjectID)
+        model.unarchiveProject(id: firstProjectID)
+
+        XCTAssertTrue(model.activeProjects.contains { $0.id == firstProjectID })
+        XCTAssertTrue(model.archivedProjects.isEmpty)
+        XCTAssertEqual(model.selectedProjectID, firstProjectID)
+    }
+
+    func testGlobalProjectCannotBeArchived() {
+        let firstProjectID = UUID()
+        let secondProjectID = UUID()
+        let globalProjectID = UUID()
+        let model = projectArchivingModel(
+            firstProjectID: firstProjectID,
+            secondProjectID: secondProjectID,
+            globalProjectID: globalProjectID
+        )
+
+        XCTAssertFalse(model.canArchiveProject(id: globalProjectID))
+
+        model.archiveProject(id: globalProjectID)
+
+        XCTAssertTrue(model.archivedProjects.isEmpty)
+        XCTAssertTrue(model.activeProjects.contains { $0.id == globalProjectID })
+    }
+
     func testSnapshotSelectedModeSeedsSelectedThreadMode() {
         let fixture = AppModelFixture()
         let model = AppModel(

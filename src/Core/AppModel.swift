@@ -195,10 +195,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             cachedArchivedThreadsByProject[projectID]?.sort(by: Self.threadPrecedes)
         }
         let fallbackProjectID =
-            sortedProjects.first { !Self.isGlobalProject($0) }?.id
+            sortedProjects.first { !Self.isGlobalProject($0) && !$0.isArchived }?.id
+            ?? sortedProjects.first { !$0.isArchived }?.id
             ?? sortedProjects[0].id
         let selectedProjectID =
-            sortedProjects.contains { $0.id == snapshot.selectedProjectID }
+            sortedProjects.contains { $0.id == snapshot.selectedProjectID && !$0.isArchived }
             ? snapshot.selectedProjectID
             : fallbackProjectID
         let selectedProjectIsGlobal =
@@ -283,6 +284,16 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public var selectedProject: Project? {
         projects.first { $0.id == selectedProjectID }
+    }
+
+    /// Projects shown in the main sidebar list (everything not archived).
+    public var activeProjects: [Project] {
+        projects.filter { !$0.isArchived }
+    }
+
+    /// Archived projects, surfaced in the bottom "Archived" section.
+    public var archivedProjects: [Project] {
+        projects.filter { $0.isArchived }
     }
 
     private func rebuildThreadIndexes() {
@@ -2240,6 +2251,41 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     public func unarchiveSelectedThread() {
         guard let selectedThreadID else { return }
         unarchiveThread(id: selectedThreadID)
+    }
+
+    /// Whether a project may be archived. The Global project is excluded.
+    public func canArchiveProject(id projectID: UUID) -> Bool {
+        guard let project = projects.first(where: { $0.id == projectID }) else { return false }
+        return !isGlobalProject(project)
+    }
+
+    public func archiveProject(id projectID: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        // The Global project is always present and cannot be archived.
+        guard !isGlobalProject(projects[index]) else { return }
+        projects[index].isArchived = true
+        let archivedProject = projects[index]
+        if selectedProjectID == projectID {
+            let fallback =
+                activeProjects.first { !isGlobalProject($0) }?.id
+                ?? activeProjects.first?.id
+            if let fallback {
+                selectProject(id: fallback)
+            }
+        }
+        persistProject(archivedProject)
+    }
+
+    public func archiveSelectedProject() {
+        archiveProject(id: selectedProjectID)
+    }
+
+    public func unarchiveProject(id projectID: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        projects[index].isArchived = false
+        projects[index].lastOpenedAt = Date()
+        persistProject(projects[index])
+        selectProject(id: projectID)
     }
 
     public func navigateBack() {

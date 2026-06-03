@@ -1650,7 +1650,7 @@ private struct SidebarView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(model.projects) { project in
+                        ForEach(model.activeProjects) { project in
                             ProjectSidebarSection(
                                 model: model,
                                 project: project,
@@ -1749,6 +1749,7 @@ private struct ProjectSidebarSection: View {
                             .truncationMode(.middle)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Project \(project.displayName)")
@@ -1764,6 +1765,12 @@ private struct ProjectSidebarSection: View {
                 SidebarActionsMenu(help: "Project actions") {
                     Button(project.isPinned ? "Unpin Project" : "Pin Project") {
                         model.toggleProjectPinned(id: project.id)
+                    }
+
+                    if model.canArchiveProject(id: project.id) {
+                        Button("Archive Project") {
+                            model.archiveProject(id: project.id)
+                        }
                     }
                 }
                 .opacity(showActions ? 1 : 0)
@@ -1864,6 +1871,7 @@ private struct ActiveThreadRow: View {
                         .accessibilityLabel(thread.agentCLI.displayName)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(
@@ -2041,7 +2049,7 @@ private struct GlobalArchivedThreadsSection: View {
 
                     Spacer()
 
-                    Text("\(model.archivedThreads.count)")
+                    Text("\(model.archivedProjects.count + model.archivedThreads.count)")
                         .font(fonts.interfaceFont(sizeOffset: -2))
                         .foregroundStyle(dracula(.comment))
                 }
@@ -2051,17 +2059,21 @@ private struct GlobalArchivedThreadsSection: View {
                 .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Archived threads")
+            .accessibilityLabel("Archived")
 
             if isExpanded {
-                if model.archivedThreads.isEmpty {
-                    Text("No archived threads")
+                if model.archivedProjects.isEmpty && model.archivedThreads.isEmpty {
+                    Text("Nothing archived")
                         .font(fonts.interfaceFont(sizeOffset: -1))
                         .foregroundStyle(dracula(.comment))
                         .padding(.vertical, 4)
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 2) {
+                            ForEach(model.archivedProjects) { project in
+                                ArchivedProjectRow(model: model, project: project)
+                            }
+
                             ForEach(model.archivedThreads) { thread in
                                 ArchivedThreadRow(
                                     model: model,
@@ -2076,6 +2088,63 @@ private struct GlobalArchivedThreadsSection: View {
                 }
             }
         }
+    }
+}
+
+private struct ArchivedProjectRow: View {
+    @ObservedObject var model: AppModel
+    let project: Project
+    @Environment(\.fontSettings) private var fonts
+    @State private var hovering = false
+
+    var body: some View {
+        let isSelected = model.selectedProjectID == project.id
+        let showActions = hovering || isSelected
+        return HStack(spacing: 8) {
+            Button {
+                model.unarchiveProject(id: project.id)
+            } label: {
+                HStack(spacing: 6) {
+                    if project.isPinned {
+                        Image(systemName: IconRole.pinned.icon.systemSymbolName)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(dracula(.pink))
+                    }
+
+                    Image(systemName: "folder")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(dracula(.comment))
+
+                    Text(project.displayName)
+                        .lineLimit(1)
+
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Archived project \(project.displayName)")
+
+            SidebarActionsMenu(help: "Archived project actions") {
+                Button("Unarchive Project") {
+                    model.unarchiveProject(id: project.id)
+                }
+            }
+            .opacity(showActions ? 1 : 0)
+            .allowsHitTesting(showActions)
+        }
+        .font(fonts.interfaceFont(sizeOffset: -1))
+        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius)
+                .fill(ChromeMetrics.pillFill(selected: isSelected, hovering: hovering))
+        )
+        .padding(.horizontal, ChromeMetrics.rowHInset)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .help(project.rootDirectory.path)
     }
 }
 
@@ -2110,6 +2179,7 @@ private struct ArchivedThreadRow: View {
                         .help(thread.agentCLI.displayName)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Archived thread \(thread.displayName)")

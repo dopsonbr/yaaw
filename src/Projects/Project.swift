@@ -8,6 +8,7 @@ public struct Project: Identifiable, Equatable, Sendable {
     public var lastOpenedAt: Date
     public var isPinned: Bool
     public var sortOrder: Int
+    public var isArchived: Bool
 
     public init(
         id: UUID = UUID(),
@@ -16,7 +17,8 @@ public struct Project: Identifiable, Equatable, Sendable {
         createdAt: Date = Date(),
         lastOpenedAt: Date = Date(),
         isPinned: Bool = false,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        isArchived: Bool = false
     ) {
         self.id = id
         self.displayName = displayName
@@ -25,6 +27,7 @@ public struct Project: Identifiable, Equatable, Sendable {
         self.lastOpenedAt = lastOpenedAt
         self.isPinned = isPinned
         self.sortOrder = sortOrder
+        self.isArchived = isArchived
     }
 }
 

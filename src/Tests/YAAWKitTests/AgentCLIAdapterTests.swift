@@ -577,6 +577,46 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(candidate.displayName, "claude-resume-test")
     }
 
+    func testClaudeCandidateIgnoresNestedToolUseNames() throws {
+        let home = try temporaryDirectory()
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let claudeProjectDirectory =
+            home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(
+                root.path.replacingOccurrences(of: "/", with: "-"), isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: claudeProjectDirectory,
+            withIntermediateDirectories: true
+        )
+        // The real title is in the top-level `custom-title`/`agent-name` lines. The
+        // `assistant` lines embed `tool_use` blocks whose `name` is a tool; a recursive
+        // search would let the last one ("Bash") win and mislabel the thread.
+        try """
+        {"type":"custom-title","customTitle":"ux-improvements","sessionId":"claude-1"}
+        {"type":"agent-name","agentName":"ux-improvements","sessionId":"claude-1"}
+        {"type":"assistant","sessionId":"claude-1","cwd":"\(root.path)","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}
+        {"type":"assistant","sessionId":"claude-1","cwd":"\(root.path)","message":{"content":[{"type":"tool_use","name":"Bash","input":{}}]}}
+        """.write(
+            to: claudeProjectDirectory.appendingPathComponent("claude-1.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let thread = AgentThread(
+            displayName: "ux-improvements",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .claude
+        )
+
+        let candidate = try XCTUnwrap(service.sessionLinkCandidates(for: thread).first)
+
+        XCTAssertEqual(candidate.identity, "claude-1")
+        XCTAssertEqual(candidate.displayName, "ux-improvements")
+    }
+
     func testCanonicalNamePrefersReportedNameThenTitleThenIdentity() throws {
         let service = AgentCLISessionBindingService(captureDirectory: nil)
 

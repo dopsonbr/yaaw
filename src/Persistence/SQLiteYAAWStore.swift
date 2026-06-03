@@ -19,7 +19,7 @@ private struct SidebarProjectStateRow {
 }
 
 public final class SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 15
+    public static let schemaVersion = 16
 
     private let databasePath: URL
     private let diagnosticRecorder: DiagnosticEventRecording
@@ -583,6 +583,19 @@ extension SQLiteYAAWStore {
                 try execute("PRAGMA user_version = 15")
             }
         }
+        if currentVersion < 16 {
+            try transaction {
+                try migrateToVersionSixteen()
+                try execute("PRAGMA user_version = 16")
+            }
+        }
+    }
+
+    fileprivate func migrateToVersionSixteen() throws {
+        let projectColumns = try tableColumns("projects")
+        if !projectColumns.contains("is_archived") {
+            try execute("ALTER TABLE projects ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     fileprivate func migrateToVersionNine() throws {
@@ -1104,16 +1117,18 @@ extension SQLiteYAAWStore {
                 created_at,
                 last_opened_at,
                 is_pinned,
-                sort_order
+                sort_order,
+                is_archived
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
                 root_directory = excluded.root_directory,
                 created_at = excluded.created_at,
                 last_opened_at = excluded.last_opened_at,
                 is_pinned = excluded.is_pinned,
-                sort_order = excluded.sort_order
+                sort_order = excluded.sort_order,
+                is_archived = excluded.is_archived
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -1124,6 +1139,7 @@ extension SQLiteYAAWStore {
         sqlite3_bind_double(statement, 5, project.lastOpenedAt.timeIntervalSince1970)
         sqlite3_bind_int(statement, 6, project.isPinned ? 1 : 0)
         sqlite3_bind_int(statement, 7, Int32(project.sortOrder))
+        sqlite3_bind_int(statement, 8, project.isArchived ? 1 : 0)
         try stepDone(statement)
     }
 
@@ -1214,9 +1230,10 @@ extension SQLiteYAAWStore {
                 created_at,
                 last_opened_at,
                 is_pinned,
-                sort_order
+                sort_order,
+                is_archived
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -1227,6 +1244,7 @@ extension SQLiteYAAWStore {
         sqlite3_bind_double(statement, 5, project.lastOpenedAt.timeIntervalSince1970)
         sqlite3_bind_int(statement, 6, project.isPinned ? 1 : 0)
         sqlite3_bind_int(statement, 7, Int32(project.sortOrder))
+        sqlite3_bind_int(statement, 8, project.isArchived ? 1 : 0)
         try stepDone(statement)
     }
 
@@ -1626,7 +1644,8 @@ extension SQLiteYAAWStore {
                 created_at,
                 last_opened_at,
                 is_pinned,
-                sort_order
+                sort_order,
+                is_archived
             FROM projects
             ORDER BY
                 CASE WHEN display_name = 'Global' THEN 1 ELSE 0 END,
@@ -1651,7 +1670,8 @@ extension SQLiteYAAWStore {
                     createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
                     lastOpenedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
                     isPinned: sqlite3_column_int(statement, 5) == 1,
-                    sortOrder: Int(sqlite3_column_int(statement, 6))
+                    sortOrder: Int(sqlite3_column_int(statement, 6)),
+                    isArchived: sqlite3_column_int(statement, 7) == 1
                 )
             )
         }

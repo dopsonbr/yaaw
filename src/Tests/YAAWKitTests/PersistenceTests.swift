@@ -956,7 +956,7 @@ final class PersistenceTests: XCTestCase {
                 projects: [
                     Project(
                         id: firstProjectID, displayName: "First", rootDirectory: root,
-                        isPinned: false, sortOrder: 0),
+                        isPinned: false, sortOrder: 0, isArchived: true),
                     Project(
                         id: secondProjectID, displayName: "Second", rootDirectory: root,
                         isPinned: true, sortOrder: 0),
@@ -987,6 +987,10 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.projects.map(\.id), [secondProjectID, firstProjectID])
         XCTAssertEqual(reloaded.projects.map(\.isPinned), [true, false])
         XCTAssertEqual(reloaded.projects.map(\.sortOrder), [0, 0])
+        XCTAssertEqual(
+            reloaded.projects.first { $0.id == firstProjectID }?.isArchived, true)
+        XCTAssertEqual(
+            reloaded.projects.first { $0.id == secondProjectID }?.isArchived, false)
         XCTAssertEqual(reloaded.threads.first { $0.id == secondThreadID }?.isPinned, true)
         XCTAssertEqual(reloaded.expandedProjectIDs, [secondProjectID])
         XCTAssertEqual(reloaded.expandedArchivedProjectIDs, [secondProjectID])
