@@ -18,6 +18,7 @@ struct FileBrowserPanel: View {
     @State private var typedQuery: String = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var treeRows: [FileBrowserVisibleTreeRow] = []
+    @State private var treeChildrenIndex: [String: [FileBrowserEntry]] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -111,17 +112,17 @@ struct FileBrowserPanel: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .onChange(of: state.entries) {
-                rebuildVisibleTreeRows()
+                rebuildTreeIndexAndRows()
             }
             .onChange(of: state.rootPath) {
                 expandedFolders.removeAll()
-                rebuildVisibleTreeRows()
+                rebuildTreeIndexAndRows()
             }
             .onChange(of: expandedFolders) {
                 rebuildVisibleTreeRows()
             }
             .onAppear {
-                rebuildVisibleTreeRows()
+                rebuildTreeIndexAndRows()
             }
         }
         .padding(.horizontal, 8)
@@ -155,10 +156,18 @@ struct FileBrowserPanel: View {
         return "\(metadata.fileCount) items, \(ignored)"
     }
 
+    // Rebuilds the parent→children adjacency once whenever the underlying index
+    // changes (re-index, thread switch). The per-expand row walk reuses it, so
+    // toggling a folder never rescans the full index.
+    private func rebuildTreeIndexAndRows() {
+        treeChildrenIndex = FileBrowserTreeBuilder.childrenIndex(from: state.entries)
+        rebuildVisibleTreeRows()
+    }
+
     private func rebuildVisibleTreeRows() {
         let startedAt = Date()
         let rows = FileBrowserTreeBuilder.visibleRows(
-            from: state.entries,
+            childrenIndex: treeChildrenIndex,
             expandedFolders: expandedFolders,
             limit: FileBrowserPanelConstants.maxVisibleTreeRows
         )

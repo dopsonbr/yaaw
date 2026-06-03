@@ -1469,6 +1469,89 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(reloadedThread.pendingSessionRename)
     }
 
+    func testSyncAutoLinkDoesNotRelaunchRunningTerminal() throws {
+        // Regression: when a new claude session starts with `--name`, polling
+        // detects the session the running process just registered and auto-links
+        // it. Binding must NOT change the launch command to `--resume` (which
+        // would tear down and relaunch the live process, discarding the user's
+        // in-flight first message). The identity is still persisted for future
+        // cold launches.
+        let fixture = AppModelFixture()
+        let home = try temporaryDirectory()
+        let claudeProjectDirectory =
+            home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(
+                fixture.root.path.replacingOccurrences(of: "/", with: "-"), isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: claudeProjectDirectory,
+            withIntermediateDirectories: true
+        )
+        try """
+        {"type":"custom-title","customTitle":"claude-resume-test","sessionId":"claude-1"}
+        """.write(
+            to: claudeProjectDirectory.appendingPathComponent("claude-1.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let store = InMemoryYAAWStore(
+            snapshot: YAAWSnapshot(
+                projects: [
+                    Project(
+                        id: fixture.projectID,
+                        displayName: "Project",
+                        rootDirectory: fixture.root
+                    )
+                ],
+                threads: [
+                    AgentThread(
+                        id: fixture.secondThreadID,
+                        displayName: "claude-resume-test",
+                        projectID: fixture.projectID,
+                        workingDirectory: fixture.root,
+                        agentCLI: .claude,
+                        pendingSessionRename: "claude-resume-test"
+                    )
+                ],
+                selectedProjectID: fixture.projectID,
+                selectedThreadID: fixture.secondThreadID,
+                selectedRightPanelMode: .files,
+                isGlobalTerminalExpanded: false
+            )
+        )
+        let service = AgentCLISessionBindingService(
+            resolver: StaticAppModelExecutableResolver(paths: ["claude": "/tmp/bin/claude"]),
+            captureDirectory: nil,
+            homeDirectory: home
+        )
+        let model = AppModel(
+            store: store,
+            agentCLIBindings: service,
+            requiresSessionLinkForLoadedUnboundThreads: false
+        )
+
+        // Launching a new session starts claude with `--name`, not `--resume`.
+        let launched = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.secondThreadID)))
+        XCTAssertTrue(launched.command[2].contains("--name"))
+        XCTAssertFalse(launched.command[2].contains("--resume"))
+
+        // Polling auto-links the session the running process just created.
+        model.syncSelectedThreadSessionMetadata()
+
+        let reloadedThread = try XCTUnwrap(
+            store.load().threads.first { $0.id == fixture.secondThreadID })
+        XCTAssertEqual(reloadedThread.sessionIdentity, "claude-1")
+
+        // The live terminal must not be relaunched: its command is unchanged
+        // (still `--name`), preserving the running process.
+        let afterLink = try XCTUnwrap(
+            model.terminalLaunchRequest(for: .project(threadID: fixture.secondThreadID)))
+        XCTAssertEqual(afterLink.command, launched.command)
+        XCTAssertFalse(afterLink.command[2].contains("--resume"))
+    }
+
     func testStartNewSessionSkipsExactAutoLinkDuringCurrentRun() throws {
         let fixture = AppModelFixture()
         let home = try temporaryDirectory()
@@ -2176,6 +2259,88 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.selectedThread?.sessionIdentity, "codex-session-789")
         XCTAssertEqual(model.selectedThread?.canonicalSessionName, "CLI Title")
         XCTAssertEqual(model.selectedThread?.displayName, "CLI Title")
+    }
+
+    func testClaudeTerminalTitleDoesNotBecomeThreadName() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.secondThreadID, output: "session id: claude-xyz")
+        model.recordAgentCLITerminalTitle(threadID: fixture.secondThreadID, title: "Bash")
+
+        let claudeThread = model.threads.first { $0.id == fixture.secondThreadID }
+        XCTAssertEqual(claudeThread?.sessionIdentity, "claude-xyz")
+        XCTAssertEqual(claudeThread?.displayName, "Second")
+        XCTAssertNil(claudeThread?.canonicalSessionName)
+    }
+
+    func testClaudeTerminalTitleShowsAsActivityPreview() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCLITerminalTitle(threadID: fixture.secondThreadID, title: "Bash")
+
+        XCTAssertEqual(model.threadActivity(for: fixture.secondThreadID).preview, "Bash")
+        XCTAssertEqual(
+            model.threads.first { $0.id == fixture.secondThreadID }?.displayName, "Second")
+    }
+
+    func testClaudeTerminalTitleMatchingThreadNameShowsNoSubtitle() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        // A stale tool subtitle appears...
+        model.recordAgentCLITerminalTitle(threadID: fixture.secondThreadID, title: "Bash")
+        XCTAssertEqual(model.threadActivity(for: fixture.secondThreadID).preview, "Bash")
+        // ...and is cleared once the title echoes the thread name (Claude idle).
+        model.recordAgentCLITerminalTitle(threadID: fixture.secondThreadID, title: "Second")
+
+        XCTAssertNil(model.threadActivity(for: fixture.secondThreadID).preview)
+        XCTAssertEqual(
+            model.threads.first { $0.id == fixture.secondThreadID }?.displayName, "Second")
+    }
+
+    func testClaudeAuthoritativeReportedNameStillNamesThread() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.secondThreadID,
+            output: """
+                session id: claude-xyz
+                session name: Real Session Name
+                """
+        )
+
+        let claudeThread = model.threads.first { $0.id == fixture.secondThreadID }
+        XCTAssertEqual(claudeThread?.canonicalSessionName, "Real Session Name")
+        XCTAssertEqual(claudeThread?.displayName, "Real Session Name")
+    }
+
+    func testClaudeEstablishedNameSurvivesToolTitleChurn() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store)
+
+        model.recordAgentCLIOutput(
+            threadID: fixture.secondThreadID,
+            output: """
+                session id: claude-xyz
+                session name: Real Session Name
+                """
+        )
+        for tool in ["Bash", "Read", "Edit"] {
+            model.recordAgentCLITerminalTitle(threadID: fixture.secondThreadID, title: tool)
+        }
+        // An identity-only poll re-injects the pending terminal (tool) title; the
+        // established name must still win.
+        model.recordAgentCLIOutput(
+            threadID: fixture.secondThreadID, output: "session id: claude-xyz")
+
+        let claudeThread = model.threads.first { $0.id == fixture.secondThreadID }
+        XCTAssertEqual(claudeThread?.displayName, "Real Session Name")
+        XCTAssertEqual(claudeThread?.canonicalSessionName, "Real Session Name")
+        XCTAssertEqual(model.threadActivity(for: fixture.secondThreadID).preview, "Edit")
     }
 
     func testProjectTerminalRelaunchResetsCaptureOffset() throws {

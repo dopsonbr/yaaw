@@ -105,145 +105,75 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(rows.contains { $0.entry.relativePath == "src/generated" })
     }
 
-    func testPresentationEntriesIncludeFilesWhenLargeIndexStartsWithDirectories() {
-        let entries = Self.directoryHeavyEntries(directoryCount: 12_000, fileCount: 4_000)
-
-        let presented = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
-        let rows = FileBrowserTreeBuilder.visibleRows(
-            from: presented,
-            expandedFolders: ["dir_00000"],
-            limit: 10_000
-        )
-
-        XCTAssertEqual(presented.count, 10_000)
-        XCTAssertTrue(presented.contains { !$0.isDirectory })
-        XCTAssertTrue(
-            rows.contains(
-                FileBrowserVisibleTreeRow(
-                    entry: FileBrowserEntry(
-                        relativePath: "dir_00000/file_00000.swift", isDirectory: false),
-                    displayName: "file_00000.swift",
-                    depth: 1
-                )))
-    }
-
-    func testPresentationEntriesKeepRootSiblingsWhenFirstBranchExceedsLimit() {
+    func testVisibleRowsRevealDeepFilesInLargeIndexWhenExpanded() {
+        // Regression: a deeply nested directory whose files sort far down the
+        // global order used to be dropped by the 10k presentation cap, so
+        // expanding the folder showed nothing. The tree now walks the full
+        // index lazily, so the markdown files appear once their ancestors are
+        // expanded — even when the index dwarfs the render ceiling.
         var entries = [
-            FileBrowserEntry(relativePath: "archive", isDirectory: true),
-            FileBrowserEntry(relativePath: "bin", isDirectory: true),
-            FileBrowserEntry(relativePath: "docs", isDirectory: true),
             FileBrowserEntry(relativePath: "repos", isDirectory: true),
-            FileBrowserEntry(relativePath: "README.md", isDirectory: false),
+            FileBrowserEntry(relativePath: "repos/order-up", isDirectory: true),
+            FileBrowserEntry(relativePath: "repos/order-up/docs", isDirectory: true),
         ]
-        for index in 0..<12_000 {
+        // A large, shallow filler branch that sorts ahead of the target so the
+        // target's files land well past any historical 10k cut-off.
+        entries.append(FileBrowserEntry(relativePath: "apps", isDirectory: true))
+        for index in 0..<60_000 {
             entries.append(
                 FileBrowserEntry(
-                    relativePath: String(format: "archive/file_%05d.swift", index),
+                    relativePath: String(format: "apps/gen_%05d.ts", index),
                     isDirectory: false
                 ))
         }
-        entries.sort(by: FileBrowserTreeBuilder.sortEntriesForTree)
-
-        let presented = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
-        let rows = FileBrowserTreeBuilder.visibleRows(
-            from: presented,
-            expandedFolders: [],
-            limit: 10_000
-        )
-        let visiblePaths = rows.map(\.entry.relativePath)
-
-        XCTAssertEqual(presented.count, 10_000)
-        XCTAssertTrue(visiblePaths.contains("archive"))
-        XCTAssertTrue(visiblePaths.contains("bin"))
-        XCTAssertTrue(visiblePaths.contains("docs"))
-        XCTAssertTrue(visiblePaths.contains("repos"))
-        XCTAssertTrue(visiblePaths.contains("README.md"))
-    }
-
-    func testPresentationEntriesKeepNestedSiblingsWhenEarlyChildHasDeepSubtree() {
-        // Regression: a `repos` directory with many child repos, where the first few
-        // children each contain thousands of nested directories. Depth-first budget
-        // exhaustion dropped the later sibling repos (e.g. order-up, usom-*) entirely.
-        let repoNames = [
-            "content-manager-gateway", "hia-pdf", "order-eligibility-api",
-            "order-modify-api", "order-up", "order-up-actions", "order-up-events",
-            "usom-customer", "usom-order", "usom-vendor",
-        ]
-        var entries = [FileBrowserEntry(relativePath: "repos", isDirectory: true)]
-        for repo in repoNames {
-            entries.append(FileBrowserEntry(relativePath: "repos/\(repo)", isDirectory: true))
-        }
-        // The first three repos each carry a deep nested directory tree that would
-        // consume the directory budget under depth-first selection.
-        for repo in repoNames.prefix(3) {
-            for index in 0..<6_000 {
-                entries.append(
-                    FileBrowserEntry(
-                        relativePath: String(format: "repos/\(repo)/nested_%05d", index),
-                        isDirectory: true
-                    ))
-            }
+        let docFiles = ["adr.md", "architecture.md", "server-side-state.md"]
+        for name in docFiles {
+            entries.append(
+                FileBrowserEntry(
+                    relativePath: "repos/order-up/docs/\(name)", isDirectory: false))
         }
         entries.sort(by: FileBrowserTreeBuilder.sortEntriesForTree)
 
-        let presented = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
+        let index = FileBrowserTreeBuilder.childrenIndex(from: entries)
         let rows = FileBrowserTreeBuilder.visibleRows(
-            from: presented,
-            expandedFolders: ["repos"],
+            childrenIndex: index,
+            expandedFolders: ["repos", "repos/order-up", "repos/order-up/docs"],
             limit: 10_000
         )
         let visiblePaths = Set(rows.map(\.entry.relativePath))
 
-        for repo in repoNames {
+        for name in docFiles {
             XCTAssertTrue(
-                visiblePaths.contains("repos/\(repo)"),
-                "Expected sibling repo \(repo) to remain visible"
+                visiblePaths.contains("repos/order-up/docs/\(name)"),
+                "Expected expanded docs folder to reveal \(name)"
             )
         }
     }
 
-    func testPresentationEntriesKeepRegularRootItemsAheadOfHiddenLargeBranches() throws {
-        var entries = [
-            FileBrowserEntry(relativePath: ".agents", isDirectory: true),
-            FileBrowserEntry(relativePath: ".claude", isDirectory: true),
-            FileBrowserEntry(relativePath: ".env", isDirectory: false),
-            FileBrowserEntry(relativePath: ".gitignore", isDirectory: false),
-            FileBrowserEntry(relativePath: "AGENTS.md", isDirectory: false),
-            FileBrowserEntry(relativePath: "README.md", isDirectory: false),
+    func testVisibleRowsViaChildrenIndexMatchEntryWalkOrdering() {
+        let entries = [
             FileBrowserEntry(relativePath: "docs", isDirectory: true),
-            FileBrowserEntry(relativePath: "repos", isDirectory: true),
+            FileBrowserEntry(relativePath: "docs/README.md", isDirectory: false),
             FileBrowserEntry(relativePath: "src", isDirectory: true),
+            FileBrowserEntry(relativePath: "src/App.swift", isDirectory: false),
+            FileBrowserEntry(relativePath: "src/Core", isDirectory: true),
+            FileBrowserEntry(relativePath: "src/Core/AppModel.swift", isDirectory: false),
         ]
-        for index in 0..<12_000 {
-            entries.append(
-                FileBrowserEntry(
-                    relativePath: String(format: ".agents/cache/file_%05d.json", index),
-                    isDirectory: false
-                ))
-        }
-        entries.sort(by: FileBrowserTreeBuilder.sortEntriesForTree)
+        let expanded: Set<String> = ["src", "src/Core"]
 
-        let presented = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
-        let rows = FileBrowserTreeBuilder.visibleRows(
-            from: presented,
-            expandedFolders: [],
-            limit: 10_000
+        let viaEntries = FileBrowserTreeBuilder.visibleRows(
+            from: entries, expandedFolders: expanded, limit: 10)
+        let viaIndex = FileBrowserTreeBuilder.visibleRows(
+            childrenIndex: FileBrowserTreeBuilder.childrenIndex(from: entries),
+            expandedFolders: expanded,
+            limit: 10
         )
-        let visiblePaths = rows.map(\.entry.relativePath)
 
-        XCTAssertEqual(presented.count, 10_000)
-        XCTAssertTrue(visiblePaths.contains("docs"))
-        XCTAssertTrue(visiblePaths.contains("repos"))
-        XCTAssertTrue(visiblePaths.contains("src"))
-        XCTAssertTrue(visiblePaths.contains(".agents"))
-        XCTAssertLessThan(
-            try XCTUnwrap(visiblePaths.firstIndex(of: "docs")),
-            try XCTUnwrap(visiblePaths.firstIndex(of: ".agents"))
-        )
-        XCTAssertLessThan(
-            try XCTUnwrap(visiblePaths.firstIndex(of: "README.md")),
-            try XCTUnwrap(visiblePaths.firstIndex(of: ".env"))
-        )
+        XCTAssertEqual(viaIndex, viaEntries)
+        XCTAssertEqual(
+            viaIndex.map(\.entry.relativePath),
+            ["docs", "src", "src/App.swift", "src/Core", "src/Core/AppModel.swift"])
+        XCTAssertEqual(viaIndex.last?.depth, 2)
     }
 
     func testSortKeepsDeepDirectoryContentsAheadOfLaterRootSiblings() throws {
@@ -502,8 +432,8 @@ final class FileBrowserTests: XCTestCase {
         model.selectThread(id: fixture.secondThreadID)
 
         XCTAssertEqual(model.fileBrowserState.indexedEntryCount, entries.count)
-        XCTAssertLessThan(model.fileBrowserState.entries.count, entries.count)
-        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
+        XCTAssertEqual(model.fileBrowserState.entries.count, entries.count)
+        XCTAssertFalse(model.fileBrowserState.isBrowseEntryLimitApplied)
 
         model.updateFileSearchQuery("warm-target")
 
@@ -512,8 +442,8 @@ final class FileBrowserTests: XCTestCase {
         model.selectThread(id: fixture.firstThreadID)
 
         XCTAssertEqual(model.fileBrowserState.indexedEntryCount, entries.count)
-        XCTAssertLessThan(model.fileBrowserState.entries.count, entries.count)
-        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
+        XCTAssertEqual(model.fileBrowserState.entries.count, entries.count)
+        XCTAssertFalse(model.fileBrowserState.isBrowseEntryLimitApplied)
     }
 
     func testAppModelDeduplicatesSameThreadIndexRefreshes() throws {
@@ -539,7 +469,7 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(model.fileBrowserState.metadata?.fileCount, 1)
     }
 
-    func testAppModelBoundsLargeBrowseIndexAndSearchesAcrossFullIndex() throws {
+    func testAppModelPublishesFullBrowseIndexAndSearchesAcrossFullIndex() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
         let recorder = RecordingDiagnosticEventRecorder()
@@ -571,10 +501,10 @@ final class FileBrowserTests: XCTestCase {
         )
 
         XCTAssertEqual(model.fileBrowserState.indexedEntryCount, allEntries.count)
-        XCTAssertLessThan(model.fileBrowserState.entries.count, allEntries.count)
-        XCTAssertLessThan(model.fileBrowserState.visibleEntries.count, allEntries.count)
-        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
-        XCTAssertTrue(model.fileBrowserState.isVisibleEntryLimitApplied)
+        XCTAssertEqual(model.fileBrowserState.entries.count, allEntries.count)
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, allEntries.count)
+        XCTAssertFalse(model.fileBrowserState.isBrowseEntryLimitApplied)
+        XCTAssertFalse(model.fileBrowserState.isVisibleEntryLimitApplied)
 
         model.updateFileSearchQuery("needle-target")
 
@@ -587,12 +517,12 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(model.selectedFileRelativePath, adjacentTargetPath)
         model.updateFileSearchQuery("")
         XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
-        XCTAssertTrue(model.fileBrowserState.isVisibleEntryLimitApplied)
+        XCTAssertFalse(model.fileBrowserState.isVisibleEntryLimitApplied)
         XCTAssertTrue(recorder.events.contains { $0.name == "file_index_completed" })
         XCTAssertTrue(recorder.events.contains { $0.name == "file_browser_search_completed" })
     }
 
-    func testClearingLargeIndexSearchRestoresBoundedBrowseList() throws {
+    func testClearingLargeIndexSearchRestoresFullBrowseList() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
         let model = AppModel(store: fixture.store, fileIndexer: indexer)
@@ -621,9 +551,9 @@ final class FileBrowserTests: XCTestCase {
         model.updateFileSearchQuery("")
 
         XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
-        XCTAssertLessThan(model.fileBrowserState.visibleEntries.count, entries.count)
-        XCTAssertTrue(model.fileBrowserState.isVisibleEntryLimitApplied)
-        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
+        XCTAssertEqual(model.fileBrowserState.entries.count, entries.count)
+        XCTAssertFalse(model.fileBrowserState.isVisibleEntryLimitApplied)
+        XCTAssertFalse(model.fileBrowserState.isBrowseEntryLimitApplied)
     }
 
     func testAppModelPublishesFilesWhenLargeCachedIndexStartsWithDirectories() throws {
@@ -648,11 +578,11 @@ final class FileBrowserTests: XCTestCase {
                 ))
         )
 
-        XCTAssertLessThan(model.fileBrowserState.entries.count, entries.count)
+        XCTAssertEqual(model.fileBrowserState.entries.count, entries.count)
         XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
         XCTAssertTrue(model.fileBrowserState.entries.contains { !$0.isDirectory })
         XCTAssertTrue(model.fileBrowserState.visibleEntries.contains { !$0.isDirectory })
-        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
+        XCTAssertFalse(model.fileBrowserState.isBrowseEntryLimitApplied)
         XCTAssertNotNil(model.selectedFileRelativePath)
     }
 

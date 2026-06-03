@@ -76,6 +76,10 @@ public protocol AgentCLIAdapter: Sendable {
     var executableName: String { get }
     var supportsStartName: Bool { get }
     var supportsInteractiveRename: Bool { get }
+    /// Whether the terminal title (OSC sequence) is a reliable source for the session
+    /// name. False for CLIs like Claude that repurpose the title for transient tool
+    /// activity ("Bash", "Read"); for those the catalog is authoritative.
+    var usesTerminalTitleAsSessionName: Bool { get }
 
     func invocation(
         sessionIdentity: String?,
@@ -105,6 +109,7 @@ public protocol AgentCLIAdapter: Sendable {
 extension AgentCLIAdapter {
     public var supportsStartName: Bool { false }
     public var supportsInteractiveRename: Bool { false }
+    public var usesTerminalTitleAsSessionName: Bool { true }
 
     public func startupInput(
         forPendingSessionRename name: String,
@@ -201,6 +206,9 @@ public struct ClaudeCLIAdapter: AgentCLIAdapter {
 
     public var supportsStartName: Bool { true }
     public var supportsInteractiveRename: Bool { true }
+    // Claude uses the terminal title for transient tool activity ("Bash", "Read"), so it
+    // must never become the session name; the catalog provides the authoritative name.
+    public var usesTerminalTitleAsSessionName: Bool { false }
 
     public func startupInput(
         forPendingSessionRename name: String,
@@ -541,6 +549,10 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
     public func canApplySessionNameOnLaunch(for kind: AgentCLIKind) -> Bool {
         guard let adapter = adaptersByKind[kind] else { return false }
         return adapter.supportsStartName || adapter.supportsInteractiveRename
+    }
+
+    public func usesTerminalTitleAsSessionName(for kind: AgentCLIKind) -> Bool {
+        adaptersByKind[kind]?.usesTerminalTitleAsSessionName ?? true
     }
 
     public func sessionLinkCandidates(for thread: AgentThread) -> [SessionLinkCandidate] {

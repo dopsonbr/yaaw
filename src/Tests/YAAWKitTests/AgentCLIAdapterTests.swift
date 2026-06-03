@@ -273,6 +273,20 @@ final class AgentCLIAdapterTests: XCTestCase {
         )
     }
 
+    func testUsesTerminalTitleAsSessionNameIsFalseOnlyForClaude() throws {
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(
+            captureDirectory: root,
+            activityDirectory: root,
+            helperBinDirectory: try temporaryDirectory()
+        )
+
+        XCTAssertFalse(service.usesTerminalTitleAsSessionName(for: .claude))
+        XCTAssertTrue(service.usesTerminalTitleAsSessionName(for: .codex))
+        XCTAssertTrue(service.usesTerminalTitleAsSessionName(for: .opencode))
+        XCTAssertTrue(service.usesTerminalTitleAsSessionName(for: .copilot))
+    }
+
     func testSessionCatalogReadersReturnWorkingDirectoryCandidates() throws {
         let home = try temporaryDirectory()
         let root = try temporaryDirectory()

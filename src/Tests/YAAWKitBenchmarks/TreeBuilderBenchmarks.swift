@@ -80,19 +80,36 @@ final class TreeBuilderBenchmarks: BenchmarkCase {
         }
     }
 
-    func test_bench_presentationEntries_150k_treeOrdered() throws {
+    // One-time cost paid when the index changes (re-index / thread switch).
+    func test_bench_childrenIndex_150k() throws {
         let entries = entries150k
-        _ = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
+        _ = FileBrowserTreeBuilder.childrenIndex(from: entries)
         measure {
-            _ = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
+            _ = FileBrowserTreeBuilder.childrenIndex(from: entries)
         }
     }
 
-    func test_bench_presentationEntries_150k_directoryHeavy() throws {
-        let entries = directoryHeavyEntries150k
-        _ = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
+    // Per-expand cost: walking a prebuilt index should be independent of total
+    // index size and proportional only to the rows revealed.
+    func test_bench_visibleRows_index_150k_oneExpandedBranch() throws {
+        let index = FileBrowserTreeBuilder.childrenIndex(from: entries150k)
+        let expandedFolders: Set<String> = ["src", "src/core"]
+        _ = FileBrowserTreeBuilder.visibleRows(
+            childrenIndex: index, expandedFolders: expandedFolders, limit: 10_000)
         measure {
-            _ = FileBrowserTreeBuilder.presentationEntries(from: entries, limit: 10_000)
+            _ = FileBrowserTreeBuilder.visibleRows(
+                childrenIndex: index, expandedFolders: expandedFolders, limit: 10_000)
+        }
+    }
+
+    func test_bench_visibleRows_index_150k_directoryHeavy() throws {
+        let index = FileBrowserTreeBuilder.childrenIndex(from: directoryHeavyEntries150k)
+        let expandedFolders: Set<String> = ["dir_00000"]
+        _ = FileBrowserTreeBuilder.visibleRows(
+            childrenIndex: index, expandedFolders: expandedFolders, limit: 10_000)
+        measure {
+            _ = FileBrowserTreeBuilder.visibleRows(
+                childrenIndex: index, expandedFolders: expandedFolders, limit: 10_000)
         }
     }
 

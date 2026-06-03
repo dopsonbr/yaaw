@@ -1081,6 +1081,29 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return
         }
         pendingTerminalTitlesByThreadID[threadID] = title
+        // For CLIs whose terminal title is transient tool activity (e.g. Claude shows
+        // "Bash"/"Read"), surface it as the activity subtitle and keep the thread name
+        // stable instead of letting the title rename the thread.
+        if !agentCLIBindings.usesTerminalTitleAsSessionName(for: threads[index].agentCLI) {
+            // When the title just echoes the thread name (Claude does this when idle), the
+            // subtitle is redundant — clear it so only the name shows.
+            let normalizedTitle = ThreadActivityText.sanitized(title)
+            let isRedundant =
+                normalizedTitle == threads[index].displayName
+                || normalizedTitle == threads[index].canonicalSessionName
+            applyThreadActivity(
+                ThreadActivityEvent(
+                    threadID: threadID,
+                    status: nil,
+                    title: isRedundant ? nil : title,
+                    body: nil,
+                    source: .terminalLifecycle
+                ),
+                isUnread: false,
+                shouldNotify: false
+            )
+            return
+        }
         guard let identity = threads[index].sessionIdentity,
             threads[index].canonicalSessionName == nil
                 || threads[index].canonicalSessionName == identity
@@ -1376,7 +1399,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                 !sessionLinkSkippedThreadIDs.contains(threadID),
                 let candidate
             else { return }
-            applySessionLink(candidate, toThreadAt: index)
+            applySessionLink(candidate, toThreadAt: index, preserveRunningTerminal: true)
             recordDiagnostic(
                 category: "AgentCLI",
                 name: "session_auto_linked_during_sync",
@@ -1934,7 +1957,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         return true
     }
 
-    private func applySessionLink(_ candidate: SessionLinkCandidate, toThreadAt index: Int) {
+    private func applySessionLink(
+        _ candidate: SessionLinkCandidate,
+        toThreadAt index: Int,
+        preserveRunningTerminal: Bool = false
+    ) {
         let threadID = threads[index].id
         mutateThread(at: index) {
             $0.sessionIdentity = candidate.identity
@@ -1944,9 +1971,18 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
         sessionLinkRequiredThreadIDs.remove(threadID)
         sessionLinkSkippedThreadIDs.remove(threadID)
-        activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
-        captureReadOffsetsByThreadID.removeValue(forKey: threadID)
-        bumpAgentCLIPollGeneration(for: threadID)
+        // When the agent CLI registers its own session, polling auto-links it to
+        // the running thread. Invalidating the cached launch descriptor here would
+        // change the launch request from `--name` to `--resume`, tearing down and
+        // relaunching the live process — which discards the user's in-flight first
+        // message. Keep the running terminal's descriptor untouched; the identity is
+        // still persisted, so a future cold launch resumes the bound session.
+        let hasRunningTerminal = activeProjectLaunchDescriptorsByThreadID[threadID] != nil
+        if !(preserveRunningTerminal && hasRunningTerminal) {
+            activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)
+            captureReadOffsetsByThreadID.removeValue(forKey: threadID)
+            bumpAgentCLIPollGeneration(for: threadID)
+        }
         persistThread(threads[index])
     }
 
@@ -2137,9 +2173,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let canonicalName = metadata.canonicalName
         let isPendingRenameConfirmed =
             pendingRename.map { $0 == canonicalName } ?? true
+        // A `reportedName` comes from the session catalog and is authoritative. Metadata
+        // whose name comes only from the terminal title is transient — for CLIs like Claude
+        // the title is tool activity ("Bash", "Read"), so it must never name the thread, and
+        // for any CLI it must never overwrite an already-established name.
+        let nameIsAuthoritative = metadata.reportedName != nil
+        let established = threads[index].canonicalSessionName
+        let hasEstablishedName = established != nil && established != metadata.identity
+        let canApplyTitleName = agentCLIBindings.usesTerminalTitleAsSessionName(
+            for: threads[index].agentCLI)
+        let mayApplyName =
+            nameIsAuthoritative ? true : (hasEstablishedName ? false : canApplyTitleName)
         var updatedThread = threads[index]
         updatedThread.sessionIdentity = metadata.identity
-        if isPendingRenameConfirmed {
+        if isPendingRenameConfirmed && mayApplyName {
             updatedThread.canonicalSessionName = canonicalName
             updatedThread.displayName = canonicalName
             updatedThread.pendingSessionRename = nil
@@ -2386,13 +2433,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     }
 
     private static func browseFileEntries(from entries: [FileBrowserEntry]) -> [FileBrowserEntry] {
-        if entries.count > FileBrowserPresentationLimits.maxBrowseEntries {
-            return FileBrowserTreeBuilder.presentationEntries(
-                from: entries,
-                limit: FileBrowserPresentationLimits.maxBrowseEntries
-            )
-        }
-        return publishedTreeEntries(from: entries)
+        // Publish the full index for browsing. The tree view renders lazily —
+        // it only materializes rows for paths whose ancestors are expanded and
+        // caps rendered rows defensively — so there is no need to drop entries
+        // up front. A presentation cap here used to silently omit deep files
+        // (e.g. docs/**/*.md in a large monorepo) that were never selected into
+        // the bounded set, leaving expanded folders looking empty.
+        publishedTreeEntries(from: entries)
     }
 
     private static func fileBrowserVisibleLimit(for query: String) -> Int {

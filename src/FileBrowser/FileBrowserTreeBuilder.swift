@@ -29,8 +29,6 @@ public struct FileBrowserVisibleTreeRow: Identifiable, Equatable, Sendable {
 }
 
 public enum FileBrowserTreeBuilder {
-    private static let minimumBalancedFileRows = 1_000
-
     public static func roots(from entries: [FileBrowserEntry]) -> [FileBrowserTreeNode] {
         var boxesByPath: [String: FileBrowserTreeNodeBox] = [:]
         var rootBoxes: [FileBrowserTreeNodeBox] = []
@@ -77,71 +75,65 @@ public enum FileBrowserTreeBuilder {
             .map { Self.node(from: $0) }
     }
 
-    public static func presentationEntries(
-        from entries: [FileBrowserEntry],
-        limit: Int
-    ) -> [FileBrowserEntry] {
-        guard limit > 0 else { return [] }
-        guard entries.count > limit else { return entries }
-
-        var selectedByPath: [String: FileBrowserEntry] = [:]
-        var selected: [FileBrowserEntry] = []
-        selected.reserveCapacity(limit)
-
-        func append(_ entry: FileBrowserEntry) {
-            guard selected.count < limit, selectedByPath[entry.relativePath] == nil else { return }
-            selectedByPath[entry.relativePath] = entry
-            selected.append(entry)
-        }
-
-        let visibleFileFloor = min(minimumBalancedFileRows, max(1, limit / 10))
-        let rootEntryBudget = max(1, limit - visibleFileFloor)
-        // Keep the collapsed tree useful when one early branch exceeds the cap.
-        for entry in entries where isRootEntry(entry) {
-            guard selected.count < rootEntryBudget else { break }
-            append(entry)
-        }
-
-        let directoryBudget = max(1, limit * 2 / 3)
-        // Select directories breadth-first (shallowest levels first). The input is
-        // sorted depth-first, so iterating it directly lets one large early branch
-        // exhaust the budget before its sibling directories are reached, dropping
-        // them from the collapsed tree. Visiting by depth guarantees every sibling
-        // at a level is considered before descending into any one subtree.
-        let directoriesByBreadth =
-            entries
-            .lazy
-            .filter(\.isDirectory)
-            .map { (entry: $0, depth: Self.pathDepth($0.relativePath)) }
-            .sorted { lhs, rhs in
-                if lhs.depth != rhs.depth { return lhs.depth < rhs.depth }
-                return Self.sortEntriesForTree(lhs.entry, rhs.entry)
-            }
-        for item in directoriesByBreadth {
-            guard selected.count < directoryBudget else { break }
-            append(item.entry)
-        }
-
-        var visibleFileCount = selected.lazy.filter { !$0.isDirectory }.prefix(visibleFileFloor)
-            .count
-        for entry in entries where !entry.isDirectory {
-            for ancestor in ancestorEntries(for: entry.relativePath) {
-                append(ancestor)
-            }
-            let previousCount = selected.count
-            append(entry)
-            if selected.count > previousCount {
-                visibleFileCount += 1
-            }
-            if selected.count >= limit && visibleFileCount >= visibleFileFloor { break }
-        }
-
+    /// Maps each parent relative path (root entries use an empty string) to its
+    /// ordered child entries. Built once per index so the visible-row walk can
+    /// descend only into expanded folders instead of rescanning every entry on
+    /// each expand/collapse. The input is assumed pre-sorted by
+    /// `sortEntriesForTree` (depth-first pre-order), so appending in input order
+    /// already leaves each parent's children in their correct sibling order.
+    public static func childrenIndex(
+        from entries: [FileBrowserEntry]
+    ) -> [String: [FileBrowserEntry]] {
+        var childrenByParent: [String: [FileBrowserEntry]] = [:]
         for entry in entries {
-            append(entry)
-            if selected.count >= limit { break }
+            let parent: String
+            if let slashIndex = entry.relativePath.lastIndex(of: "/") {
+                parent = String(entry.relativePath[..<slashIndex])
+            } else {
+                parent = ""
+            }
+            childrenByParent[parent, default: []].append(entry)
+        }
+        return childrenByParent
+    }
+
+    /// Walks a prebuilt children index depth-first, emitting a row for every
+    /// entry whose ancestors are all expanded. Cost is proportional to the rows
+    /// emitted (bounded by `limit`), not the size of the full index, so expanding
+    /// a folder in a 150k-entry monorepo stays responsive — the full index is
+    /// fed in without a lossy presentation cap, so every folder reveals its
+    /// actual contents on demand.
+    public static func visibleRows(
+        childrenIndex: [String: [FileBrowserEntry]],
+        expandedFolders: Set<String>,
+        limit: Int
+    ) -> [FileBrowserVisibleTreeRow] {
+        guard limit > 0 else { return [] }
+        var rows: [FileBrowserVisibleTreeRow] = []
+        rows.reserveCapacity(min(limit, 256))
+
+        func appendChildren(of parent: String, depth: Int) {
+            guard let children = childrenIndex[parent] else { return }
+            for child in children {
+                if rows.count >= limit { return }
+                let displayName: String
+                if let slashIndex = child.relativePath.lastIndex(of: "/") {
+                    displayName = String(
+                        child.relativePath[child.relativePath.index(after: slashIndex)...])
+                } else {
+                    displayName = child.relativePath
+                }
+                rows.append(
+                    FileBrowserVisibleTreeRow(
+                        entry: child, displayName: displayName, depth: depth))
+                if child.isDirectory, expandedFolders.contains(child.relativePath) {
+                    appendChildren(of: child.relativePath, depth: depth + 1)
+                }
+            }
         }
 
-        return selected.sorted(by: Self.sortEntriesForTree)
+        appendChildren(of: "", depth: 0)
+        return rows
     }
 
     public static func visibleRows(
@@ -240,33 +232,8 @@ public enum FileBrowserTreeBuilder {
         return left.relativePath.localizedStandardCompare(right.relativePath) == .orderedAscending
     }
 
-    private static func isRootEntry(_ entry: FileBrowserEntry) -> Bool {
-        !entry.relativePath.contains("/")
-    }
-
-    private static func pathDepth(_ relativePath: String) -> Int {
-        var depth = 1
-        for character in relativePath where character == "/" {
-            depth += 1
-        }
-        return depth
-    }
-
     private static func isHiddenName(_ name: String) -> Bool {
         name.hasPrefix(".")
-    }
-
-    private static func ancestorEntries(for relativePath: String) -> [FileBrowserEntry] {
-        let components = relativePath.split(separator: "/").map(String.init)
-        guard components.count > 1 else { return [] }
-        var ancestors: [FileBrowserEntry] = []
-        ancestors.reserveCapacity(components.count - 1)
-        var currentPath = ""
-        for component in components.dropLast() {
-            currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
-            ancestors.append(FileBrowserEntry(relativePath: currentPath, isDirectory: true))
-        }
-        return ancestors
     }
 }
 
