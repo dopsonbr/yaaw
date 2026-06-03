@@ -9,10 +9,12 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(matcher.shouldIgnore(relativePath: ".git", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "src/node_modules", isDirectory: true))
         XCTAssertTrue(matcher.shouldIgnore(relativePath: "DerivedData/App", isDirectory: true))
-        // Home-directory noise (Music/Movies/Pictures) and `worktrees` are no longer
-        // default rules, so they are surfaced like any other directory.
+        // Home-directory noise (Music/Movies/Pictures) is not a default rule, so it is
+        // surfaced like any other directory. `worktrees` IS a default rule: each git
+        // worktree is a full checkout, so it stays collapsed and is indexed lazily on expand.
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "Music", isDirectory: true))
-        XCTAssertFalse(matcher.shouldIgnore(relativePath: "worktrees", isDirectory: true))
+        XCTAssertTrue(matcher.shouldIgnore(relativePath: "worktrees", isDirectory: true))
+        XCTAssertTrue(matcher.shouldIgnore(relativePath: "src/worktrees", isDirectory: true))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "dist", isDirectory: false))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: "src/.build", isDirectory: false))
         XCTAssertFalse(matcher.shouldIgnore(relativePath: ".env", isDirectory: false))
@@ -605,6 +607,203 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(indexer.subtreeRequestCount, 1)
     }
 
+    func testExpandedFoldersAreRememberedPerThreadAcrossSwitches() throws {
+        let fixture = AppModelFixtureForFiles()
+        let model = AppModel(store: fixture.store, fileIndexer: ManualFileIndexer())
+
+        model.setExpandedFolders(["src", "src/app"], forThreadID: fixture.firstThreadID)
+        model.selectThread(id: fixture.secondThreadID)
+
+        // The second thread has its own (empty) expansion state.
+        XCTAssertEqual(model.expandedFolders(forThreadID: fixture.secondThreadID), [])
+
+        model.setExpandedFolders(["docs"], forThreadID: fixture.secondThreadID)
+        model.selectThread(id: fixture.firstThreadID)
+
+        // Switching back restores the first thread's expansion state unchanged.
+        XCTAssertEqual(model.expandedFolders(forThreadID: fixture.firstThreadID), ["src", "src/app"])
+        XCTAssertEqual(model.expandedFolders(forThreadID: fixture.secondThreadID), ["docs"])
+    }
+
+    func testSelectedFileIsRememberedPerThreadAcrossSwitches() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let fileA = FileBrowserEntry(relativePath: "a.swift", isDirectory: false)
+        let fileB = FileBrowserEntry(relativePath: "b.swift", isDirectory: false)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    entries: [fileA, fileB])))
+
+        model.selectFile(relativePath: "b.swift")
+        XCTAssertEqual(model.selectedFileRelativePath, "b.swift")
+
+        // Leaving and returning preserves the first thread's chosen file.
+        model.selectThread(id: fixture.secondThreadID)
+        model.selectThread(id: fixture.firstThreadID)
+        XCTAssertEqual(model.selectedFileRelativePath, "b.swift")
+    }
+
+    func testReindexDoesNotStompRememberedSelectionThatIsNoLongerVisible() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let fileA = FileBrowserEntry(relativePath: "a.swift", isDirectory: false)
+        let fileB = FileBrowserEntry(relativePath: "b.swift", isDirectory: false)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    entries: [fileA, fileB])))
+        model.selectFile(relativePath: "b.swift")
+
+        // A reindex whose results no longer contain the remembered file must keep the
+        // remembered selection rather than jumping to the first visible file.
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 1,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot, entries: [fileA])))
+
+        XCTAssertEqual(model.selectedFileRelativePath, "b.swift")
+    }
+
+    func testLazyExpandShowsAndClearsIndexingIndicator() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let pruned = FileBrowserEntry(
+            relativePath: "node_modules", isDirectory: true, isPruned: true)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot, entries: [pruned])))
+        XCTAssertFalse(model.fileBrowserState.isIndexing)
+
+        model.expandPrunedDirectory(relativePath: "node_modules")
+        XCTAssertTrue(model.fileBrowserState.isIndexing)
+
+        indexer.completeSubtreeRequest(
+            at: 0,
+            result: .success(
+                Self.subtreeResult(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    prunedPath: "node_modules",
+                    childFile: "node_modules/pkg/needle.js")))
+        XCTAssertFalse(model.fileBrowserState.isIndexing)
+    }
+
+    func testLazyExpandClearsIndicatorOnFailure() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let pruned = FileBrowserEntry(
+            relativePath: "node_modules", isDirectory: true, isPruned: true)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot, entries: [pruned])))
+
+        model.expandPrunedDirectory(relativePath: "node_modules")
+        XCTAssertTrue(model.fileBrowserState.isIndexing)
+
+        indexer.completeSubtreeRequest(
+            at: 0, result: .failure(FileBrowserIndexError.missingRoot("node_modules")))
+        XCTAssertFalse(model.fileBrowserState.isIndexing)
+    }
+
+    func testConcurrentExpandsKeepIndicatorUntilLastFinishes() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let prunedA = FileBrowserEntry(
+            relativePath: "node_modules", isDirectory: true, isPruned: true)
+        let prunedB = FileBrowserEntry(relativePath: "vendor", isDirectory: true, isPruned: true)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    entries: [prunedA, prunedB])))
+
+        model.expandPrunedDirectory(relativePath: "node_modules")
+        model.expandPrunedDirectory(relativePath: "vendor")
+        XCTAssertEqual(indexer.subtreeRequestCount, 2)
+        XCTAssertTrue(model.fileBrowserState.isIndexing)
+
+        indexer.completeSubtreeRequest(
+            at: 0,
+            result: .success(
+                Self.subtreeResult(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    prunedPath: "node_modules", childFile: "node_modules/pkg/a.js")))
+        // One expand still in flight, so the indicator stays up.
+        XCTAssertTrue(model.fileBrowserState.isIndexing)
+
+        indexer.completeSubtreeRequest(
+            at: 1,
+            result: .success(
+                Self.subtreeResult(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    prunedPath: "vendor", childFile: "vendor/lib/b.rb")))
+        XCTAssertFalse(model.fileBrowserState.isIndexing)
+    }
+
+    func testReopeningThreadReusesCacheWithoutForcingReindex() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let pruned = FileBrowserEntry(relativePath: "worktrees", isDirectory: true, isPruned: true)
+        let readme = FileBrowserEntry(relativePath: "README.md", isDirectory: false)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    entries: [readme, pruned])))
+
+        // Lazily load the worktrees subtree and confirm it merged in.
+        model.expandPrunedDirectory(relativePath: "worktrees")
+        let needle = FileBrowserEntry(
+            relativePath: "worktrees/wt1/needle.swift", isDirectory: false)
+        indexer.completeSubtreeRequest(
+            at: 0,
+            result: .success(
+                Self.subtreeResult(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    prunedPath: "worktrees", childFile: "worktrees/wt1/needle.swift")))
+        XCTAssertTrue(model.fileBrowserState.entries.contains(needle))
+
+        // Switching to the (cold) second thread legitimately indexes once.
+        model.selectThread(id: fixture.secondThreadID)
+        let countAfterSecond = indexer.requestCount
+
+        // Returning to the first thread reuses its cached/merged index — no new full index,
+        // and the previously expanded worktrees subtree is still present.
+        model.selectThread(id: fixture.firstThreadID)
+        XCTAssertEqual(indexer.requestCount, countAfterSecond)
+        XCTAssertTrue(model.fileBrowserState.entries.contains(needle))
+    }
+
     func testAppModelPublishesFullBrowseIndexAndSearchesAcrossFullIndex() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
@@ -720,6 +919,26 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(model.fileBrowserState.visibleEntries.contains { !$0.isDirectory })
         XCTAssertFalse(model.fileBrowserState.isBrowseEntryLimitApplied)
         XCTAssertNotNil(model.selectedFileRelativePath)
+    }
+
+    /// Builds an `indexSubtree` result that mirrors the real indexer: the subtree root as an
+    /// un-pruned directory plus one nested file, so a merge flips the pruned placeholder to
+    /// "loaded" and surfaces the file.
+    private static func subtreeResult(
+        threadID: UUID, root: URL, prunedPath: String, childFile: String
+    ) -> FileIndexResult {
+        let entries = [
+            FileBrowserEntry(relativePath: prunedPath, isDirectory: true, isPruned: false),
+            FileBrowserEntry(relativePath: childFile, isDirectory: false),
+        ]
+        return FileIndexResult(
+            entries: entries,
+            metadata: FileIndexMetadata(
+                threadID: threadID,
+                rootPath: root.path,
+                indexedAt: Date(timeIntervalSince1970: 5),
+                fileCount: entries.count,
+                ignoredDirectoryCount: 0))
     }
 
     private static func largeSyntheticEntries(count: Int) -> [FileBrowserEntry] {

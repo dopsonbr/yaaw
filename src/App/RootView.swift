@@ -2652,6 +2652,17 @@ private struct RightPanelView: View {
                         get: { model.fileBrowserState.searchQuery },
                         set: { model.updateFileSearchQuery($0) }
                     ),
+                    expandedFolders: Binding(
+                        get: {
+                            model.selectedThreadID.map { model.expandedFolders(forThreadID: $0) }
+                                ?? []
+                        },
+                        set: { newValue in
+                            if let id = model.selectedThreadID {
+                                model.setExpandedFolders(newValue, forThreadID: id)
+                            }
+                        }
+                    ),
                     selectedRelativePath: model.selectedFileRelativePath,
                     fileIconPack: model.configuration.fileIconPack,
                     onRefresh: model.refreshSelectedFileBrowser,

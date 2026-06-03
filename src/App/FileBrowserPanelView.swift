@@ -4,6 +4,7 @@ import YAAWKit
 struct FileBrowserPanel: View {
     let state: FileBrowserState
     @Binding var searchQuery: String
+    @Binding var expandedFolders: Set<String>
     let selectedRelativePath: String?
     let fileIconPack: FileIconPack
     let onRefresh: () -> Void
@@ -15,7 +16,6 @@ struct FileBrowserPanel: View {
     let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
     let onExpandDirectory: (FileBrowserEntry) -> Void
     let onTreeBuilt: (Int, Int, Int) -> Void
-    @State private var expandedFolders: Set<String> = []
     @State private var typedQuery: String = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var treeRows: [FileBrowserVisibleTreeRow] = []
@@ -117,7 +117,8 @@ struct FileBrowserPanel: View {
                 rebuildTreeIndexAndRows()
             }
             .onChange(of: state.rootPath) {
-                expandedFolders.removeAll()
+                // Expansion state is keyed per thread by the model, so don't clear it here.
+                // Stale paths after a genuine root change match no entries and are ignored.
                 rebuildTreeIndexAndRows()
             }
             .onChange(of: expandedFolders) {

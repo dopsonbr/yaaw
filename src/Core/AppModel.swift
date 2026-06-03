@@ -90,6 +90,10 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private var fileBrowserPresentationByThreadID: [UUID: FileBrowserPresentationCacheEntry] = [:]
     private var latestFileBrowserRequestIDByThreadID: [UUID: UUID] = [:]
     private var pendingSubtreeLoadsByThreadID: [UUID: Set<String>] = [:]
+    // In-memory, per-thread file-browser open state. Not persisted: it survives thread
+    // and right-panel-tab switches within a session and resets on relaunch.
+    private var expandedFoldersByThreadID: [UUID: Set<String>] = [:]
+    private var selectedFileByThreadID: [UUID: String] = [:]
     private var nvimRelativePathsByThreadID: [UUID: String] = [:]
     private var nvimRelaunchTokensByThreadID: [UUID: UUID] = [:]
     private var nvimRelaunchTokensByTabKey: [String: UUID] = [:]
@@ -1558,9 +1562,27 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         )
     }
 
+    /// The set of expanded folders remembered for the given thread (in-session only).
+    public func expandedFolders(forThreadID id: UUID) -> Set<String> {
+        expandedFoldersByThreadID[id] ?? []
+    }
+
+    public func setExpandedFolders(_ folders: Set<String>, forThreadID id: UUID) {
+        expandedFoldersByThreadID[id] = folders
+    }
+
+    /// Sets the published selection and records it as the selected thread's remembered file
+    /// so it can be restored after a thread/tab switch within the session.
+    private func setSelectedFile(_ relativePath: String?) {
+        selectedFileRelativePath = relativePath
+        if let selectedThreadID {
+            selectedFileByThreadID[selectedThreadID] = relativePath
+        }
+    }
+
     public func selectFile(relativePath: String?) {
         guard let relativePath else {
-            selectedFileRelativePath = nil
+            setSelectedFile(nil)
             return
         }
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
@@ -1568,7 +1590,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] }
             ?? []
         guard fullEntries.contains(where: { $0.relativePath == normalizedPath }) else { return }
-        selectedFileRelativePath = normalizedPath
+        setSelectedFile(normalizedPath)
     }
 
     public func recordFileBrowserTreeBuilt(entryCount: Int, rowCount: Int, durationMS: Int) {
@@ -1606,7 +1628,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         case .down:
             nextIndex = min(entries.count - 1, currentIndex + 1)
         }
-        selectedFileRelativePath = entries[nextIndex].relativePath
+        setSelectedFile(entries[nextIndex].relativePath)
     }
 
     public func openSelectedFileInNvim() {
@@ -1618,7 +1640,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard let selectedThreadID else { return }
         guard let resolvedFile = selectedThreadFileURL(relativePath: relativePath) else { return }
         let normalizedPath = resolvedFile.normalizedPath
-        selectedFileRelativePath = normalizedPath
+        setSelectedFile(normalizedPath)
         var state = selectedRightPanelState
         let existingTabID = RightPanelTab.nvimTabID(relativePath: normalizedPath)
         let alreadyOpen = state.tabs.contains { $0.id == existingTabID }
@@ -1713,7 +1735,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return false
         }
 
-        selectedFileRelativePath = normalizedPath
+        setSelectedFile(normalizedPath)
         var state = selectedRightPanelState
         _ = state.openBrowserTab(urlString: fileURL.absoluteString, relativePath: normalizedPath)
         rightPanelStatesByThreadID[selectedThreadID] = state
@@ -2144,7 +2166,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectedThreadID = thread.id
         expandedProjectIDs.insert(thread.projectID)
         resetFileBrowserForSelectedThread()
-        refreshFileBrowser(for: thread, publishCachedSnapshot: false)
+        refreshFileBrowser(for: thread, publishCachedSnapshot: false, forceReindex: false)
         pushCurrentSelection()
         recordDiagnostic(
             category: "Threads",
@@ -2288,6 +2310,11 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         guard isExistingDirectory(thread.workingDirectory) else { return }
 
         pendingSubtreeLoadsByThreadID[threadID, default: []].insert(relativePath)
+        // Show the indexing spinner while the subtree loads; cleared once the last
+        // pending expand for this thread finishes (see finishSubtreeExpansion).
+        if selectedThreadID == threadID {
+            fileBrowserState.isIndexing = true
+        }
         let requestID = latestFileBrowserRequestIDByThreadID[threadID]
         let cacheKey = fileIndexCacheCoordinator.cacheKey(
             root: thread.workingDirectory,
@@ -2316,12 +2343,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         result: Result<FileIndexResult, Error>
     ) {
         pendingSubtreeLoadsByThreadID[threadID]?.remove(relativePath)
+        // Keep the spinner up while other expands for this thread are still in flight.
+        let stillIndexing = !(pendingSubtreeLoadsByThreadID[threadID]?.isEmpty ?? true)
         // A full reindex or thread switch since the expand bumps the request ID;
         // discard stale subtree results so we never merge into a replaced index.
-        guard latestFileBrowserRequestIDByThreadID[threadID] == requestID else { return }
+        guard latestFileBrowserRequestIDByThreadID[threadID] == requestID else {
+            clearSubtreeIndexingIndicatorIfIdle(threadID: threadID)
+            return
+        }
         guard case .success(let subtreeResult) = result,
             let existingEntries = fileBrowserEntriesByThreadID[threadID]
-        else { return }
+        else {
+            clearSubtreeIndexingIndicatorIfIdle(threadID: threadID)
+            return
+        }
 
         let mergedEntries = FileBrowserTreeBuilder.merging(
             existingEntries, withSubtree: subtreeResult.entries,
@@ -2345,12 +2380,25 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             metadata: metadata,
             cacheKeyValue: metadata?.cacheKey,
             searchQuery: fileBrowserState.searchQuery,
-            isIndexing: false,
+            isIndexing: stillIndexing,
             allowCachedPresentation: false
         )
     }
 
-    private func refreshFileBrowser(for thread: AgentThread, publishCachedSnapshot: Bool = true) {
+    /// Clears the file-browser spinner on a subtree-expand exit path that doesn't publish
+    /// fresh state, but only once no expands remain in flight for the selected thread.
+    private func clearSubtreeIndexingIndicatorIfIdle(threadID: UUID) {
+        guard selectedThreadID == threadID else { return }
+        if pendingSubtreeLoadsByThreadID[threadID]?.isEmpty ?? true {
+            fileBrowserState.isIndexing = false
+        }
+    }
+
+    private func refreshFileBrowser(
+        for thread: AgentThread,
+        publishCachedSnapshot: Bool = true,
+        forceReindex: Bool = true
+    ) {
         let requestID = UUID()
         latestFileBrowserRequestIDByThreadID[thread.id] = requestID
         guard isExistingDirectory(thread.workingDirectory) else {
@@ -2379,6 +2427,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             root: thread.workingDirectory,
             ignoreRules: configuration.ignoreRules
         )
+        // Re-opening a thread that already has a fresh cached (and possibly subtree-merged)
+        // index reuses it instead of forcing a full re-enumeration, so re-opens — and
+        // re-expanding lazily-loaded subtrees like worktrees — are instant. The directory
+        // watcher, git-identity cache key, and the Refresh button still trigger real
+        // reindexes when something actually changed. resetFileBrowserForSelectedThread has
+        // already published the cached entries before this call.
+        if !forceReindex,
+            fileIndexCacheCoordinator.cachedIndex(threadID: thread.id, key: cacheKey) != nil
+        {
+            return
+        }
         if publishCachedSnapshot {
             let cachedResult = fileIndexCacheCoordinator.cachedIndex(
                 threadID: thread.id, key: cacheKey)
@@ -2459,6 +2518,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             selectedFileRelativePath = nil
             return
         }
+        // Restore the thread's remembered selection before publishing so the index load
+        // doesn't auto-select the first file over a file the user previously opened.
+        selectedFileRelativePath = selectedFileByThreadID[selectedThread.id]
         let cachedResult: FileIndexResult?
         let entries: [FileBrowserEntry]
         let presentationCacheKeyValue: String?
@@ -2559,6 +2621,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private func updateSelectedFileAfterVisibleEntriesChanged() {
         let fileEntries = fileBrowserState.visibleEntries.filter { !$0.isDirectory }
         guard !fileEntries.isEmpty else {
+            // Clear the published value but keep the per-thread memory so a later index
+            // load (e.g. an expanded subtree) can restore the remembered selection.
             selectedFileRelativePath = nil
             return
         }
@@ -2567,7 +2631,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         {
             return
         }
-        selectedFileRelativePath = fileEntries.first?.relativePath
+        // Honor a remembered selection for this thread rather than jumping to the first
+        // file, even when it isn't visible yet (e.g. it lives inside an unexpanded subtree).
+        if let selectedThreadID, let remembered = selectedFileByThreadID[selectedThreadID] {
+            selectedFileRelativePath = remembered
+            return
+        }
+        setSelectedFile(fileEntries.first?.relativePath)
     }
 
     private static func publishedTreeEntries(from entries: [FileBrowserEntry]) -> [FileBrowserEntry]

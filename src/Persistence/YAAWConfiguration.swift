@@ -1129,6 +1129,7 @@ public struct FileIndexingSettings: Codable, Equatable, Sendable {
         "vendor",
         ".idea",
         ".vscode",
+        "worktrees",
     ]
 }
 

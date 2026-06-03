@@ -1586,9 +1586,10 @@ final class PersistenceTests: XCTestCase {
 
         let reloaded = store.load()
 
-        // No ignoreRules key: defaults are seeded.
+        // No ignoreRules key: defaults are seeded, including `worktrees` (each git worktree
+        // is a full checkout, so it is collapsed and indexed lazily on expand).
         XCTAssertEqual(reloaded.ignoreRules, FileIndexingSettings.defaultIgnoreRules)
-        XCTAssertFalse(reloaded.ignoreRules.contains("worktrees"))
+        XCTAssertTrue(reloaded.ignoreRules.contains("worktrees"))
     }
 
     func testYAMLConfigurationClampsFontSizesAndFallbacksBlankFamilies() throws {
