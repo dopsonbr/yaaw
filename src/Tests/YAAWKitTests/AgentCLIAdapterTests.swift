@@ -307,7 +307,7 @@ final class AgentCLIAdapterTests: XCTestCase {
         XCTAssertEqual(service.catalogMetadata(for: codex)?.canonicalName, "Codex Linked")
     }
 
-    func testExactSessionLinkCandidateUsesUniqueCodexNameWithoutWorkingDirectory() throws {
+    func testExactSessionLinkCandidateRejectsUniqueCodexNameWithoutWorkingDirectory() throws {
         let home = try temporaryDirectory()
         let root = try temporaryDirectory()
         let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
@@ -330,10 +330,12 @@ final class AgentCLIAdapterTests: XCTestCase {
             pendingSessionRename: "rename-test"
         )
 
-        let candidate = try XCTUnwrap(service.exactSessionLinkCandidate(for: thread))
+        XCTAssertNil(service.exactSessionLinkCandidate(for: thread))
 
-        XCTAssertEqual(candidate.identity, "codex-1")
-        XCTAssertEqual(candidate.displayName, "rename-test")
+        XCTAssertTrue(
+            service.sessionLinkCandidates(for: thread).contains {
+                $0.identity == "codex-1" && $0.displayName == "rename-test"
+            })
     }
 
     func testExactSessionLinkCandidateUsesCodexHistoryWhenIndexIsMissingSession() throws {
@@ -351,7 +353,7 @@ final class AgentCLIAdapterTests: XCTestCase {
             encoding: .utf8
         )
         try """
-        {"session_id":"codex-history-1","ts":1779820871,"text":"tell me 2 jokes"}
+        {"session_id":"codex-history-1","cwd":"\(root.path)","ts":1779820871,"text":"tell me 2 jokes"}
         """.write(
             to: codexDirectory.appendingPathComponent("history.jsonl"),
             atomically: true,
@@ -369,7 +371,61 @@ final class AgentCLIAdapterTests: XCTestCase {
 
         XCTAssertEqual(candidate.identity, "codex-history-1")
         XCTAssertEqual(candidate.displayName, "tell me 2 jokes")
+        XCTAssertEqual(candidate.workingDirectory?.standardizedFileURL.path, root.path)
         XCTAssertEqual(candidate.source, "~/.codex/history.jsonl")
+    }
+
+    func testExactSessionLinkCandidateDoesNotAutoLinkDirectorylessCodexHistory() throws {
+        let home = try temporaryDirectory()
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"session_id":"codex-history-1","ts":1779820871,"text":"tell me 2 jokes"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("history.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let thread = AgentThread(
+            displayName: "tell me 2 jokes",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex,
+            pendingSessionRename: "tell me 2 jokes"
+        )
+
+        XCTAssertNil(service.exactSessionLinkCandidate(for: thread))
+        XCTAssertEqual(service.sessionLinkCandidates(for: thread).first?.identity, "codex-history-1")
+    }
+
+    func testManualSessionLinkCandidatesRankDirectoryMatchesBeforeRecency() throws {
+        let home = try temporaryDirectory()
+        let root = try temporaryDirectory()
+        let service = AgentCLISessionBindingService(captureDirectory: nil, homeDirectory: home)
+        let codexDirectory = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexDirectory, withIntermediateDirectories: true)
+        try """
+        {"id":"directory-match","thread_name":"Older Exact","cwd":"\(root.path)","updated_at":"2026-05-26T10:00:00Z"}
+        {"id":"directoryless-newer","thread_name":"Newer Unknown","updated_at":"2026-05-26T12:00:00Z"}
+        """.write(
+            to: codexDirectory.appendingPathComponent("session_index.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let thread = AgentThread(
+            displayName: "Manual",
+            projectID: UUID(),
+            workingDirectory: root,
+            agentCLI: .codex
+        )
+
+        let candidates = service.sessionLinkCandidates(for: thread)
+
+        XCTAssertEqual(candidates.map(\.identity), ["directory-match", "directoryless-newer"])
     }
 
     func testExactSessionLinkCandidateRejectsAmbiguousCodexNames() throws {

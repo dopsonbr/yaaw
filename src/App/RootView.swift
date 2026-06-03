@@ -2468,9 +2468,6 @@ private struct RightPanelView: View {
                 .onAppear {
                     model.refreshSelectedFileBrowser()
                 }
-                .onChange(of: model.selectedThreadID) {
-                    model.refreshSelectedFileBrowser()
-                }
 
             case .browser:
                 BrowserPanel(

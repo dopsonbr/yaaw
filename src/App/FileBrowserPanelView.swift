@@ -144,6 +144,10 @@ struct FileBrowserPanel: View {
             return
                 "\(state.visibleEntries.count) matches of \(metadata.fileCount) items, \(ignored)"
         }
+        if state.isBrowseEntryLimitApplied {
+            return
+                "Showing \(state.entries.count) of \(state.indexedEntryCount) indexed items, \(ignored)"
+        }
         if treeRows.count >= FileBrowserPanelConstants.maxVisibleTreeRows {
             return
                 "Tree truncated at \(FileBrowserPanelConstants.maxVisibleTreeRows) rows - collapse folders to see more"

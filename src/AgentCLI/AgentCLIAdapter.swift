@@ -560,6 +560,10 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             workingDirectory: thread.workingDirectory,
             homeDirectory: homeDirectory
         )
+        let sortedCandidates = Self.sortedSessionLinkCandidates(
+            candidates,
+            workingDirectory: thread.workingDirectory
+        )
         catalogCacheLock.lock()
         if catalogCacheByKey[key] == nil {
             catalogCacheInsertionOrder.append(key)
@@ -570,10 +574,10 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         }
         catalogCacheByKey[key] = SessionCatalogCacheEntry(
             signature: signature,
-            candidates: candidates
+            candidates: sortedCandidates
         )
         catalogCacheLock.unlock()
-        return candidates
+        return sortedCandidates
     }
 
     public func catalogMetadata(for thread: AgentThread) -> AgentCLISessionMetadata? {
@@ -599,10 +603,10 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             guard let directory = candidate.workingDirectory else { return false }
             return Self.sameDirectory(directory, thread.workingDirectory)
         }
-        let candidates = directoryMatches.isEmpty ? matchingCandidates : directoryMatches
-        let identities = Set(candidates.map(\.id))
+        guard !directoryMatches.isEmpty else { return nil }
+        let identities = Set(directoryMatches.map(\.id))
         guard identities.count == 1 else { return nil }
-        return candidates.first
+        return directoryMatches.first
     }
 
     public func captureLogURL(for thread: AgentThread) -> URL? {
@@ -777,6 +781,34 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
 
     private static func sameDirectory(_ lhs: URL, _ rhs: URL) -> Bool {
         lhs.standardizedFileURL.path == rhs.standardizedFileURL.path
+    }
+
+    private static func sortedSessionLinkCandidates(
+        _ candidates: [SessionLinkCandidate],
+        workingDirectory: URL
+    ) -> [SessionLinkCandidate] {
+        candidates.sorted { lhs, rhs in
+            let lhsDirectoryMatches = lhs.workingDirectory.map {
+                sameDirectory($0, workingDirectory)
+            } ?? false
+            let rhsDirectoryMatches = rhs.workingDirectory.map {
+                sameDirectory($0, workingDirectory)
+            } ?? false
+            if lhsDirectoryMatches != rhsDirectoryMatches {
+                return lhsDirectoryMatches
+            }
+            switch (lhs.updatedAt, rhs.updatedAt) {
+            case (let lhsDate?, let rhsDate?) where lhsDate != rhsDate:
+                return lhsDate > rhsDate
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return lhs.displayName.localizedStandardCompare(rhs.displayName)
+                    == .orderedAscending
+            }
+        }
     }
 
     public static let captureLogStaleWindow: UInt64 = 8 * 1024 * 1024
@@ -1030,10 +1062,17 @@ private enum AgentCLISessionCatalog {
                             "summary", "text",
                         ]
                     ) ?? identity
+                let directory = firstURL(
+                    in: object,
+                    keys: ["cwd", "working_directory", "workingDirectory", "directory", "path"]
+                )
+                guard matches(workingDirectory: workingDirectory, candidateDirectory: directory)
+                else { return nil }
                 return SessionLinkCandidate(
                     identity: identity,
                     displayName: name,
                     agentCLI: .codex,
+                    workingDirectory: directory,
                     updatedAt: firstDate(
                         in: object,
                         keys: [

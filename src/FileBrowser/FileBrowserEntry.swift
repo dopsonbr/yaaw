@@ -57,8 +57,10 @@ public struct FileIndexMetadata: Equatable, Sendable {
 public struct FileBrowserState: Equatable, Sendable {
     public var rootPath: String?
     public var searchQuery: String
+    public var indexedEntryCount: Int
     public var entries: [FileBrowserEntry]
     public var visibleEntries: [FileBrowserEntry]
+    public var isBrowseEntryLimitApplied: Bool
     public var isVisibleEntryLimitApplied: Bool
     public var isIndexing: Bool
     public var metadata: FileIndexMetadata?
@@ -67,8 +69,10 @@ public struct FileBrowserState: Equatable, Sendable {
     public init(
         rootPath: String? = nil,
         searchQuery: String = "",
+        indexedEntryCount: Int = 0,
         entries: [FileBrowserEntry] = [],
         visibleEntries: [FileBrowserEntry] = [],
+        isBrowseEntryLimitApplied: Bool = false,
         isVisibleEntryLimitApplied: Bool = false,
         isIndexing: Bool = false,
         metadata: FileIndexMetadata? = nil,
@@ -76,8 +80,10 @@ public struct FileBrowserState: Equatable, Sendable {
     ) {
         self.rootPath = rootPath
         self.searchQuery = searchQuery
+        self.indexedEntryCount = indexedEntryCount
         self.entries = entries
         self.visibleEntries = visibleEntries
+        self.isBrowseEntryLimitApplied = isBrowseEntryLimitApplied
         self.isVisibleEntryLimitApplied = isVisibleEntryLimitApplied
         self.isIndexing = isIndexing
         self.metadata = metadata

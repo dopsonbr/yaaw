@@ -1175,7 +1175,7 @@ final class AppModelTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: codexDirectory, withIntermediateDirectories: true)
         try """
-        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
+        {"id":"codex-1","thread_name":"rename-test","cwd":"\(fixture.root.path)","updated_at":"2026-05-26T10:00:00Z"}
         """.write(
             to: codexDirectory.appendingPathComponent("session_index.jsonl"),
             atomically: true,
@@ -1237,7 +1237,7 @@ final class AppModelTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: codexDirectory, withIntermediateDirectories: true)
         try """
-        {"session_id":"codex-history-1","ts":1779820871,"text":"tell me 2 jokes"}
+        {"session_id":"codex-history-1","cwd":"\(fixture.root.path)","ts":1779820871,"text":"tell me 2 jokes"}
         """.write(
             to: codexDirectory.appendingPathComponent("history.jsonl"),
             atomically: true,
@@ -1367,8 +1367,8 @@ final class AppModelTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: codexDirectory, withIntermediateDirectories: true)
         try """
-        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
-        {"id":"codex-2","thread_name":"rename-test","updated_at":"2026-05-26T11:00:00Z"}
+        {"id":"codex-1","thread_name":"rename-test","cwd":"\(fixture.root.path)","updated_at":"2026-05-26T10:00:00Z"}
+        {"id":"codex-2","thread_name":"rename-test","cwd":"\(fixture.root.path)","updated_at":"2026-05-26T11:00:00Z"}
         """.write(
             to: codexDirectory.appendingPathComponent("session_index.jsonl"),
             atomically: true,
@@ -1422,7 +1422,7 @@ final class AppModelTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: codexDirectory, withIntermediateDirectories: true)
         try """
-        {"id":"codex-1","thread_name":"rename-test","updated_at":"2026-05-26T10:00:00Z"}
+        {"id":"codex-1","thread_name":"rename-test","cwd":"\(fixture.root.path)","updated_at":"2026-05-26T10:00:00Z"}
         """.write(
             to: codexDirectory.appendingPathComponent("session_index.jsonl"),
             atomically: true,

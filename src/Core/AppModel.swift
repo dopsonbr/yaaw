@@ -15,6 +15,7 @@ public enum AppModelError: Error, Equatable {
 
 private enum FileBrowserPresentationLimits {
     static let maxSearchResults = 1_000
+    static let maxBrowseEntries = 10_000
     static let largeIndexDiagnosticThreshold = 50_000
     static let slowSearchDiagnosticThresholdMS = 100
     static let slowTreeBuildDiagnosticThresholdMS = 50
@@ -41,6 +42,12 @@ private enum AgentCLISessionSyncRequest: Sendable {
 private enum AgentCLISessionSyncResult: Sendable {
     case exactLink(threadID: UUID, candidate: SessionLinkCandidate?)
     case catalogMetadata(threadID: UUID, metadata: AgentCLISessionMetadata?)
+}
+
+private struct FileBrowserPresentationCacheEntry {
+    var cacheKey: String
+    var sourceEntryCount: Int
+    var entries: [FileBrowserEntry]
 }
 
 public final class AppModel: ObservableObject, @unchecked Sendable {
@@ -78,6 +85,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     private let homeDirectory: URL
     private var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
     private var fileBrowserEntriesByThreadID: [UUID: [FileBrowserEntry]] = [:]
+    private var fileBrowserPresentationByThreadID: [UUID: FileBrowserPresentationCacheEntry] = [:]
     private var latestFileBrowserRequestIDByThreadID: [UUID: UUID] = [:]
     private var nvimRelativePathsByThreadID: [UUID: String] = [:]
     private var nvimRelaunchTokensByThreadID: [UUID: UUID] = [:]
@@ -1463,15 +1471,14 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let startedAt = Date()
         let fullEntries =
             selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] }
-            ?? fileBrowserState.entries
+            ?? []
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let result: FuzzyFileMatcher.Result
         if trimmed.isEmpty {
-            // Empty query: reuse the already-sorted state.entries instead of resorting.
             result = FuzzyFileMatcher.Result(
                 entries: fileBrowserState.entries,
                 totalMatches: fullEntries.count,
-                isLimitApplied: false
+                isLimitApplied: fileBrowserState.isBrowseEntryLimitApplied
             )
         } else {
             result = FuzzyFileMatcher.rankedResult(
@@ -1501,7 +1508,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         let fullEntries =
             selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] }
-            ?? fileBrowserState.entries
+            ?? []
         guard fullEntries.contains(where: { $0.relativePath == normalizedPath }) else { return }
         selectedFileRelativePath = normalizedPath
     }
@@ -2035,6 +2042,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectedThreadID = thread.id
         expandedProjectIDs.insert(thread.projectID)
         resetFileBrowserForSelectedThread()
+        refreshFileBrowser(for: thread, publishCachedSnapshot: false)
         pushCurrentSelection()
         recordDiagnostic(
             category: "Threads",
@@ -2058,6 +2066,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         if selectedThreadID == threadID {
             selectedThreadID = firstActiveThreadID(forProject: projectID)
             resetFileBrowserForSelectedThread()
+            if let selectedThread {
+                refreshFileBrowser(for: selectedThread, publishCachedSnapshot: false)
+            }
         }
         pushCurrentSelection()
         persistThread(threads[index])
@@ -2106,6 +2117,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         selectedThreadID = selection.threadID
         expandedProjectIDs.insert(selection.projectID)
         resetFileBrowserForSelectedThread()
+        if let selectedThread {
+            refreshFileBrowser(for: selectedThread, publishCachedSnapshot: false)
+        }
     }
 
     private func activeThread(id threadID: UUID) -> AgentThread? {
@@ -2145,7 +2159,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func refreshFileBrowser(for thread: AgentThread) {
+    private func refreshFileBrowser(for thread: AgentThread, publishCachedSnapshot: Bool = true) {
         let requestID = UUID()
         latestFileBrowserRequestIDByThreadID[thread.id] = requestID
         guard isExistingDirectory(thread.workingDirectory) else {
@@ -2174,32 +2188,23 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             root: thread.workingDirectory,
             ignoreRules: configuration.ignoreRules
         )
-        let cachedResult = fileIndexCacheCoordinator.cachedIndex(threadID: thread.id, key: cacheKey)
-        let entries =
-            cachedResult?.entries
-            ?? fileBrowserEntriesByThreadID[thread.id]
-            ?? (fileBrowserState.rootPath == thread.workingDirectory.path
-                ? fileBrowserState.entries : [])
-        fileBrowserEntriesByThreadID[thread.id] = entries
-        let sortedEntries = Self.publishedTreeEntries(from: entries)
-        let visibleResult = Self.visibleFileEntries(
-            sortedEntries: sortedEntries,
-            originalEntries: entries,
-            query: fileBrowserState.searchQuery,
-            limit: Self.fileBrowserVisibleLimit(for: fileBrowserState.searchQuery)
-        )
-        let metadata = cachedResult?.metadata ?? fileIndexMetadataByThreadID[thread.id]
-        fileBrowserState = FileBrowserState(
-            rootPath: thread.workingDirectory.path,
-            searchQuery: fileBrowserState.searchQuery,
-            entries: sortedEntries,
-            visibleEntries: visibleResult.entries,
-            isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
-            isIndexing: true,
-            metadata: metadata,
-            errorMessage: nil
-        )
-        updateSelectedFileAfterVisibleEntriesChanged()
+        if publishCachedSnapshot {
+            let cachedResult = fileIndexCacheCoordinator.cachedIndex(
+                threadID: thread.id, key: cacheKey)
+            let entries = cachedResult?.entries ?? fileBrowserEntriesByThreadID[thread.id] ?? []
+            publishFileBrowserState(
+                for: thread,
+                entries: entries,
+                metadata: cachedResult?.metadata ?? fileIndexMetadataByThreadID[thread.id],
+                cacheKeyValue: cacheKey.value,
+                searchQuery: fileBrowserState.searchQuery,
+                isIndexing: true,
+                allowCachedPresentation: true
+            )
+        } else if selectedThreadID == thread.id {
+            fileBrowserState.isIndexing = true
+            fileBrowserState.errorMessage = nil
+        }
         fileIndexCacheCoordinator.refreshIndex(
             threadID: thread.id,
             root: thread.workingDirectory,
@@ -2220,26 +2225,20 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         switch result {
         case .success(let result):
             fileIndexMetadataByThreadID[threadID] = result.metadata
-            fileBrowserEntriesByThreadID[threadID] = result.entries
-            let sortedEntries = Self.publishedTreeEntries(from: result.entries)
-            let visibleResult = Self.visibleFileEntries(
-                sortedEntries: sortedEntries,
-                originalEntries: result.entries,
-                query: fileBrowserState.searchQuery,
-                limit: Self.fileBrowserVisibleLimit(for: fileBrowserState.searchQuery)
-            )
             if selectedThreadID == threadID {
-                fileBrowserState = FileBrowserState(
-                    rootPath: result.metadata.rootPath,
-                    searchQuery: fileBrowserState.searchQuery,
-                    entries: sortedEntries,
-                    visibleEntries: visibleResult.entries,
-                    isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
-                    isIndexing: false,
+                guard let index = threadIndexByID[threadID] else { return }
+                publishFileBrowserState(
+                    for: threads[index],
+                    entries: result.entries,
                     metadata: result.metadata,
-                    errorMessage: nil
+                    cacheKeyValue: result.metadata.cacheKey,
+                    searchQuery: fileBrowserState.searchQuery,
+                    isIndexing: false,
+                    allowCachedPresentation: false
                 )
-                updateSelectedFileAfterVisibleEntriesChanged()
+            } else {
+                fileBrowserEntriesByThreadID[threadID] = result.entries
+                fileBrowserPresentationByThreadID.removeValue(forKey: threadID)
             }
             recordIndexDiagnosticIfNeeded(result: result)
             persistFileIndexMetadata(result.metadata)
@@ -2267,34 +2266,100 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             return
         }
         let cachedResult: FileIndexResult?
-        if isExistingDirectory(selectedThread.workingDirectory) {
-            let cacheKey = fileIndexCacheCoordinator.cacheKey(
+        let entries: [FileBrowserEntry]
+        let presentationCacheKeyValue: String?
+        if let rememberedEntries = fileBrowserEntriesByThreadID[selectedThread.id] {
+            cachedResult = nil
+            entries = rememberedEntries
+            presentationCacheKeyValue = fileIndexMetadataByThreadID[selectedThread.id]?.cacheKey
+        } else if isExistingDirectory(selectedThread.workingDirectory) {
+            let resolvedCacheKey = fileIndexCacheCoordinator.cacheKey(
                 root: selectedThread.workingDirectory,
                 ignoreRules: configuration.ignoreRules
             )
             cachedResult = fileIndexCacheCoordinator.cachedIndex(
-                threadID: selectedThread.id, key: cacheKey)
+                threadID: selectedThread.id, key: resolvedCacheKey)
+            entries = cachedResult?.entries ?? []
+            presentationCacheKeyValue = cachedResult?.metadata.cacheKey ?? resolvedCacheKey.value
         } else {
             cachedResult = nil
+            entries = []
+            presentationCacheKeyValue = nil
         }
-        let entries = cachedResult?.entries ?? fileBrowserEntriesByThreadID[selectedThread.id] ?? []
-        fileBrowserEntriesByThreadID[selectedThread.id] = entries
-        let sortedEntries = Self.publishedTreeEntries(from: entries)
+        publishFileBrowserState(
+            for: selectedThread,
+            entries: entries,
+            metadata: cachedResult?.metadata ?? fileIndexMetadataByThreadID[selectedThread.id],
+            cacheKeyValue: presentationCacheKeyValue,
+            searchQuery: "",
+            isIndexing: false,
+            allowCachedPresentation: true
+        )
+    }
+
+    private func publishFileBrowserState(
+        for thread: AgentThread,
+        entries: [FileBrowserEntry],
+        metadata: FileIndexMetadata?,
+        cacheKeyValue: String?,
+        searchQuery: String,
+        isIndexing: Bool,
+        allowCachedPresentation: Bool
+    ) {
+        fileBrowserEntriesByThreadID[thread.id] = entries
+        if let metadata {
+            fileIndexMetadataByThreadID[thread.id] = metadata
+        }
+        let browseResult = browseFileEntries(
+            for: thread.id,
+            entries: entries,
+            cacheKeyValue: cacheKeyValue,
+            allowCached: allowCachedPresentation
+        )
         let visibleResult = Self.visibleFileEntries(
-            sortedEntries: sortedEntries,
+            browseEntries: browseResult.entries,
             originalEntries: entries,
-            query: "",
-            limit: .max
+            browseLimitApplied: browseResult.isLimitApplied,
+            query: searchQuery,
+            limit: Self.fileBrowserVisibleLimit(for: searchQuery)
         )
         fileBrowserState = FileBrowserState(
-            rootPath: selectedThread.workingDirectory.path,
-            searchQuery: "",
-            entries: sortedEntries,
+            rootPath: thread.workingDirectory.path,
+            searchQuery: searchQuery,
+            indexedEntryCount: entries.count,
+            entries: browseResult.entries,
             visibleEntries: visibleResult.entries,
+            isBrowseEntryLimitApplied: browseResult.isLimitApplied,
             isVisibleEntryLimitApplied: visibleResult.isLimitApplied,
-            metadata: cachedResult?.metadata ?? fileIndexMetadataByThreadID[selectedThread.id]
+            isIndexing: isIndexing,
+            metadata: metadata,
+            errorMessage: nil
         )
         updateSelectedFileAfterVisibleEntriesChanged()
+    }
+
+    private func browseFileEntries(
+        for threadID: UUID,
+        entries: [FileBrowserEntry],
+        cacheKeyValue: String?,
+        allowCached: Bool
+    ) -> (entries: [FileBrowserEntry], isLimitApplied: Bool) {
+        let presentationCacheKey = cacheKeyValue ?? "thread:\(threadID.uuidString)"
+        if allowCached,
+            let cached = fileBrowserPresentationByThreadID[threadID],
+            cached.cacheKey == presentationCacheKey,
+            cached.sourceEntryCount == entries.count
+        {
+            return (cached.entries, cached.entries.count < entries.count)
+        }
+
+        let browseEntries = Self.browseFileEntries(from: entries)
+        fileBrowserPresentationByThreadID[threadID] = FileBrowserPresentationCacheEntry(
+            cacheKey: presentationCacheKey,
+            sourceEntryCount: entries.count,
+            entries: browseEntries
+        )
+        return (browseEntries, browseEntries.count < entries.count)
     }
 
     private func updateSelectedFileAfterVisibleEntriesChanged() {
@@ -2316,23 +2381,34 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         entries.sorted(by: FileBrowserTreeBuilder.sortEntriesForTree)
     }
 
+    private static func browseFileEntries(from entries: [FileBrowserEntry]) -> [FileBrowserEntry] {
+        if entries.count > FileBrowserPresentationLimits.maxBrowseEntries {
+            return FileBrowserTreeBuilder.presentationEntries(
+                from: entries,
+                limit: FileBrowserPresentationLimits.maxBrowseEntries
+            )
+        }
+        return publishedTreeEntries(from: entries)
+    }
+
     private static func fileBrowserVisibleLimit(for query: String) -> Int {
         query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? .max
+            ? FileBrowserPresentationLimits.maxBrowseEntries
             : FileBrowserPresentationLimits.maxSearchResults
     }
 
     private static func visibleFileEntries(
-        sortedEntries: [FileBrowserEntry],
+        browseEntries: [FileBrowserEntry],
         originalEntries: [FileBrowserEntry],
+        browseLimitApplied: Bool,
         query: String,
         limit: Int
     ) -> FuzzyFileMatcher.Result {
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return FuzzyFileMatcher.Result(
-                entries: sortedEntries,
+                entries: browseEntries,
                 totalMatches: originalEntries.count,
-                isLimitApplied: false
+                isLimitApplied: browseLimitApplied
             )
         }
         return FuzzyFileMatcher.rankedResult(originalEntries, query: query, limit: limit)

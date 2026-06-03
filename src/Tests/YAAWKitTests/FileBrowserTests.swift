@@ -430,6 +430,50 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(model.fileBrowserState.metadata?.cacheKey, cacheKey.value)
     }
 
+    func testWarmThreadSwitchUsesBoundedCachedBrowseAndFullSearch() throws {
+        let fixture = AppModelFixtureForSharedFiles()
+        let store = fixture.store
+        let cacheKey = FileIndexCacheKey(
+            root: fixture.root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
+        let targetPath = "zz-special/warm-target.swift"
+        let entries = Self.largeSyntheticEntries(count: 12_000) + [
+            FileBrowserEntry(relativePath: targetPath, isDirectory: false)
+        ]
+        store.upsertCachedFileIndex(
+            CachedFileIndex(
+                metadata: FileIndexMetadata(
+                    threadID: fixture.firstThreadID,
+                    cacheKey: cacheKey.value,
+                    rootPath: cacheKey.rootPath,
+                    gitIdentity: cacheKey.gitIdentity,
+                    ignoreRulesFingerprint: cacheKey.ignoreRulesFingerprint,
+                    schemaVersion: cacheKey.schemaVersion,
+                    indexedAt: Date(timeIntervalSince1970: 42),
+                    fileCount: entries.count,
+                    ignoredDirectoryCount: 0
+                ),
+                entries: entries
+            )
+        )
+        let model = AppModel(store: store, fileIndexer: DelayedFileIndexer())
+
+        model.selectThread(id: fixture.secondThreadID)
+
+        XCTAssertEqual(model.fileBrowserState.indexedEntryCount, entries.count)
+        XCTAssertLessThan(model.fileBrowserState.entries.count, entries.count)
+        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
+
+        model.updateFileSearchQuery("warm-target")
+
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.map(\.relativePath), [targetPath])
+
+        model.selectThread(id: fixture.firstThreadID)
+
+        XCTAssertEqual(model.fileBrowserState.indexedEntryCount, entries.count)
+        XCTAssertLessThan(model.fileBrowserState.entries.count, entries.count)
+        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
+    }
+
     func testAppModelDeduplicatesSameThreadIndexRefreshes() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
@@ -453,7 +497,7 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(model.fileBrowserState.metadata?.fileCount, 1)
     }
 
-    func testAppModelPublishesEntireLargeIndexAndSearchesAcrossIt() throws {
+    func testAppModelBoundsLargeBrowseIndexAndSearchesAcrossFullIndex() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
         let recorder = RecordingDiagnosticEventRecorder()
@@ -484,9 +528,11 @@ final class FileBrowserTests: XCTestCase {
                 ))
         )
 
-        XCTAssertEqual(model.fileBrowserState.entries.count, allEntries.count)
-        XCTAssertTrue(model.fileBrowserState.entries.contains { $0.relativePath == targetPath })
-        XCTAssertFalse(model.fileBrowserState.isVisibleEntryLimitApplied)
+        XCTAssertEqual(model.fileBrowserState.indexedEntryCount, allEntries.count)
+        XCTAssertLessThan(model.fileBrowserState.entries.count, allEntries.count)
+        XCTAssertLessThan(model.fileBrowserState.visibleEntries.count, allEntries.count)
+        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
+        XCTAssertTrue(model.fileBrowserState.isVisibleEntryLimitApplied)
 
         model.updateFileSearchQuery("needle-target")
 
@@ -498,13 +544,13 @@ final class FileBrowserTests: XCTestCase {
         model.selectAdjacentFile(direction: .down)
         XCTAssertEqual(model.selectedFileRelativePath, adjacentTargetPath)
         model.updateFileSearchQuery("")
-        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, allEntries.count)
-        XCTAssertFalse(model.fileBrowserState.isVisibleEntryLimitApplied)
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
+        XCTAssertTrue(model.fileBrowserState.isVisibleEntryLimitApplied)
         XCTAssertTrue(recorder.events.contains { $0.name == "file_index_completed" })
         XCTAssertTrue(recorder.events.contains { $0.name == "file_browser_search_completed" })
     }
 
-    func testClearingLargeIndexSearchRestoresFullBrowseList() throws {
+    func testClearingLargeIndexSearchRestoresBoundedBrowseList() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
         let model = AppModel(store: fixture.store, fileIndexer: indexer)
@@ -532,8 +578,10 @@ final class FileBrowserTests: XCTestCase {
 
         model.updateFileSearchQuery("")
 
-        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, entries.count)
-        XCTAssertFalse(model.fileBrowserState.isVisibleEntryLimitApplied)
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
+        XCTAssertLessThan(model.fileBrowserState.visibleEntries.count, entries.count)
+        XCTAssertTrue(model.fileBrowserState.isVisibleEntryLimitApplied)
+        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
     }
 
     func testAppModelPublishesFilesWhenLargeCachedIndexStartsWithDirectories() throws {
@@ -558,10 +606,11 @@ final class FileBrowserTests: XCTestCase {
                 ))
         )
 
-        XCTAssertEqual(model.fileBrowserState.entries.count, entries.count)
-        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, entries.count)
+        XCTAssertLessThan(model.fileBrowserState.entries.count, entries.count)
+        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
         XCTAssertTrue(model.fileBrowserState.entries.contains { !$0.isDirectory })
         XCTAssertTrue(model.fileBrowserState.visibleEntries.contains { !$0.isDirectory })
+        XCTAssertTrue(model.fileBrowserState.isBrowseEntryLimitApplied)
         XCTAssertNotNil(model.selectedFileRelativePath)
     }
 
