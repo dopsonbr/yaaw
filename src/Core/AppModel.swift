@@ -1569,6 +1569,30 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
 
     public func setExpandedFolders(_ folders: Set<String>, forThreadID id: UUID) {
         expandedFoldersByThreadID[id] = folders
+        // Watch the newly expanded directories so files created inside a folder you've
+        // opened surface automatically.
+        if id == selectedThreadID, let thread = selectedThread,
+            isExistingDirectory(thread.workingDirectory)
+        {
+            updateFileBrowserDirectoryWatch(for: thread)
+        }
+    }
+
+    /// Watches the working directory plus the currently-expanded directories. A new file is
+    /// only visible when its parent is the root or is expanded, so this is exactly the set
+    /// where a new entry should appear; the debounced callback triggers a refresh.
+    private func updateFileBrowserDirectoryWatch(for thread: AgentThread) {
+        var directories: Set<String> = [thread.workingDirectory.standardizedFileURL.path]
+        for relativePath in expandedFoldersByThreadID[thread.id] ?? [] {
+            let url = thread.workingDirectory.appendingPathComponent(relativePath)
+                .standardizedFileURL
+            if isExistingDirectory(url) {
+                directories.insert(url.path)
+            }
+        }
+        fileIndexDirectoryWatcher.watch(directories: directories) { [weak self] in
+            self?.refreshSelectedFileBrowser()
+        }
     }
 
     /// Sets the published selection and records it as the selected thread's remembered file
@@ -2336,6 +2360,22 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// After a full reindex re-prunes ignore-listed directories, re-load the ones the user
+    /// had expanded so they keep their contents and surface any newly created files. The
+    /// indexSubtree walk is recursive, so re-loading a top-level pruned directory (e.g.
+    /// `worktrees`) also refills any nested expansions beneath it.
+    private func reloadExpandedPrunedSubtrees(threadID: UUID) {
+        guard selectedThreadID == threadID,
+            let entries = fileBrowserEntriesByThreadID[threadID]
+        else { return }
+        let expanded = expandedFoldersByThreadID[threadID] ?? []
+        guard !expanded.isEmpty else { return }
+        for entry in entries
+        where entry.isDirectory && entry.isPruned && expanded.contains(entry.relativePath) {
+            expandPrunedDirectory(relativePath: entry.relativePath)
+        }
+    }
+
     private func finishSubtreeExpansion(
         threadID: UUID,
         relativePath: String,
@@ -2420,9 +2460,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             )
             return
         }
-        fileIndexDirectoryWatcher.watch(root: thread.workingDirectory) { [weak self] in
-            self?.refreshSelectedFileBrowser()
-        }
+        updateFileBrowserDirectoryWatch(for: thread)
         let cacheKey = fileIndexCacheCoordinator.cacheKey(
             root: thread.workingDirectory,
             ignoreRules: configuration.ignoreRules
@@ -2472,8 +2510,9 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         result: Result<FileIndexResult, Error>
     ) {
         guard latestFileBrowserRequestIDByThreadID[threadID] == requestID else { return }
-        // A fresh full index re-collapses pruned directories, so any in-flight or
-        // remembered lazy-expand state for this thread no longer applies.
+        // A fresh full index re-collapses pruned directories. Any in-flight lazy-expand for
+        // this thread is superseded; we re-load currently-expanded pruned subtrees below so
+        // they keep their contents (and pick up new files).
         pendingSubtreeLoadsByThreadID.removeValue(forKey: threadID)
         switch result {
         case .success(let result):
@@ -2489,6 +2528,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
                     isIndexing: false,
                     allowCachedPresentation: false
                 )
+                reloadExpandedPrunedSubtrees(threadID: threadID)
             } else {
                 fileBrowserEntriesByThreadID[threadID] = result.entries
                 fileBrowserPresentationByThreadID.removeValue(forKey: threadID)

@@ -804,6 +804,68 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(model.fileBrowserState.entries.contains(needle))
     }
 
+    func testRefreshReloadsExpandedPrunedSubtreesToSurfaceNewFiles() throws {
+        let fixture = AppModelFixtureForFiles()
+        let indexer = ManualFileIndexer()
+        let model = AppModel(store: fixture.store, fileIndexer: indexer)
+        let pruned = FileBrowserEntry(relativePath: "worktrees", isDirectory: true, isPruned: true)
+        let readme = FileBrowserEntry(relativePath: "README.md", isDirectory: false)
+
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 0,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    entries: [readme, pruned])))
+
+        // User expands worktrees: the view records the expansion and requests the lazy load.
+        model.setExpandedFolders(["worktrees"], forThreadID: fixture.firstThreadID)
+        model.expandPrunedDirectory(relativePath: "worktrees")
+        XCTAssertEqual(indexer.subtreeRequestCount, 1)
+        indexer.completeSubtreeRequest(
+            at: 0,
+            result: .success(
+                Self.subtreeResult(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    prunedPath: "worktrees", childFile: "worktrees/wt1/old.swift")))
+        XCTAssertTrue(
+            model.fileBrowserState.entries.contains { $0.relativePath == "worktrees/wt1/old.swift" })
+
+        // A filesystem change forces a full reindex that re-prunes worktrees...
+        model.refreshSelectedFileBrowser()
+        indexer.completeRequest(
+            at: 1,
+            result: .success(
+                indexer.result(
+                    threadID: fixture.firstThreadID, root: fixture.firstRoot,
+                    entries: [readme, pruned])))
+
+        // ...and the expanded worktrees subtree is automatically re-loaded so a file created
+        // inside it after expansion shows up without manual re-expansion.
+        XCTAssertEqual(indexer.subtreeRequestCount, 2)
+        let newFile = FileBrowserEntry(
+            relativePath: "worktrees/wt1/new.swift", isDirectory: false)
+        indexer.completeSubtreeRequest(
+            at: 1,
+            result: .success(
+                FileIndexResult(
+                    entries: [
+                        FileBrowserEntry(
+                            relativePath: "worktrees", isDirectory: true, isPruned: false),
+                        FileBrowserEntry(
+                            relativePath: "worktrees/wt1/old.swift", isDirectory: false),
+                        newFile,
+                    ],
+                    metadata: FileIndexMetadata(
+                        threadID: fixture.firstThreadID,
+                        rootPath: fixture.firstRoot.path,
+                        indexedAt: Date(timeIntervalSince1970: 9),
+                        fileCount: 3,
+                        ignoredDirectoryCount: 0))))
+        XCTAssertTrue(model.fileBrowserState.entries.contains(newFile))
+    }
+
     func testAppModelPublishesFullBrowseIndexAndSearchesAcrossFullIndex() throws {
         let fixture = AppModelFixtureForFiles()
         let indexer = ManualFileIndexer()
