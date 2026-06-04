@@ -113,6 +113,52 @@ final class IsolatedToolProtocolTests: XCTestCase {
         XCTAssertNil(IsolatedTerminalLaunch.from(payload: payload))
     }
 
+    func testIsolatedTerminalLaunchFromAgentPTYRequest() {
+        let descriptor = AgentTerminalLaunchDescriptor(
+            command: ["codex", "--resume"],
+            environment: ["YAAW_EVENT_LOG": "/tmp/e.log", "TERM": "xterm-256color"],
+            captureLogURL: URL(fileURLWithPath: "/tmp/capture/abc.log"),
+            captureLogMaximumBytes: 4096,
+            startupInput: "go\n"
+        )
+        let request = TerminalLaunchRequest(
+            role: .project(threadID: UUID()),
+            title: "Agent",
+            workingDirectory: URL(fileURLWithPath: "/Users/me/project"),
+            command: ["codex", "--resume"],
+            backend: .agentPTY(descriptor),
+            agentCLI: .codex
+        )
+
+        let launch = IsolatedTerminalLaunch(request: request)
+        XCTAssertEqual(launch.command, ["codex", "--resume"])
+        XCTAssertEqual(launch.environment["YAAW_EVENT_LOG"], "/tmp/e.log")
+        XCTAssertEqual(launch.workingDirectory, "/Users/me/project")
+        XCTAssertEqual(launch.captureLogPath, "/tmp/capture/abc.log")
+        XCTAssertEqual(launch.captureLogMaximumBytes, 4096)
+        XCTAssertEqual(launch.startupInput, "go\n")
+        XCTAssertEqual(launch.agentCLI, "codex")
+    }
+
+    func testIsolatedTerminalLaunchFromExecRequest() {
+        let request = TerminalLaunchRequest(
+            role: .bottom(threadID: UUID()),
+            title: "Bottom Terminal",
+            workingDirectory: URL(fileURLWithPath: "/work"),
+            command: ["/bin/zsh", "-il"],
+            backend: .exec
+        )
+
+        let launch = IsolatedTerminalLaunch(request: request)
+        XCTAssertEqual(launch.command, ["/bin/zsh", "-il"])
+        // Empty environment signals the helper to inherit its own (the app's) env.
+        XCTAssertTrue(launch.environment.isEmpty)
+        XCTAssertEqual(launch.workingDirectory, "/work")
+        XCTAssertNil(launch.captureLogPath)
+        XCTAssertNil(launch.captureLogMaximumBytes)
+        XCTAssertNil(launch.startupInput)
+    }
+
     func testRuntimeReducerTracksTerminalExit() {
         var snapshot = IsolatedToolRuntimeSnapshot()
         snapshot = IsolatedToolRuntimeReducer.reduce(snapshot, action: .launch)

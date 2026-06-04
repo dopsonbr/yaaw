@@ -231,11 +231,12 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     private func setSurfaceVisible(_ visible: Bool) {
         guard let window else { return }
-        // Keep the surface visible while the user is interacting with this helper
-        // window: clicking it makes it key, which deactivates the main app, which
-        // makes the parent's viewport reporter report the pane as not-visible.
-        // Hiding then would yank the terminal out from under the user.
-        if !visible && window.isKeyWindow {
+        // Keep the surface visible while the user is interacting with our process
+        // cluster (the main app or any terminal/tool helper). Clicking a helper
+        // window deactivates the main app, which makes the parent's viewport
+        // reporter report the pane as not-visible; without this guard, focusing
+        // one terminal would hide its siblings in a split view.
+        if !visible && Self.isClusterFrontmost() {
             return
         }
         guard visible != isSurfaceVisible else { return }
@@ -248,6 +249,15 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             terminalView?.setSurfaceVisible(false)
             window.orderOut(nil)
         }
+    }
+
+    /// True when the frontmost app is the main app or one of its helper
+    /// processes — i.e. the user is interacting with our window cluster.
+    private static func isClusterFrontmost() -> Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
+        let pid = front.processIdentifier
+        if pid == getpid() || pid == getppid() { return true }
+        return front.executableURL?.lastPathComponent == "YAAWToolHost"
     }
 
     private func startWatchdog() {
@@ -478,6 +488,15 @@ private final class TerminalHostController {
         let command = launch.command.isEmpty ? ["/bin/zsh", "-il"] : launch.command
         let workingDirectory = URL(fileURLWithPath: launch.workingDirectory)
 
+        // An empty environment means "inherit" (used for plain exec terminals
+        // like the bottom shell / nvim / lazygit); agent PTY launches carry their
+        // full environment. Ensure TERM is always set for the PTY.
+        var environment = launch.environment.isEmpty
+            ? ProcessInfo.processInfo.environment : launch.environment
+        if environment["TERM"] == nil {
+            environment["TERM"] = "xterm-256color"
+        }
+
         captureWriter = launch.captureLogPath.map { path in
             AgentTerminalCaptureWriter(
                 url: URL(fileURLWithPath: path),
@@ -516,7 +535,7 @@ private final class TerminalHostController {
         let process = AgentTerminalProcess(
             command: command,
             workingDirectory: workingDirectory,
-            environment: launch.environment,
+            environment: environment,
             backpressureGate: gate,
             output: { data in
                 captureWriter?.append(data)

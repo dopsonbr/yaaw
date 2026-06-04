@@ -20,11 +20,11 @@ struct TerminalPlaceholderView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let request {
-                if useIsolatedTerminal, case .agentPTY(let descriptor) = request.backend {
+                if useIsolatedTerminal {
                     IsolatedAgentTerminalView(
                         runtime: terminalRuntime,
                         role: request.role,
-                        launch: Self.launch(for: request, descriptor: descriptor),
+                        launch: IsolatedTerminalLaunch(request: request),
                         fonts: fonts
                     )
                     .accessibilityLabel("\(request.title) terminal")
@@ -49,21 +49,6 @@ struct TerminalPlaceholderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(dracula(.background))
-    }
-
-    private static func launch(
-        for request: TerminalLaunchRequest,
-        descriptor: AgentTerminalLaunchDescriptor
-    ) -> IsolatedTerminalLaunch {
-        IsolatedTerminalLaunch(
-            command: descriptor.command,
-            environment: descriptor.environment,
-            workingDirectory: request.workingDirectory.path,
-            captureLogPath: descriptor.captureLogURL?.path,
-            captureLogMaximumBytes: Int(descriptor.captureLogMaximumBytes),
-            startupInput: descriptor.startupInput,
-            agentCLI: request.agentCLI?.rawValue
-        )
     }
 }
 
@@ -147,6 +132,7 @@ struct BottomTerminalBar: View {
     let isExpanded: Bool
     let request: TerminalLaunchRequest?
     let fonts: FontSettings
+    var useIsolatedTerminal: Bool = false
     let onToggle: () -> Void
     let onAppearExpanded: () -> Void
 
@@ -172,7 +158,8 @@ struct BottomTerminalBar: View {
                 TerminalPlaceholderView(
                     request: request,
                     unavailableMessage: "Terminal unavailable for the selected thread",
-                    fonts: fonts
+                    fonts: fonts,
+                    useIsolatedTerminal: useIsolatedTerminal
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear(perform: onAppearExpanded)

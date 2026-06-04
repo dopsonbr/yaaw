@@ -181,6 +181,7 @@ struct RootView: View {
                 isExpanded: model.isBottomTerminalExpanded,
                 request: selectedBottomTerminalRequest,
                 fonts: model.configuration.fonts,
+                useIsolatedTerminal: model.configuration.agent.isolatedTerminalsEnabled,
                 onToggle: model.toggleBottomTerminal,
                 onAppearExpanded: {
                     model.activateSelectedBottomTerminal()
@@ -2844,7 +2845,8 @@ private struct RightPanelView: View {
                 TerminalPlaceholderView(
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "nvim"),
-                    fonts: model.configuration.fonts
+                    fonts: model.configuration.fonts,
+                    useIsolatedTerminal: model.configuration.agent.isolatedTerminalsEnabled
                 )
                 .id(
                     "\(model.selectedThreadID?.uuidString ?? "none")-\(model.selectedRightPanelTab.id)"
@@ -2857,7 +2859,8 @@ private struct RightPanelView: View {
                 TerminalPlaceholderView(
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "lazygit"),
-                    fonts: model.configuration.fonts
+                    fonts: model.configuration.fonts,
+                    useIsolatedTerminal: model.configuration.agent.isolatedTerminalsEnabled
                 )
                 .id(model.selectedThreadID)
                 .onAppear {

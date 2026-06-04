@@ -188,6 +188,33 @@ def scenario_flood(binary):
     h.kill()
 
 
+def scenario_exec_env_inheritance(binary):
+    print("\nD. Plain exec terminal inherits a usable environment")
+    cap = tmp_capture("exec")
+    marker = "PATHSEEN"
+    # Empty environment in the launch -> helper must inherit its own env so the
+    # shell has a real PATH (this is how bottom/nvim/lazygit terminals launch).
+    h = Helper(binary, "val-exec")
+    h.send("launchTerminal", {
+        "command": json.dumps(
+            ["/bin/sh", "-lc", "[ -n \"$PATH\" ] && printf '%s\\n' " + marker + "; exit 0"]),
+        "environment": json.dumps({}),  # empty -> inherit
+        "workingDirectory": "/tmp",
+        "captureLogPath": cap,
+    })
+    ready = h.wait_for("ready", 8)
+    h.start_surface()
+    h.wait_for("exited", 12)
+    time.sleep(0.3)
+    cap_text = read_file(cap)
+    check("exec helper ready", ready)
+    check("inherited env gave the shell a PATH", marker in cap_text, "%d bytes" % len(cap_text))
+    h.shutdown()
+    time.sleep(0.4)
+    check("exec helper exits cleanly", not h.alive())
+    h.kill()
+
+
 def scenario_independent_kill(binary):
     print("\nC. Independent kill (one helper down, sibling unaffected)")
     cap_a, cap_b = tmp_capture("killA"), tmp_capture("killB")
@@ -221,6 +248,7 @@ def main():
     print("helper:", binary)
     scenario_lifecycle(binary)
     scenario_flood(binary)
+    scenario_exec_env_inheritance(binary)
     scenario_independent_kill(binary)
     passed = sum(1 for r in results if r)
     print("\n==== %d/%d checks passed ====" % (passed, len(results)))

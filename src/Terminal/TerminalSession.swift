@@ -71,6 +71,37 @@ public enum TerminalLaunchBackend: Equatable, Sendable {
     case agentPTY(AgentTerminalLaunchDescriptor)
 }
 
+extension IsolatedTerminalLaunch {
+    /// Maps a terminal launch request to the payload for the isolated helper.
+    /// `agentPTY` carries the full descriptor (command/env/capture log/startup
+    /// input); `exec` carries the bare command and an empty environment, which
+    /// signals the helper to inherit its own (the app's) environment.
+    public init(request: TerminalLaunchRequest) {
+        switch request.backend {
+        case .agentPTY(let descriptor):
+            self.init(
+                command: descriptor.command,
+                environment: descriptor.environment,
+                workingDirectory: request.workingDirectory.path,
+                captureLogPath: descriptor.captureLogURL?.path,
+                captureLogMaximumBytes: Int(descriptor.captureLogMaximumBytes),
+                startupInput: descriptor.startupInput,
+                agentCLI: request.agentCLI?.rawValue
+            )
+        case .exec:
+            self.init(
+                command: request.command,
+                environment: [:],
+                workingDirectory: request.workingDirectory.path,
+                captureLogPath: nil,
+                captureLogMaximumBytes: nil,
+                startupInput: nil,
+                agentCLI: request.agentCLI?.rawValue
+            )
+        }
+    }
+}
+
 public struct AgentTerminalLaunchDescriptor: Equatable, Sendable {
     public var command: [String]
     public var environment: [String: String]
