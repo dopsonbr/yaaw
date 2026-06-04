@@ -145,7 +145,7 @@ public struct AgentSettings: Codable, Equatable, Sendable {
     public init(
         default: AgentCLIKind = .codex,
         launchDefaults: AgentLaunchDefaultsSettings = AgentLaunchDefaultsSettings(),
-        isolatedTerminalsEnabled: Bool = false
+        isolatedTerminalsEnabled: Bool = true
     ) {
         self.default = `default`
         self.launchDefaults = launchDefaults
@@ -161,7 +161,7 @@ public struct AgentSettings: Codable, Equatable, Sendable {
                 forKey: .launchDefaults
             ) ?? AgentLaunchDefaultsSettings()
         self.isolatedTerminalsEnabled =
-            try container.decodeIfPresent(Bool.self, forKey: .isolatedTerminalsEnabled) ?? false
+            try container.decodeIfPresent(Bool.self, forKey: .isolatedTerminalsEnabled) ?? true
     }
 
     fileprivate func validated() -> AgentSettings {
