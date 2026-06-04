@@ -3,8 +3,8 @@ import XCTest
 @testable import YAAWKit
 
 final class TerminalDriverTests: XCTestCase {
-    func testOutputPumpBatchesAdjacentOutputOnMainActor() async {
-        let recorder = await MainActor.run { TerminalPumpRecorder() }
+    func testOutputPumpBatchesAdjacentOutput() async {
+        let recorder = TerminalPumpRecorder()
         let outputDelivered = expectation(description: "output delivered")
         let pump = AgentTerminalOutputPump(
             receive: { data in
@@ -18,12 +18,11 @@ final class TerminalDriverTests: XCTestCase {
         pump.enqueueOutput(Data("second".utf8))
 
         await fulfillment(of: [outputDelivered], timeout: 1)
-        let events = await MainActor.run { recorder.events }
-        XCTAssertEqual(events, ["output:firstsecond"])
+        XCTAssertEqual(recorder.snapshot, ["output:firstsecond"])
     }
 
     func testOutputPumpDeliversFinishAfterPendingOutput() async {
-        let recorder = await MainActor.run { TerminalPumpRecorder() }
+        let recorder = TerminalPumpRecorder()
         let finishDelivered = expectation(description: "finish delivered")
         let pump = AgentTerminalOutputPump(
             receive: { data in
@@ -39,12 +38,11 @@ final class TerminalDriverTests: XCTestCase {
         pump.enqueueFinish(exitCode: 7, runtimeMilliseconds: 42)
 
         await fulfillment(of: [finishDelivered], timeout: 1)
-        let events = await MainActor.run { recorder.events }
-        XCTAssertEqual(events, ["output:final output", "finish:7:42"])
+        XCTAssertEqual(recorder.snapshot, ["output:final output", "finish:7:42"])
     }
 
     func testOutputPumpChunksLargeOutputInOrder() async {
-        let recorder = await MainActor.run { TerminalPumpRecorder() }
+        let recorder = TerminalPumpRecorder()
         let outputDelivered = expectation(description: "all output chunks delivered")
         outputDelivered.expectedFulfillmentCount = 3
         let pump = AgentTerminalOutputPump(
@@ -59,12 +57,11 @@ final class TerminalDriverTests: XCTestCase {
         pump.enqueueOutput(Data("abcdefghijk".utf8))
 
         await fulfillment(of: [outputDelivered], timeout: 1)
-        let events = await MainActor.run { recorder.events }
-        XCTAssertEqual(events, ["output:abcde", "output:fghij", "output:k"])
+        XCTAssertEqual(recorder.snapshot, ["output:abcde", "output:fghij", "output:k"])
     }
 
     func testOutputPumpDelaysFinishUntilChunkedOutputCompletes() async {
-        let recorder = await MainActor.run { TerminalPumpRecorder() }
+        let recorder = TerminalPumpRecorder()
         let finishDelivered = expectation(description: "finish delivered")
         let pump = AgentTerminalOutputPump(
             maximumDeliveryBytes: 4,
@@ -81,8 +78,7 @@ final class TerminalDriverTests: XCTestCase {
         pump.enqueueFinish(exitCode: 9, runtimeMilliseconds: 12)
 
         await fulfillment(of: [finishDelivered], timeout: 1)
-        let events = await MainActor.run { recorder.events }
-        XCTAssertEqual(events, ["output:abcd", "output:ef", "finish:9:12"])
+        XCTAssertEqual(recorder.snapshot, ["output:abcd", "output:ef", "finish:9:12"])
     }
 
     func testOutputPumpRecordsSlowDeliveryDiagnostics() async {
@@ -104,6 +100,32 @@ final class TerminalDriverTests: XCTestCase {
         XCTAssertEqual(diagnostics.snapshot.first?.category, "Terminal")
         XCTAssertEqual(diagnostics.snapshot.first?.name, "terminal_output_delivery_slow")
         XCTAssertEqual(diagnostics.snapshot.first?.metadata["bytes"], "8")
+    }
+
+    func testOutputPumpDoesNotBlockMainActorWhenReceiveBlocks() async {
+        let diagnostics = LockedDiagnosticRecorder()
+        let receiveStarted = expectation(description: "receive started")
+        let mainActorReached = expectation(description: "main actor reached")
+        let releaseReceive = DispatchSemaphore(value: 0)
+        let pump = AgentTerminalOutputPump(
+            blockedDeliveryThreshold: 0.05,
+            diagnostics: diagnostics,
+            receive: { _ in
+                receiveStarted.fulfill()
+                _ = releaseReceive.wait(timeout: .now() + 1)
+            },
+            finish: { _, _ in }
+        )
+
+        pump.enqueueOutput(Data("blocked".utf8))
+
+        await fulfillment(of: [receiveStarted], timeout: 1)
+        Task { @MainActor in
+            mainActorReached.fulfill()
+        }
+        await fulfillment(of: [mainActorReached], timeout: 1)
+        XCTAssertTrue(diagnostics.waitUntilName("terminal_output_delivery_blocked"))
+        releaseReceive.signal()
     }
 
     func testOperationDriverSerializesOperationsAndSkipsDuplicateResizes() {
@@ -173,12 +195,20 @@ final class TerminalDriverTests: XCTestCase {
     }
 }
 
-@MainActor
-private final class TerminalPumpRecorder {
-    private(set) var events: [String] = []
+private final class TerminalPumpRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [String] = []
+
+    var snapshot: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
 
     func record(_ event: String) {
+        lock.lock()
         events.append(event)
+        lock.unlock()
     }
 }
 
@@ -208,6 +238,7 @@ private final class LockedTerminalDriverEvents: @unchecked Sendable {
         }
         return snapshot.count >= count
     }
+
 }
 
 private final class LockedDiagnosticRecorder: DiagnosticEventRecording, @unchecked Sendable {
@@ -235,5 +266,16 @@ private final class LockedDiagnosticRecorder: DiagnosticEventRecording, @uncheck
             RunLoop.current.run(until: Date().addingTimeInterval(0.01))
         }
         return snapshot.count >= count
+    }
+
+    func waitUntilName(_ name: String, timeout: TimeInterval = 1) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if snapshot.contains(where: { $0.name == name }) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        return snapshot.contains(where: { $0.name == name })
     }
 }
