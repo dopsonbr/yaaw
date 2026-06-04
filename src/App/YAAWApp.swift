@@ -127,6 +127,14 @@ struct YAAWApp: App {
                     }
                 }
 
+                CommandMenu("Debug") {
+                    Button("Toggle Isolated Terminal Spike") {
+                        NotificationCenter.default.post(
+                            name: .yaawToggleTerminalSpike, object: nil)
+                    }
+                    .keyboardShortcut("t", modifiers: [.command, .control])
+                }
+
                 CommandMenu("Project") {
                     ShortcutCommandButton(
                         model: model, action: .newProject, title: "New Project..."

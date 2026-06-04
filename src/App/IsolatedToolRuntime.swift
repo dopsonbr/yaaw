@@ -388,9 +388,7 @@ private final class IsolatedToolHostProcess: @unchecked Sendable {
     }
 
     func send(_ envelope: IsolatedToolEnvelope) throws {
-        let data = try JSONEncoder().encode(envelope)
-        var line = data
-        line.append(0x0A)
+        let line = try JSONEncoder().encode(envelope) + Data([0x0A])
 
         writeLock.lock()
         if writeBroken {

@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import GhosttyTerminal
 import WebKit
 import YAAWKit
 
@@ -12,6 +13,8 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private let cliInstanceID: String
     private var window: NSWindow?
     private var webView: WKWebView?
+    private var terminalView: TerminalView?
+    private var terminalState: TerminalViewState?
     private var currentURLString: String?
     private var hasLaunchedTool = false
     private var isLoadingMarkdownPreview = false
@@ -69,6 +72,8 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         switch envelope.type {
         case "launchTool":
             launchTool()
+        case "launchTerminal":
+            launchTerminal(payload: envelope.payload)
         case "setViewport":
             setViewport(payload: envelope.payload)
         case "show":
@@ -77,6 +82,17 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             setSurfaceVisible(false)
         case "focus":
             window?.makeKeyAndOrderFront(nil)
+            if let terminalView {
+                window?.makeFirstResponder(terminalView)
+            }
+        case "blur":
+            break
+        case "input":
+            sendTerminalInput(payload: envelope.payload)
+        case "resize":
+            terminalView?.fitToSize()
+        case "terminate":
+            NSApp.terminate(nil)
         case "load":
             load(urlString: envelope.payload["urlString"])
         case "goBack":
@@ -114,6 +130,82 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             // silently no-op so the parent surfaces a clear failure state.
             send(type: "error", payload: ["message": "Terminal host is not implemented yet."])
         }
+    }
+
+    // MARK: - Terminal hosting (spike)
+
+    private func launchTerminal(payload: [String: String]) {
+        guard !hasLaunchedTool else {
+            send(type: "ready")
+            return
+        }
+        hasLaunchedTool = true
+        createTerminalWindow(launch: IsolatedTerminalLaunch.from(payload: payload))
+        send(type: "ready")
+    }
+
+    private func createTerminalWindow(launch: IsolatedTerminalLaunch?) {
+        let command = launch.map(\.command).flatMap { $0.isEmpty ? nil : $0 } ?? ["/bin/zsh", "-il"]
+        let workingDirectory =
+            launch?.workingDirectory ?? FileManager.default.homeDirectoryForCurrentUser.path
+
+        var terminalConfiguration = TerminalConfiguration.default.fontSize(13)
+        terminalConfiguration = terminalConfiguration.custom(
+            "command", Self.shellCommandLine(for: command))
+
+        let state = TerminalViewState(terminalConfiguration: terminalConfiguration)
+        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        view.delegate = state
+
+        let options = TerminalSurfaceOptions(
+            backend: .exec,
+            fontSize: 13,
+            workingDirectory: workingDirectory,
+            context: .window
+        )
+        state.configuration = options
+        state.setTerminalConfiguration(terminalConfiguration)
+        view.controller = state.controller
+        view.configuration = options
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = view
+        view.autoresizingMask = [.width, .height]
+        window.backgroundColor = .black
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.orderOut(nil)
+        view.setSurfaceVisible(false)
+        self.window = window
+        self.terminalView = view
+        self.terminalState = state
+    }
+
+    private func sendTerminalInput(payload: [String: String]) {
+        guard let base64 = payload["bytes"],
+            let data = Data(base64Encoded: base64),
+            let text = String(data: data, encoding: .utf8),
+            let terminalState
+        else { return }
+        _ = terminalState.send(text)
+    }
+
+    private static func shellCommandLine(for command: [String]) -> String {
+        command.map { argument in
+            if argument.rangeOfCharacter(
+                from: CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: "\"'\\$`")))
+                == nil
+            {
+                return argument
+            }
+            return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }.joined(separator: " ")
     }
 
     private func createBrowserWindow() {
@@ -154,6 +246,11 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let visible = payload["visible"].flatMap(Bool.init) == true
         visibleLeaseDeadline = visible ? Date().addingTimeInterval(0.6) : nil
         setSurfaceVisible(visible)
+        // Reflow the terminal grid to the new pane size while it stays visible
+        // (setSurfaceVisible only fits on a visibility transition).
+        if visible, terminalView != nil {
+            terminalView?.fitToSize()
+        }
     }
 
     private func setSurfaceVisible(_ visible: Bool) {
@@ -162,7 +259,10 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         isSurfaceVisible = visible
         if visible {
             window.orderFrontRegardless()
+            terminalView?.setSurfaceVisible(true)
+            terminalView?.fitToSize()
         } else {
+            terminalView?.setSurfaceVisible(false)
             window.orderOut(nil)
         }
     }

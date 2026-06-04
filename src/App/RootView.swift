@@ -2644,12 +2644,67 @@ private struct SessionLinkSheet: View {
     }
 }
 
+extension Notification.Name {
+    /// Debug-only: toggles the out-of-process terminal isolation spike overlay.
+    static let yaawToggleTerminalSpike = Notification.Name("yaaw.toggleTerminalSpike")
+}
+
+/// Temporary spike: renders a single agent terminal in an out-of-process helper
+/// (running a plain shell) composited as an overlay window, to validate the
+/// IPC + overlay compositing + keyboard-focus mechanics before the full
+/// per-terminal process isolation work. Triggered via the Debug menu.
+private struct IsolatedTerminalSpikePanel: View {
+    @ObservedObject var runtime: IsolatedToolRuntime
+    let workingDirectory: String
+    private let instanceID = "terminal-spike"
+
+    private var snapshot: IsolatedToolRuntimeSnapshot { runtime.snapshot(for: instanceID) }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black
+
+            IsolatedToolViewportReporter { frame, visible in
+                runtime.terminalSetViewport(instanceID: instanceID, frame: frame, visible: visible)
+            }
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Isolated terminal spike — \(snapshot.phase.rawValue)")
+                if snapshot.phase == .crashed {
+                    Text(snapshot.errorMessage ?? "Helper crashed.")
+                } else if snapshot.phase == .exited {
+                    Text("Helper exited (code \(snapshot.exitCode.map(String.init) ?? "?")).")
+                }
+                Text("Click to type. Resize the window to test tracking.")
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.5))
+            .padding(10)
+            .allowsHitTesting(false)
+        }
+        .onAppear {
+            runtime.ensureTerminalLaunched(
+                instanceID: instanceID,
+                launch: IsolatedTerminalLaunch(
+                    command: ["/bin/zsh", "-il"],
+                    workingDirectory: workingDirectory
+                )
+            )
+        }
+        .onDisappear {
+            runtime.terminalShutdown(instanceID: instanceID)
+        }
+    }
+}
+
 private struct RightPanelView: View {
     @ObservedObject var model: AppModel
     let defaultExternalEditorTool: ExternalOpenToolID?
     let onOpenFileExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
     let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
     @StateObject private var isolatedToolRuntime = IsolatedToolRuntime()
+    @State private var showTerminalSpike = false
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
@@ -2798,6 +2853,17 @@ private struct RightPanelView: View {
             }
         }
         .background(dracula(.background))
+        .overlay {
+            if showTerminalSpike {
+                IsolatedTerminalSpikePanel(
+                    runtime: isolatedToolRuntime,
+                    workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path
+                )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .yaawToggleTerminalSpike)) { _ in
+            showTerminalSpike.toggle()
+        }
         .onAppear {
             syncIsolatedToolVisibility()
         }
