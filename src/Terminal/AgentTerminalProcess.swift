@@ -30,6 +30,7 @@ public final class AgentTerminalProcess: @unchecked Sendable {
     private let outputHandler: OutputHandler
     private let exitHandler: ExitHandler
     private let readQueue: DispatchQueue
+    private let backpressureGate: TerminalBackpressureGate?
     private let lock = NSLock()
 
     private var masterFileDescriptor: Int32 = -1
@@ -41,12 +42,14 @@ public final class AgentTerminalProcess: @unchecked Sendable {
         command: [String],
         workingDirectory: URL,
         environment: [String: String],
+        backpressureGate: TerminalBackpressureGate? = nil,
         output: @escaping OutputHandler,
         onExit: @escaping ExitHandler = { _ in }
     ) {
         self.command = command
         self.workingDirectory = workingDirectory
         self.environment = environment
+        self.backpressureGate = backpressureGate
         self.outputHandler = output
         self.exitHandler = onExit
         self.readQueue = DispatchQueue(
@@ -196,6 +199,9 @@ public final class AgentTerminalProcess: @unchecked Sendable {
         masterFileDescriptor = -1
         lock.unlock()
 
+        // Unblock the read loop if it is parked on backpressure.
+        backpressureGate?.close()
+
         if pid > 0 {
             _ = kill(-pid, SIGHUP)
             _ = kill(pid, SIGHUP)
@@ -214,16 +220,22 @@ public final class AgentTerminalProcess: @unchecked Sendable {
     private func readLoop(masterFileDescriptor fd: Int32, childPID pid: pid_t) {
         var buffer = [UInt8](repeating: 0, count: 16 * 1024)
         while true {
+            // Park before reading when the downstream consumer is saturated, so
+            // the kernel PTY buffer fills and the child's writes block (lossless
+            // backpressure). terminate()/markFinished close the gate to unblock.
+            backpressureGate?.waitUntilReadable()
             let count = buffer.withUnsafeMutableBytes { rawBuffer in
                 Darwin.read(fd, rawBuffer.baseAddress, rawBuffer.count)
             }
             if count > 0 {
+                backpressureGate?.produced(count)
                 outputHandler(Data(buffer.prefix(count)))
             } else {
                 break
             }
         }
 
+        backpressureGate?.close()
         var status: Int32 = 0
         _ = waitpid(pid, &status, 0)
         markFinished(masterFileDescriptor: fd)

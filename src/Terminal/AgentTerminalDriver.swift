@@ -12,6 +12,9 @@ public final class AgentTerminalOutputPump: @unchecked Sendable {
     private let lock = NSLock()
     private let receiveHandler: ReceiveHandler
     private let finishHandler: FinishHandler
+    /// Called after each chunk is delivered, with the delivered byte count.
+    /// Used to drive backpressure (signals the read loop that bytes drained).
+    private let onDelivered: (@Sendable (Int) -> Void)?
     private let diagnostics: DiagnosticEventRecording?
     private let maximumDeliveryBytes: Int
     private let slowDeliveryThreshold: TimeInterval
@@ -29,7 +32,8 @@ public final class AgentTerminalOutputPump: @unchecked Sendable {
         diagnostics: DiagnosticEventRecording? = nil,
         queueLabel: String = "dev.dopsonbr.yaaw.agent-terminal-output.\(UUID().uuidString)",
         receive: @escaping ReceiveHandler,
-        finish: @escaping FinishHandler
+        finish: @escaping FinishHandler,
+        onDelivered: (@Sendable (Int) -> Void)? = nil
     ) {
         self.maximumDeliveryBytes = max(1, maximumDeliveryBytes)
         self.slowDeliveryThreshold = slowDeliveryThreshold
@@ -38,6 +42,7 @@ public final class AgentTerminalOutputPump: @unchecked Sendable {
         self.deliveryQueue = DispatchQueue(label: queueLabel, qos: .userInitiated)
         self.receiveHandler = receive
         self.finishHandler = finish
+        self.onDelivered = onDelivered
     }
 
     public func enqueueOutput(_ data: Data) {
@@ -87,6 +92,7 @@ public final class AgentTerminalOutputPump: @unchecked Sendable {
             let startedAt = Date()
             receiveHandler(data)
             finishDelivery(deliveryID)
+            onDelivered?(data.count)
             recordSlowDeliveryIfNeeded(
                 byteCount: data.count,
                 remainingBytes: remainingBytes,

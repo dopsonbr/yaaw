@@ -641,6 +641,9 @@ private final class ManagedAgentTerminal {
                 )
             }
         )
+        // Lossless backpressure: pause PTY reads when undelivered output piles
+        // up, so a runaway agent can't grow memory without bound.
+        let backpressureGate = TerminalBackpressureGate()
         let outputPump = AgentTerminalOutputPump(
             diagnostics: LoggerDiagnosticEventRecorder.shared,
             receive: { data in
@@ -651,12 +654,16 @@ private final class ManagedAgentTerminal {
                     exitCode: exitCode,
                     runtimeMilliseconds: runtimeMilliseconds
                 )
+            },
+            onDelivered: { [backpressureGate] byteCount in
+                backpressureGate.consumed(byteCount)
             }
         )
         let terminalProcess = AgentTerminalProcess(
             command: launchDescriptor.command,
             workingDirectory: workingDirectory,
             environment: launchDescriptor.environment,
+            backpressureGate: backpressureGate,
             output: { data in
                 captureWriter?.append(data)
                 outputPump.enqueueOutput(data)
