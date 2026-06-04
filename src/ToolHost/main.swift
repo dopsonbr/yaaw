@@ -81,6 +81,9 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case "hide":
             setSurfaceVisible(false)
         case "focus":
+            if terminalView != nil {
+                NSApp.activate(ignoringOtherApps: true)
+            }
             window?.makeKeyAndOrderFront(nil)
             if let terminalView {
                 window?.makeFirstResponder(terminalView)
@@ -168,7 +171,10 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         view.controller = state.controller
         view.configuration = options
 
-        let window = NSWindow(
+        // Borderless NSWindows return canBecomeKey=false by default, which would
+        // prevent the ghostty surface from ever becoming first responder. Use a
+        // subclass that can become key so keyboard input routes to the terminal.
+        let window = TerminalHostWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.borderless],
             backing: .buffered,
@@ -255,6 +261,13 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     private func setSurfaceVisible(_ visible: Bool) {
         guard let window else { return }
+        // Keep the surface visible while the user is interacting with this helper
+        // window: clicking it makes it key, which deactivates the main app, which
+        // makes the parent's viewport reporter report the pane as not-visible.
+        // Hiding then would yank the terminal out from under the user.
+        if !visible && window.isKeyWindow {
+            return
+        }
         guard visible != isSurfaceVisible else { return }
         isSurfaceVisible = visible
         if visible {
@@ -452,6 +465,13 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let nsError = error as NSError
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
+}
+
+/// A borderless window that can still become key/main, so the hosted terminal
+/// surface can become first responder and receive keyboard input.
+private final class TerminalHostWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
 
 private func argumentValue(after flag: String) -> String? {
