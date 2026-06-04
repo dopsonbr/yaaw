@@ -12,14 +12,23 @@ public final class AgentTerminalOutputPump: @unchecked Sendable {
     private let lock = NSLock()
     private let receiveHandler: ReceiveHandler
     private let finishHandler: FinishHandler
+    private let diagnostics: DiagnosticEventRecording?
+    private let maximumDeliveryBytes: Int
+    private let slowDeliveryThreshold: TimeInterval
     private var pendingData = Data()
     private var pendingFinish: FinishEvent?
     private var isFlushScheduled = false
 
     public init(
+        maximumDeliveryBytes: Int = 32 * 1024,
+        slowDeliveryThreshold: TimeInterval = 0.1,
+        diagnostics: DiagnosticEventRecording? = nil,
         receive: @escaping ReceiveHandler,
         finish: @escaping FinishHandler
     ) {
+        self.maximumDeliveryBytes = max(1, maximumDeliveryBytes)
+        self.slowDeliveryThreshold = slowDeliveryThreshold
+        self.diagnostics = diagnostics
         self.receiveHandler = receive
         self.finishHandler = finish
     }
@@ -53,15 +62,25 @@ public final class AgentTerminalOutputPump: @unchecked Sendable {
     @MainActor
     private func flushOnMainActor() {
         lock.lock()
-        let data = pendingData
-        let finish = pendingFinish
-        pendingData.removeAll(keepingCapacity: true)
-        pendingFinish = nil
+        let deliveryByteCount = min(pendingData.count, maximumDeliveryBytes)
+        let data = Data(pendingData.prefix(deliveryByteCount))
+        pendingData.removeFirst(deliveryByteCount)
+        let remainingBytes = pendingData.count
+        let finish = remainingBytes == 0 ? pendingFinish : nil
+        if finish != nil {
+            pendingFinish = nil
+        }
         isFlushScheduled = false
         lock.unlock()
 
         if !data.isEmpty {
+            let startedAt = Date()
             receiveHandler(data)
+            recordSlowDeliveryIfNeeded(
+                byteCount: data.count,
+                remainingBytes: remainingBytes,
+                duration: Date().timeIntervalSince(startedAt)
+            )
         }
         if let finish {
             finishHandler(finish.exitCode, finish.runtimeMilliseconds)
@@ -73,6 +92,23 @@ public final class AgentTerminalOutputPump: @unchecked Sendable {
             scheduleFlushIfNeededLocked()
         }
         lock.unlock()
+    }
+
+    private func recordSlowDeliveryIfNeeded(
+        byteCount: Int,
+        remainingBytes: Int,
+        duration: TimeInterval
+    ) {
+        guard duration >= slowDeliveryThreshold else { return }
+        diagnostics?.record(
+            DiagnosticEvent(
+                category: "Terminal",
+                name: "terminal_output_delivery_slow",
+                metadata: [
+                    "bytes": "\(byteCount)",
+                    "duration_ms": "\(Int((duration * 1000).rounded()))",
+                    "remaining_bytes": "\(remainingBytes)",
+                ]))
     }
 }
 

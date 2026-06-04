@@ -642,6 +642,7 @@ private final class ManagedAgentTerminal {
             }
         )
         let outputPump = AgentTerminalOutputPump(
+            diagnostics: LoggerDiagnosticEventRecorder.shared,
             receive: { data in
                 terminalSession.receive(data)
             },
