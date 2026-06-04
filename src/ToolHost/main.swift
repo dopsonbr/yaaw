@@ -7,14 +7,13 @@ import YAAWKit
 
 @MainActor
 final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
-    private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let cliToolKind: IsolatedToolKind
     private let cliInstanceID: String
     private var window: NSWindow?
     private var webView: WKWebView?
-    private var terminalView: TerminalView?
-    private var terminalState: TerminalViewState?
+    private var terminalController: TerminalHostController?
+    private var terminalView: TerminalView? { terminalController?.view }
     private var currentURLString: String?
     private var hasLaunchedTool = false
     private var isLoadingMarkdownPreview = false
@@ -95,7 +94,7 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case "resize":
             terminalView?.fitToSize()
         case "terminate":
-            NSApp.terminate(nil)
+            terminalController?.terminate()
         case "load":
             load(urlString: envelope.payload["urlString"])
         case "goBack":
@@ -135,41 +134,26 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    // MARK: - Terminal hosting (spike)
+    // MARK: - Terminal hosting
 
     private func launchTerminal(payload: [String: String]) {
         guard !hasLaunchedTool else {
             send(type: "ready")
             return
         }
+        guard let launch = IsolatedTerminalLaunch.from(payload: payload) else {
+            send(type: "error", payload: ["message": "Terminal host received an invalid launch."])
+            return
+        }
         hasLaunchedTool = true
-        createTerminalWindow(launch: IsolatedTerminalLaunch.from(payload: payload))
-        send(type: "ready")
-    }
 
-    private func createTerminalWindow(launch: IsolatedTerminalLaunch?) {
-        let command = launch.map(\.command).flatMap { $0.isEmpty ? nil : $0 } ?? ["/bin/zsh", "-il"]
-        let workingDirectory =
-            launch?.workingDirectory ?? FileManager.default.homeDirectoryForCurrentUser.path
-
-        var terminalConfiguration = TerminalConfiguration.default.fontSize(13)
-        terminalConfiguration = terminalConfiguration.custom(
-            "command", Self.shellCommandLine(for: command))
-
-        let state = TerminalViewState(terminalConfiguration: terminalConfiguration)
-        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        view.delegate = state
-
-        let options = TerminalSurfaceOptions(
-            backend: .exec,
-            fontSize: 13,
-            workingDirectory: workingDirectory,
-            context: .window
-        )
-        state.configuration = options
-        state.setTerminalConfiguration(terminalConfiguration)
-        view.controller = state.controller
-        view.configuration = options
+        let controller = TerminalHostController(launch: launch) {
+            [cliToolKind, cliInstanceID] type, payload in
+            writeToolHostEnvelope(
+                IsolatedToolEnvelope(
+                    toolKind: cliToolKind, instanceID: cliInstanceID, type: type, payload: payload))
+        }
+        terminalController = controller
 
         // Borderless NSWindows return canBecomeKey=false by default, which would
         // prevent the ghostty surface from ever becoming first responder. Use a
@@ -180,38 +164,24 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             backing: .buffered,
             defer: false
         )
-        window.contentView = view
-        view.autoresizingMask = [.width, .height]
+        window.contentView = controller.view
+        controller.view.autoresizingMask = [.width, .height]
         window.backgroundColor = .black
         window.isReleasedWhenClosed = false
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.orderOut(nil)
-        view.setSurfaceVisible(false)
+        controller.view.setSurfaceVisible(false)
         self.window = window
-        self.terminalView = view
-        self.terminalState = state
+
+        send(type: "ready")
     }
 
     private func sendTerminalInput(payload: [String: String]) {
         guard let base64 = payload["bytes"],
-            let data = Data(base64Encoded: base64),
-            let text = String(data: data, encoding: .utf8),
-            let terminalState
+            let data = Data(base64Encoded: base64)
         else { return }
-        _ = terminalState.send(text)
-    }
-
-    private static func shellCommandLine(for command: [String]) -> String {
-        command.map { argument in
-            if argument.rangeOfCharacter(
-                from: CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: "\"'\\$`")))
-                == nil
-            {
-                return argument
-            }
-            return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        }.joined(separator: " ")
+        terminalController?.sendInput(data)
     }
 
     private func createBrowserWindow() {
@@ -363,15 +333,13 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     private func send(type: String, payload: [String: String] = [:]) {
-        let envelope = IsolatedToolEnvelope(
-            toolKind: cliToolKind,
-            instanceID: cliInstanceID,
-            type: type,
-            payload: payload
-        )
-        guard let data = try? encoder.encode(envelope) else { return }
-        FileHandle.standardOutput.write(data)
-        FileHandle.standardOutput.write(Data([0x0A]))
+        writeToolHostEnvelope(
+            IsolatedToolEnvelope(
+                toolKind: cliToolKind,
+                instanceID: cliInstanceID,
+                type: type,
+                payload: payload
+            ))
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -467,11 +435,228 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 }
 
+/// Serializes envelope writes to stdout so events emitted from background
+/// threads (e.g. the PTY read queue) can't interleave and corrupt a JSON line.
+private let toolHostStdoutLock = NSLock()
+
+private func writeToolHostEnvelope(_ envelope: IsolatedToolEnvelope) {
+    guard let data = try? JSONEncoder().encode(envelope) else { return }
+    toolHostStdoutLock.lock()
+    FileHandle.standardOutput.write(data)
+    FileHandle.standardOutput.write(Data([0x0A]))
+    toolHostStdoutLock.unlock()
+}
+
 /// A borderless window that can still become key/main, so the hosted terminal
 /// surface can become first responder and receive keyboard input.
 private final class TerminalHostWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+}
+
+/// Hosts a real agent PTY terminal out-of-process: forkpty via
+/// AgentTerminalProcess, output tee'd to the capture-log writer and the ghostty
+/// InMemoryTerminalSession through the throttled pump + lossless backpressure
+/// gate. Surface delegate events (title, command finished, notifications, focus)
+/// are forwarded to the parent over IPC.
+@MainActor
+private final class TerminalHostController {
+    let view: TerminalView
+    private let state: TerminalViewState
+    private let session: InMemoryTerminalSession
+    private let gate: TerminalBackpressureGate
+    private let pump: AgentTerminalOutputPump
+    private let process: AgentTerminalProcess
+    private let driver: AgentTerminalProcessDriver
+    private let captureWriter: AgentTerminalCaptureWriter?
+    private let delegate: HelperTerminalDelegate
+
+    init(
+        launch: IsolatedTerminalLaunch,
+        onEvent: @escaping @Sendable (String, [String: String]) -> Void
+    ) {
+        let command = launch.command.isEmpty ? ["/bin/zsh", "-il"] : launch.command
+        let workingDirectory = URL(fileURLWithPath: launch.workingDirectory)
+
+        captureWriter = launch.captureLogPath.map { path in
+            AgentTerminalCaptureWriter(
+                url: URL(fileURLWithPath: path),
+                maximumBytes: launch.captureLogMaximumBytes.map(UInt64.init)
+                    ?? AgentTerminalCaptureLog.maximumBytes
+            )
+        }
+
+        let callbacks = TerminalDriverCallbacks()
+        let session = InMemoryTerminalSession(
+            write: { data in callbacks.write(data) },
+            resize: { viewport in
+                callbacks.resize(
+                    AgentTerminalViewport(
+                        columns: UInt32(viewport.columns),
+                        rows: UInt32(viewport.rows),
+                        widthPixels: viewport.widthPixels,
+                        heightPixels: viewport.heightPixels
+                    ))
+            }
+        )
+        self.session = session
+
+        let gate = TerminalBackpressureGate()
+        self.gate = gate
+        let pump = AgentTerminalOutputPump(
+            receive: { data in session.receive(data) },
+            finish: { exitCode, runtimeMilliseconds in
+                session.finish(exitCode: exitCode, runtimeMilliseconds: runtimeMilliseconds)
+            },
+            onDelivered: { [gate] byteCount in gate.consumed(byteCount) }
+        )
+        self.pump = pump
+
+        let captureWriter = self.captureWriter
+        let process = AgentTerminalProcess(
+            command: command,
+            workingDirectory: workingDirectory,
+            environment: launch.environment,
+            backpressureGate: gate,
+            output: { data in
+                captureWriter?.append(data)
+                pump.enqueueOutput(data)
+            },
+            onExit: { exitCode in
+                pump.enqueueFinish(
+                    exitCode: UInt32(bitPattern: exitCode ?? 0), runtimeMilliseconds: 0)
+                // Authoritative process-exit signal (forkpty child reaped).
+                onEvent("exited", ["exitCode": exitCode.map(String.init) ?? ""])
+            }
+        )
+        self.process = process
+
+        let driver = AgentTerminalProcessDriver(
+            process: process,
+            startupInput: launch.startupInput,
+            onLaunchFailure: { error in
+                pump.enqueueOutput(
+                    Data("\r\nYAAW: failed to launch agent terminal: \(error)\r\n".utf8))
+                pump.enqueueFinish(exitCode: 127, runtimeMilliseconds: 0)
+            }
+        )
+        self.driver = driver
+        callbacks.driver = driver
+
+        let terminalConfiguration = TerminalConfiguration.default.fontSize(13)
+        let state = TerminalViewState(terminalConfiguration: terminalConfiguration)
+        self.state = state
+        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        self.view = view
+        let delegate = HelperTerminalDelegate(state: state, onEvent: onEvent)
+        self.delegate = delegate
+        view.delegate = delegate
+
+        let options = TerminalSurfaceOptions(
+            backend: .inMemory(session),
+            fontSize: 13,
+            workingDirectory: launch.workingDirectory,
+            context: .window
+        )
+        state.configuration = options
+        state.setTerminalConfiguration(terminalConfiguration)
+        view.controller = state.controller
+        view.configuration = options
+    }
+
+    /// Programmatic input (paste / host-injected text) straight to the PTY.
+    func sendInput(_ data: Data) {
+        driver.write(data)
+    }
+
+    func terminate() {
+        driver.terminate()
+    }
+}
+
+/// Breaks the chicken-and-egg between the ghostty session (needs write/resize
+/// closures) and the driver (created afterwards).
+private final class TerminalDriverCallbacks: @unchecked Sendable {
+    var driver: AgentTerminalProcessDriver?
+
+    func write(_ data: Data) {
+        driver?.write(data)
+    }
+
+    func resize(_ viewport: AgentTerminalViewport) {
+        driver?.resizeOrStart(to: viewport)
+    }
+}
+
+/// Forwards ghostty surface delegate callbacks to the TerminalViewState (so the
+/// surface renders correctly) and emits the parent-facing IPC events.
+@MainActor
+private final class HelperTerminalDelegate:
+    TerminalSurfaceTitleDelegate,
+    TerminalSurfaceGridResizeDelegate,
+    TerminalSurfaceFocusDelegate,
+    TerminalSurfaceCloseDelegate,
+    TerminalSurfaceBellDelegate,
+    TerminalSurfaceDesktopNotificationDelegate,
+    TerminalSurfacePwdDelegate,
+    TerminalSurfaceCommandFinishedDelegate,
+    TerminalSurfaceLifecycleDelegate
+{
+    private let state: TerminalViewState
+    private let onEvent: @Sendable (String, [String: String]) -> Void
+
+    init(
+        state: TerminalViewState,
+        onEvent: @escaping @Sendable (String, [String: String]) -> Void
+    ) {
+        self.state = state
+        self.onEvent = onEvent
+    }
+
+    func terminalDidChangeTitle(_ title: String) {
+        state.terminalDidChangeTitle(title)
+        onEvent("titleChanged", ["title": title])
+    }
+
+    func terminalDidResize(_ size: TerminalGridMetrics) {
+        state.terminalDidResize(size)
+    }
+
+    func terminalDidChangeFocus(_ focused: Bool) {
+        state.terminalDidChangeFocus(focused)
+        onEvent("focusChanged", ["focused": String(focused)])
+    }
+
+    func terminalDidClose(processAlive: Bool) {
+        state.terminalDidClose(processAlive: processAlive)
+    }
+
+    func terminalDidRingBell() {
+        state.terminalDidRingBell()
+    }
+
+    func terminalDidRequestDesktopNotification(title: String, body: String) {
+        state.terminalDidRequestDesktopNotification(title: title, body: body)
+        onEvent("desktopNotification", ["title": title, "body": body])
+    }
+
+    func terminalDidChangeWorkingDirectory(_ path: String) {
+        state.terminalDidChangeWorkingDirectory(path)
+    }
+
+    func terminalDidFinishCommand(exitCode: Int?, durationNanos: UInt64) {
+        // Per-command completion (shell integration), not process exit — used for
+        // activity tracking only; the parent derives activity from the capture log.
+        state.terminalDidFinishCommand(exitCode: exitCode, durationNanos: durationNanos)
+    }
+
+    func terminalDidAttachSurface(_ surface: TerminalSurface) {
+        state.terminalDidAttachSurface(surface)
+    }
+
+    func terminalDidDetachSurface() {
+        state.terminalDidDetachSurface()
+    }
 }
 
 private func argumentValue(after flag: String) -> String? {
