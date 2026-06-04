@@ -61,8 +61,10 @@ struct GhosttyTerminalSurfaceView: NSViewRepresentable {
         if terminal.frame != container.bounds {
             terminal.frame = container.bounds
         }
-        if didAttachTerminal {
-            terminal.fitToSize()
+        if didAttachTerminal,
+            let terminalContainer = container as? TerminalContainerView
+        {
+            terminalContainer.requestTerminalFitToSize()
             terminal.setSurfaceVisible(true)
         }
         GhosttyTerminalStateRegistry.shared.configure(
@@ -87,6 +89,7 @@ private final class TerminalContainerView: NSView {
     weak var terminalView: TerminalView?
     var request: TerminalLaunchRequest?
     private var lastLayoutBounds: NSRect = .zero
+    private var isFitToSizeScheduled = false
     private var shouldFocusWhenWindowIsReady = false
     private weak var observedWindow: NSWindow?
     private var mouseDownMonitor: Any?
@@ -96,8 +99,7 @@ private final class TerminalContainerView: NSView {
         guard let terminalView else { return }
         guard terminalView.frame != bounds || lastLayoutBounds != bounds else { return }
         terminalView.frame = bounds
-        terminalView.fitToSize()
-        lastLayoutBounds = bounds
+        requestTerminalFitToSize()
     }
 
     override func viewDidMoveToWindow() {
@@ -132,6 +134,26 @@ private final class TerminalContainerView: NSView {
     func requestInitialTerminalFocus() {
         shouldFocusWhenWindowIsReady = true
         focusTerminalIfPossible()
+    }
+
+    func requestTerminalFitToSize() {
+        guard terminalView != nil, !isFitToSizeScheduled else { return }
+        isFitToSizeScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+            guard let terminalView else {
+                isFitToSizeScheduled = false
+                return
+            }
+            if terminalView.frame != bounds {
+                terminalView.frame = bounds
+            }
+            terminalView.fitToSize()
+            lastLayoutBounds = bounds
+            isFitToSizeScheduled = false
+        }
     }
 
     private func focusTerminalIfPossible() {
@@ -591,9 +613,7 @@ private struct ManagedAgentLaunchKey: Equatable {
 private final class ManagedAgentTerminal {
     let session: InMemoryTerminalSession
 
-    private let startupInput: String?
-    private let process: AgentTerminalProcess
-    private var hasStarted = false
+    private let driver: AgentTerminalProcessDriver
 
     init(
         launchDescriptor: AgentTerminalLaunchDescriptor,
@@ -621,72 +641,60 @@ private final class ManagedAgentTerminal {
                 )
             }
         )
+        let outputPump = AgentTerminalOutputPump(
+            receive: { data in
+                terminalSession.receive(data)
+            },
+            finish: { exitCode, runtimeMilliseconds in
+                terminalSession.finish(
+                    exitCode: exitCode,
+                    runtimeMilliseconds: runtimeMilliseconds
+                )
+            }
+        )
         let terminalProcess = AgentTerminalProcess(
             command: launchDescriptor.command,
             workingDirectory: workingDirectory,
             environment: launchDescriptor.environment,
             output: { data in
                 captureWriter?.append(data)
-                terminalSession.receive(data)
+                outputPump.enqueueOutput(data)
             },
             onExit: { exitCode in
-                terminalSession.finish(
+                outputPump.enqueueFinish(
                     exitCode: UInt32(bitPattern: exitCode ?? 0),
                     runtimeMilliseconds: 0
                 )
             }
         )
-        self.session = terminalSession
-        self.startupInput = launchDescriptor.startupInput
-        self.process = terminalProcess
-        callbacks.process = terminalProcess
-        callbacks.resizeHandler = { [weak self] viewport in
-            DispatchQueue.main.async { [weak self] in
-                self?.resizeOrStart(to: viewport)
+        let driver = AgentTerminalProcessDriver(
+            process: terminalProcess,
+            startupInput: launchDescriptor.startupInput,
+            onLaunchFailure: { error in
+                outputPump.enqueueOutput(
+                    Data("\r\nYAAW: failed to launch agent terminal: \(error)\r\n".utf8))
+                outputPump.enqueueFinish(exitCode: 127, runtimeMilliseconds: 0)
             }
-        }
+        )
+        self.session = terminalSession
+        self.driver = driver
+        callbacks.driver = driver
     }
 
     func terminate() {
-        process.terminate()
-    }
-
-    private func resizeOrStart(to viewport: AgentTerminalViewport) {
-        if hasStarted {
-            process.resize(to: viewport)
-            return
-        }
-        do {
-            try process.start(initialViewport: viewport)
-            hasStarted = true
-            sendStartupInputIfNeeded()
-        } catch {
-            session.receive("\r\nYAAW: failed to launch agent terminal: \(error)\r\n")
-            session.finish(exitCode: 127, runtimeMilliseconds: 0)
-        }
-    }
-
-    private func sendStartupInputIfNeeded() {
-        guard let startupInput,
-            !startupInput.isEmpty,
-            let data = startupInput.data(using: .utf8)
-        else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-            self?.process.write(data)
-        }
+        driver.terminate()
     }
 }
 
 private final class ManagedAgentTerminalCallbacks: @unchecked Sendable {
-    var process: AgentTerminalProcess?
-    var resizeHandler: (@Sendable (AgentTerminalViewport) -> Void)?
+    var driver: AgentTerminalProcessDriver?
 
     func write(_ data: Data) {
-        process?.write(data)
+        driver?.write(data)
     }
 
     func resize(_ viewport: AgentTerminalViewport) {
-        resizeHandler?(viewport)
+        driver?.resizeOrStart(to: viewport)
     }
 }
 

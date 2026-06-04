@@ -808,6 +808,60 @@ final class AppModelTests: XCTestCase {
         )
     }
 
+    func testSelectingSameDirectoryThreadReusesPublishedFileBrowserSnapshot() throws {
+        let root = try temporaryDirectory()
+        try "readme\n".write(
+            to: root.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let projectID = UUID()
+        let firstThreadID = UUID()
+        let secondThreadID = UUID()
+        let model = AppModel(
+            store: InMemoryYAAWStore(
+                snapshot: YAAWSnapshot(
+                    projects: [Project(id: projectID, displayName: "Project", rootDirectory: root)],
+                    threads: [
+                        AgentThread(
+                            id: firstThreadID,
+                            displayName: "First",
+                            projectID: projectID,
+                            workingDirectory: root,
+                            agentCLI: .codex
+                        ),
+                        AgentThread(
+                            id: secondThreadID,
+                            displayName: "Second",
+                            projectID: projectID,
+                            workingDirectory: root,
+                            agentCLI: .claude
+                        ),
+                    ],
+                    selectedProjectID: projectID,
+                    selectedThreadID: firstThreadID,
+                    rightPanelModesByThreadID: [
+                        firstThreadID: .files,
+                        secondThreadID: .files,
+                    ],
+                    selectedRightPanelMode: .files,
+                    isGlobalTerminalExpanded: false
+                )
+            ),
+            fileIndexer: ImmediateTestFileIndexer()
+        )
+
+        model.refreshSelectedFileBrowser()
+        XCTAssertTrue(
+            model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" })
+
+        model.selectThread(id: secondThreadID)
+
+        XCTAssertTrue(
+            model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" })
+        XCTAssertEqual(model.fileBrowserState.metadata?.threadID, secondThreadID)
+    }
+
     func testCreateThreadUsesConfiguredDefaultAgentCLIWhenChoiceIsNotExplicit() throws {
         let fixture = AppModelFixture()
         let model = AppModel(
@@ -3183,6 +3237,46 @@ private struct StaticAppModelExecutableResolver: AgentCLIExecutableResolving {
 
     func executablePath(named executableName: String, environment: [String: String]) -> String? {
         paths[executableName]
+    }
+}
+
+private final class ImmediateTestFileIndexer: FileIndexing {
+    func indexFiles(
+        threadID: UUID,
+        root: URL,
+        ignoreRules: [String],
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    ) {
+        do {
+            let result = try BackgroundFileIndexer.buildIndex(
+                threadID: threadID,
+                root: root,
+                ignoreRules: ignoreRules
+            )
+            completion(.success(result))
+        } catch {
+            completion(.failure(error))
+        }
+    }
+
+    func indexSubtree(
+        threadID: UUID,
+        root: URL,
+        relativeSubpath: String,
+        ignoreRules: [String],
+        completion: @escaping @Sendable (Result<FileIndexResult, Error>) -> Void
+    ) {
+        do {
+            let result = try BackgroundFileIndexer.buildSubtreeIndex(
+                threadID: threadID,
+                root: root,
+                relativeSubpath: relativeSubpath,
+                ignoreRules: ignoreRules
+            )
+            completion(.success(result))
+        } catch {
+            completion(.failure(error))
+        }
     }
 }
 

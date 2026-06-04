@@ -2607,36 +2607,70 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         // Restore the thread's remembered selection before publishing so the index load
         // doesn't auto-select the first file over a file the user previously opened.
         selectedFileRelativePath = selectedFileByThreadID[selectedThread.id]
-        let cachedResult: FileIndexResult?
         let entries: [FileBrowserEntry]
+        let metadata: FileIndexMetadata?
         let presentationCacheKeyValue: String?
         if let rememberedEntries = fileBrowserEntriesByThreadID[selectedThread.id] {
-            cachedResult = nil
             entries = rememberedEntries
-            presentationCacheKeyValue = fileIndexMetadataByThreadID[selectedThread.id]?.cacheKey
+            metadata = fileIndexMetadataByThreadID[selectedThread.id]
+            presentationCacheKeyValue = metadata?.cacheKey
         } else if isExistingDirectory(selectedThread.workingDirectory) {
             let resolvedCacheKey = fileIndexCacheCoordinator.cacheKey(
                 root: selectedThread.workingDirectory,
                 ignoreRules: configuration.ignoreRules
             )
-            cachedResult = fileIndexCacheCoordinator.cachedIndex(
-                threadID: selectedThread.id, key: resolvedCacheKey)
-            entries = cachedResult?.entries ?? []
-            presentationCacheKeyValue = cachedResult?.metadata.cacheKey ?? resolvedCacheKey.value
+            if let cachedResult = fileIndexCacheCoordinator.cachedIndex(
+                threadID: selectedThread.id,
+                key: resolvedCacheKey
+            ) {
+                entries = cachedResult.entries
+                metadata = cachedResult.metadata
+                presentationCacheKeyValue = cachedResult.metadata.cacheKey ?? resolvedCacheKey.value
+            } else if let sharedSnapshot = sharedFileBrowserSnapshot(
+                for: selectedThread,
+                cacheKey: resolvedCacheKey
+            ) {
+                entries = sharedSnapshot.entries
+                metadata = sharedSnapshot.metadata
+                presentationCacheKeyValue = sharedSnapshot.metadata.cacheKey
+            } else {
+                entries = []
+                metadata = nil
+                presentationCacheKeyValue = resolvedCacheKey.value
+            }
         } else {
-            cachedResult = nil
             entries = []
+            metadata = nil
             presentationCacheKeyValue = nil
         }
         publishFileBrowserState(
             for: selectedThread,
             entries: entries,
-            metadata: cachedResult?.metadata ?? fileIndexMetadataByThreadID[selectedThread.id],
+            metadata: metadata,
             cacheKeyValue: presentationCacheKeyValue,
             searchQuery: "",
             isIndexing: false,
             allowCachedPresentation: true
         )
+    }
+
+    private func sharedFileBrowserSnapshot(
+        for thread: AgentThread,
+        cacheKey: FileIndexCacheKey
+    ) -> (entries: [FileBrowserEntry], metadata: FileIndexMetadata)? {
+        let rootPath = thread.workingDirectory.standardizedFileURL.path
+        for candidate in threads where candidate.id != thread.id
+            && candidate.workingDirectory.standardizedFileURL.path == rootPath
+        {
+            guard let entries = fileBrowserEntriesByThreadID[candidate.id],
+                let metadata = fileIndexMetadataByThreadID[candidate.id],
+                metadata.cacheKey == cacheKey.value
+            else {
+                continue
+            }
+            return (entries, metadata.forThread(thread.id))
+        }
+        return nil
     }
 
     private func publishFileBrowserState(

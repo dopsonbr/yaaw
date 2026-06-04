@@ -47,6 +47,11 @@ struct YAAWApp: App {
             let store = try SQLiteYAAWStore(
                 databasePath: databasePath, diagnosticRecorder: diagnostics)
             let configuration = configurationStore.load()
+            let externalToolResolver = PATHAgentCLIExecutableResolver(
+                fallbackSearchPaths: envPrefix == "YAAW_E2E_"
+                    ? []
+                    : PATHAgentCLIExecutableResolver.defaultFallbackSearchPaths
+            )
             let agentCLIBindings = AgentCLISessionBindingService(
                 environment: environment,
                 captureDirectory: Self.captureDirectory(
@@ -56,6 +61,7 @@ struct YAAWApp: App {
                 wrappedValue: AppModel(
                     store: store,
                     agentCLIBindings: agentCLIBindings,
+                    externalToolResolver: externalToolResolver,
                     configuration: configuration,
                     diagnosticRecorder: diagnostics,
                     notificationDispatcher: MacSystemThreadActivityNotificationDispatcher.shared,

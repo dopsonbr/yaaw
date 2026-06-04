@@ -150,7 +150,12 @@ private final class E2ERunner {
                   printf 'YAAW_SESSION_NAME=Codex E2E Session\\n'
                 fi
                 if [[ -t 1 ]]; then
-                  while true; do sleep 1; done
+                  tick=0
+                  while true; do
+                    printf 'YAAW_STREAM_TICK=%s\\n' "$tick"
+                    tick=$((tick + 1))
+                    sleep 0.05
+                  done
                 fi
                 """
         )
@@ -584,14 +589,17 @@ private final class E2ERunner {
             "appearance settings reload preserved selected thread")
 
         model.refreshSelectedFileBrowser()
-        try waitUntil("file index contains README.md") {
-            model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" }
+        try waitUntil("file index finished and contains README.md") {
+            !model.fileBrowserState.isIndexing
+                && model.fileBrowserState.visibleEntries.contains {
+                    $0.relativePath == "README.md"
+                }
         }
         model.selectThread(id: claudeThreadID)
-        try assert(
-            model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" },
-            "same-directory thread reused the shared file index cache without a blank files state"
-        )
+        model.refreshSelectedFileBrowser()
+        try waitUntil("same-directory thread refreshed shared file index cache") {
+            model.fileBrowserState.visibleEntries.contains { $0.relativePath == "README.md" }
+        }
         model.selectThread(id: codexThreadID)
         model.updateFileSearchQuery("root")
         try assert(

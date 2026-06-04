@@ -285,6 +285,12 @@ launch_state() {
 tell application "System Events"
   tell process "$APP_NAME"
     perform action "AXRaise" of window 1
+    set size of window 1 to {980, 700}
+    delay 0.15
+    set size of window 1 to {1180, 820}
+    delay 0.15
+    set size of window 1 to {1040, 720}
+    delay 0.15
     set size of window 1 to {1100, 760}
   end tell
 end tell
