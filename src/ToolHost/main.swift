@@ -109,6 +109,10 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case .browser:
             createBrowserWindow()
             send(type: "ready")
+        case .terminal:
+            // Implemented in Step 2 (TerminalHostController). Report rather than
+            // silently no-op so the parent surfaces a clear failure state.
+            send(type: "error", payload: ["message": "Terminal host is not implemented yet."])
         }
     }
 
