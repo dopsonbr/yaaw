@@ -138,13 +138,18 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
 public struct AgentSettings: Codable, Equatable, Sendable {
     public var `default`: AgentCLIKind
     public var launchDefaults: AgentLaunchDefaultsSettings
+    /// Experimental: run each agent terminal in an isolated helper process so a
+    /// hang/crash/OOM in one is contained and independently killable.
+    public var isolatedTerminalsEnabled: Bool
 
     public init(
         default: AgentCLIKind = .codex,
-        launchDefaults: AgentLaunchDefaultsSettings = AgentLaunchDefaultsSettings()
+        launchDefaults: AgentLaunchDefaultsSettings = AgentLaunchDefaultsSettings(),
+        isolatedTerminalsEnabled: Bool = false
     ) {
         self.default = `default`
         self.launchDefaults = launchDefaults
+        self.isolatedTerminalsEnabled = isolatedTerminalsEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -155,10 +160,15 @@ public struct AgentSettings: Codable, Equatable, Sendable {
                 AgentLaunchDefaultsSettings.self,
                 forKey: .launchDefaults
             ) ?? AgentLaunchDefaultsSettings()
+        self.isolatedTerminalsEnabled =
+            try container.decodeIfPresent(Bool.self, forKey: .isolatedTerminalsEnabled) ?? false
     }
 
     fileprivate func validated() -> AgentSettings {
-        AgentSettings(default: `default`, launchDefaults: launchDefaults.validated())
+        AgentSettings(
+            default: `default`,
+            launchDefaults: launchDefaults.validated(),
+            isolatedTerminalsEnabled: isolatedTerminalsEnabled)
     }
 }
 

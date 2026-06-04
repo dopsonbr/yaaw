@@ -1087,7 +1087,13 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Set by the app layer to tear down an out-of-process terminal helper when
+    /// its terminal is terminated. Keeps AppModel agnostic of the isolation
+    /// runtime (which lives in the app target).
+    public var onTerminalTerminated: ((TerminalRole) -> Void)?
+
     public func terminateTerminal(role: TerminalRole) {
+        onTerminalTerminated?(role)
         terminalManager.terminate(role: role)
         if case .project(let threadID) = role {
             activeProjectLaunchDescriptorsByThreadID.removeValue(forKey: threadID)

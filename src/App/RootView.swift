@@ -19,6 +19,10 @@ struct RootView: View {
     let onReloadSettings: () -> Void
     let onInstallLatestRelease: () -> Void
     @State private var isShowingUpdateConfirmation = false
+    // Shared across all terminal panes and stable for the app's lifetime, so
+    // isolated-terminal helpers persist while their thread is live even as panes
+    // mount/unmount on thread switches.
+    @StateObject private var terminalRuntime = IsolatedToolRuntime()
 
     var body: some View {
         GeometryReader { geometry in
@@ -77,6 +81,14 @@ struct RootView: View {
         .environment(\.fontSettings, model.configuration.fonts)
         .environment(\.appTheme, model.configuration.resolvedTheme)
         .environment(\.colorScheme, model.configuration.resolvedTheme.swiftUIColorScheme)
+        .environmentObject(terminalRuntime)
+        .onAppear {
+            // Tearing down a terminal kills only its isolated helper — never the
+            // app or sibling terminals (the user's "kill one thread" capability).
+            model.onTerminalTerminated = { [terminalRuntime] role in
+                terminalRuntime.terminalShutdown(instanceID: role.isolatedInstanceID)
+            }
+        }
         .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
         .confirmationDialog(
             "Install the latest release?",
@@ -2436,6 +2448,7 @@ private struct MainWorkspaceView: View {
                         request: selectedProjectTerminalRequest,
                         unavailableMessage: selectedProjectTerminalUnavailableMessage,
                         fonts: model.configuration.fonts,
+                        useIsolatedTerminal: model.configuration.agent.isolatedTerminalsEnabled,
                         onTitleChange: { role, title in
                             if case .project(let threadID) = role {
                                 model.recordAgentCLITerminalTitle(threadID: threadID, title: title)

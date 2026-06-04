@@ -19,6 +19,23 @@ public enum TerminalRole: Hashable, Sendable {
             return .lazygit
         }
     }
+
+    /// Stable identifier for the out-of-process terminal helper that hosts this
+    /// role (one helper per role; persists while the role is live).
+    public var isolatedInstanceID: String {
+        switch self {
+        case .project(let threadID):
+            return "project:\(threadID.uuidString)"
+        case .bottom(let threadID):
+            return "bottom:\(threadID.uuidString)"
+        case .nvim(let threadID):
+            return "nvim:\(threadID.uuidString)"
+        case .nvimTab(let threadID, let tabID):
+            return "nvimTab:\(threadID.uuidString):\(tabID)"
+        case .lazygit(let threadID):
+            return "lazygit:\(threadID.uuidString)"
+        }
+    }
 }
 
 public struct TerminalLaunchRequest: Equatable, Sendable {
