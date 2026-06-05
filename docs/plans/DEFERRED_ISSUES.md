@@ -29,7 +29,7 @@ This file tracks review findings that are real but intentionally belong to a lat
 
 - Source: Plan 06 upstream research on 2026-05-20.
 - Finding: Official Ghostty sources expose the full macOS embedding API in `include/ghostty.h`, but current official public docs still emphasize `libghostty-vt` as the available split and do not publish a stable official full-surface SwiftUI/AppKit package.
-- Resolution: Plan 11 keeps `Lakr233/libghostty-spm` 1.1.4 behind the narrow `src/App/GhosttyTerminalSurfaceView.swift` bridge, documents the current distribution path in `docs/standards/dependency/libghostty.md`, and hardens `script/build_and_run.sh --verify` to ad-hoc sign and verify the staged `.app`.
+- Resolution: Plan 11 originally kept `Lakr233/libghostty-spm` 1.1.4 behind the narrow `src/App/GhosttyTerminalSurfaceView.swift` bridge. Per-terminal process isolation later moved the Ghostty bridge into `YAAWToolHost`, documented the current distribution path in `docs/standards/dependency/libghostty.md`, and kept `script/build_and_run.sh --verify` as the staged `.app` signing/linkage check.
 - Closure test: `./script/build_and_run.sh --verify` verifies the app bundle signature and rejects `/Applications/Ghostty.app` binary links; `otool -L dist/YAAW.app/Contents/MacOS/YAAW` showed no dependency on `/Applications/Ghostty.app`.
 
 ### D-001: Persist Non-Default Thread CLI Metadata

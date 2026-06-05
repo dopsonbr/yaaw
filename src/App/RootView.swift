@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AppKit
 import SwiftUI
 import YAAWKit
@@ -88,6 +89,9 @@ struct RootView: View {
             model.onTerminalTerminated = { [terminalRuntime] role in
                 terminalRuntime.terminalShutdown(instanceID: role.isolatedInstanceID)
             }
+            terminalRuntime.onKeyboardShortcut = { key, modifiers in
+                handleForwardedTerminalShortcut(key: key, modifierRawValues: modifiers)
+            }
         }
         .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
         .confirmationDialog(
@@ -107,13 +111,24 @@ struct RootView: View {
         .onReceive(
             NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
         ) { _ in
-            GhosttyTerminalRuntime.closeAll()
+            terminalRuntime.shutdownAllHosts()
         }
     }
 
     private var selectedBottomTerminalRequest: TerminalLaunchRequest? {
         guard let selectedThreadID = model.selectedThreadID else { return nil }
         return model.terminalLaunchRequest(for: .bottom(threadID: selectedThreadID))
+    }
+
+    private var terminalAppShortcutSignatures: [String] {
+        var signatures = KeyboardShortcutAction.allCases.compactMap { action -> String? in
+            guard action.scope != .settings,
+                model.isKeyboardShortcutEnabled(for: action)
+            else { return nil }
+            return model.keyboardShortcutDefinition(for: action).signature
+        }
+        signatures.append("command+q")
+        return Array(Set(signatures)).sorted()
     }
 
     private var availableExternalOpenTools: [ExternalOpenToolID] {
@@ -181,7 +196,7 @@ struct RootView: View {
                 isExpanded: model.isBottomTerminalExpanded,
                 request: selectedBottomTerminalRequest,
                 fonts: model.configuration.fonts,
-                useIsolatedTerminal: model.configuration.agent.isolatedTerminalsEnabled,
+                appShortcutSignatures: terminalAppShortcutSignatures,
                 onToggle: model.toggleBottomTerminal,
                 onAppearExpanded: {
                     model.activateSelectedBottomTerminal()
@@ -201,7 +216,7 @@ struct RootView: View {
 
     @ViewBuilder
     private var agentCLIRegion: some View {
-        MainWorkspaceView(model: model)
+        MainWorkspaceView(model: model, appShortcutSignatures: terminalAppShortcutSignatures)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -240,6 +255,7 @@ struct RootView: View {
         RightPanelView(
             model: model,
             defaultExternalEditorTool: defaultExternalEditorTool,
+            appShortcutSignatures: terminalAppShortcutSignatures,
             onOpenFileExternally: openFileExternally,
             onCopyPath: copyFileBrowserPath
         )
@@ -269,6 +285,94 @@ struct RootView: View {
             model.resetRightPanelWidth()
         case .bottomTerminal:
             model.resetGlobalTerminalHeight()
+        }
+    }
+
+    private func handleForwardedTerminalShortcut(key: String, modifierRawValues: [String]) {
+        let modifiers = modifierRawValues.compactMap(KeyboardShortcutModifier.init(rawValue:))
+        guard modifiers.count == modifierRawValues.count,
+            let signature = KeyboardShortcutDefinition(key: key, modifiers: modifiers).signature
+        else { return }
+
+        if signature == "command+q" {
+            NSApplication.shared.terminate(nil)
+            return
+        }
+
+        guard
+            let action = KeyboardShortcutAction.allCases.first(where: { action in
+                guard action.scope != .settings,
+                    model.isKeyboardShortcutEnabled(for: action)
+                else { return false }
+                return model.keyboardShortcutDefinition(for: action).signature == signature
+            })
+        else { return }
+
+        performForwardedTerminalShortcut(action)
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
+    private func performForwardedTerminalShortcut(_ action: KeyboardShortcutAction) {
+        switch action {
+        case .openSettings:
+            isSettingsOpen = true
+        case .newThread:
+            _ = try? model.createThread(agentCLI: nil)
+        case .toggleSelectedProjectPinned:
+            model.toggleSelectedProjectPinned()
+        case .moveSelectedProjectUp:
+            model.moveSelectedProject(direction: .up)
+        case .moveSelectedProjectDown:
+            model.moveSelectedProject(direction: .down)
+        case .toggleSelectedProjectExpanded:
+            model.toggleSelectedProjectExpanded()
+        case .toggleSelectedProjectArchiveExpanded:
+            model.toggleSelectedProjectArchiveExpanded()
+        case .toggleSelectedThreadPinned:
+            model.toggleSelectedThreadPinned()
+        case .archiveSelectedThread:
+            model.archiveSelectedThread()
+        case .unarchiveSelectedThread:
+            model.unarchiveSelectedThread()
+        case .toggleBottomTerminal:
+            model.toggleBottomTerminal()
+        case .navigateBack:
+            model.navigateBack()
+        case .navigateForward:
+            model.navigateForward()
+        case .previousRightPanelMode:
+            model.cycleRightPanelModeBackward()
+        case .nextRightPanelMode:
+            model.cycleRightPanelModeForward()
+        case .selectFilesRightPanelMode:
+            model.selectRightPanelMode(.files)
+        case .selectGitRightPanelMode:
+            model.selectRightPanelMode(.git)
+        case .selectNvimRightPanelMode:
+            model.selectRightPanelMode(.nvim)
+        case .toggleSidebar:
+            model.toggleSidebarCollapsed()
+        case .toggleRightPanel:
+            model.toggleRightPanelCollapsed()
+        case .swapMainAndRightPanels:
+            model.toggleWorkspaceSwap()
+        case .refreshFiles:
+            model.refreshSelectedFileBrowser()
+        case .openSelectedFileInNvim:
+            model.openSelectedFileInNvim()
+        case .newProject, .openNvimFilePicker, .openSelectedDirectoryExternalDefault,
+            .openSelectedDirectoryInVSCode, .openSelectedDirectoryInVSCodeInsiders,
+            .openSelectedDirectoryInSublimeText, .openSelectedDirectoryInZed,
+            .openSelectedDirectoryInFinder, .openSelectedDirectoryInTerminal,
+            .openSelectedDirectoryInGhostty, .openSelectedDirectoryInXcode,
+            .openSelectedDirectoryInWebStorm, .openSelectedFileExternalDefault,
+            .openSelectedFileInVSCode, .openSelectedFileInVSCodeInsiders,
+            .openSelectedFileInSublimeText, .openSelectedFileInZed,
+            .openSelectedFileInFinder, .openSelectedFileInTerminal,
+            .openSelectedFileInGhostty, .openSelectedFileInXcode,
+            .openSelectedFileInWebStorm, .saveSettings, .reloadSettings,
+            .revertSettings, .openSettingsExternal:
+            break
         }
     }
 }
@@ -800,8 +904,9 @@ private struct SettingsEditorView: View {
                 }
 
                 settingsRow("Markdown/HTML") {
-                    Picker("Markdown and HTML primary open", selection: markdownHTMLDefaultSelection)
-                    {
+                    Picker(
+                        "Markdown and HTML primary open", selection: markdownHTMLDefaultSelection
+                    ) {
                         Text("Preview").tag(FileBrowserMarkdownAndHTMLDefault.browserPreview)
                         Text("Editor").tag(FileBrowserMarkdownAndHTMLDefault.editor)
                     }
@@ -2416,6 +2521,7 @@ private struct ThreadRenameSheet: View {
 
 private struct MainWorkspaceView: View {
     @ObservedObject var model: AppModel
+    let appShortcutSignatures: [String]
     private let capturePoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var isSessionLinkSheetPresented = false
 
@@ -2449,7 +2555,7 @@ private struct MainWorkspaceView: View {
                         request: selectedProjectTerminalRequest,
                         unavailableMessage: selectedProjectTerminalUnavailableMessage,
                         fonts: model.configuration.fonts,
-                        useIsolatedTerminal: model.configuration.agent.isolatedTerminalsEnabled,
+                        appShortcutSignatures: appShortcutSignatures,
                         onTitleChange: { role, title in
                             if case .project(let threadID) = role {
                                 model.recordAgentCLITerminalTitle(threadID: threadID, title: title)
@@ -2658,67 +2764,13 @@ private struct SessionLinkSheet: View {
     }
 }
 
-extension Notification.Name {
-    /// Debug-only: toggles the out-of-process terminal isolation spike overlay.
-    static let yaawToggleTerminalSpike = Notification.Name("yaaw.toggleTerminalSpike")
-}
-
-/// Temporary spike: renders a single agent terminal in an out-of-process helper
-/// (running a plain shell) composited as an overlay window, to validate the
-/// IPC + overlay compositing + keyboard-focus mechanics before the full
-/// per-terminal process isolation work. Triggered via the Debug menu.
-private struct IsolatedTerminalSpikePanel: View {
-    @ObservedObject var runtime: IsolatedToolRuntime
-    let workingDirectory: String
-    private let instanceID = "terminal-spike"
-
-    private var snapshot: IsolatedToolRuntimeSnapshot { runtime.snapshot(for: instanceID) }
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.black
-
-            IsolatedToolViewportReporter { frame, visible in
-                runtime.terminalSetViewport(instanceID: instanceID, frame: frame, visible: visible)
-            }
-            .allowsHitTesting(false)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Isolated terminal spike — \(snapshot.phase.rawValue)")
-                if snapshot.phase == .crashed {
-                    Text(snapshot.errorMessage ?? "Helper crashed.")
-                } else if snapshot.phase == .exited {
-                    Text("Helper exited (code \(snapshot.exitCode.map(String.init) ?? "?")).")
-                }
-                Text("Click to type. Resize the window to test tracking.")
-            }
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.5))
-            .padding(10)
-            .allowsHitTesting(false)
-        }
-        .onAppear {
-            runtime.ensureTerminalLaunched(
-                instanceID: instanceID,
-                launch: IsolatedTerminalLaunch(
-                    command: ["/bin/zsh", "-il"],
-                    workingDirectory: workingDirectory
-                )
-            )
-        }
-        .onDisappear {
-            runtime.terminalShutdown(instanceID: instanceID)
-        }
-    }
-}
-
 private struct RightPanelView: View {
     @ObservedObject var model: AppModel
     let defaultExternalEditorTool: ExternalOpenToolID?
+    let appShortcutSignatures: [String]
     let onOpenFileExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
     let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
     @StateObject private var isolatedToolRuntime = IsolatedToolRuntime()
-    @State private var showTerminalSpike = false
     @Environment(\.fontSettings) private var fonts
 
     var body: some View {
@@ -2768,7 +2820,10 @@ private struct RightPanelView: View {
                             Image(systemName: IconRole.disclosureExpanded.icon.systemSymbolName)
                                 .font(.system(size: 9, weight: ChromeMetrics.glyphWeight))
                         }
-                        .font(.system(size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight))
+                        .font(
+                            .system(
+                                size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight)
+                        )
                         .frame(width: 38, height: 32)
                         .contentShape(Rectangle())
                     }
@@ -2846,7 +2901,7 @@ private struct RightPanelView: View {
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "nvim"),
                     fonts: model.configuration.fonts,
-                    useIsolatedTerminal: model.configuration.agent.isolatedTerminalsEnabled
+                    appShortcutSignatures: appShortcutSignatures
                 )
                 .id(
                     "\(model.selectedThreadID?.uuidString ?? "none")-\(model.selectedRightPanelTab.id)"
@@ -2860,7 +2915,7 @@ private struct RightPanelView: View {
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "lazygit"),
                     fonts: model.configuration.fonts,
-                    useIsolatedTerminal: model.configuration.agent.isolatedTerminalsEnabled
+                    appShortcutSignatures: appShortcutSignatures
                 )
                 .id(model.selectedThreadID)
                 .onAppear {
@@ -2869,17 +2924,6 @@ private struct RightPanelView: View {
             }
         }
         .background(dracula(.background))
-        .overlay {
-            if showTerminalSpike {
-                IsolatedTerminalSpikePanel(
-                    runtime: isolatedToolRuntime,
-                    workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path
-                )
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .yaawToggleTerminalSpike)) { _ in
-            showTerminalSpike.toggle()
-        }
         .onAppear {
             syncIsolatedToolVisibility()
         }
@@ -2934,7 +2978,9 @@ private struct RightPanelView: View {
                         systemName: IconRole.rightPanelMode(mode(for: tab.kind)).icon
                             .systemSymbolName
                     )
-                    .font(.system(size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight))
+                    .font(
+                        .system(size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight)
+                    )
                     .frame(width: 22, height: 32)
 
                     if showsTitle {

@@ -198,7 +198,8 @@ struct ThreadChoiceSheet: View {
     private func selectAgent(_ agentCLI: AgentCLIKind) {
         selectedAgentCLI = agentCLI
         let options = model.configuredLaunchOptions(for: agentCLI)
-        executableName = options.executableName ?? model.configuration.agentExecutableName(for: agentCLI)
+        executableName =
+            options.executableName ?? model.configuration.agentExecutableName(for: agentCLI)
         permissionModeID = options.permissionModeID ?? AgentLaunchOptions.defaultPermissionModeID
         additionalArgumentsText = AgentLaunchOptions.formatAdditionalArguments(
             options.additionalArguments

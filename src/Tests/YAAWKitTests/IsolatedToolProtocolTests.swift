@@ -97,11 +97,13 @@ final class IsolatedToolProtocolTests: XCTestCase {
             captureLogPath: "/tmp/capture/xyz.log",
             captureLogMaximumBytes: 1234,
             startupInput: "go\n",
-            agentCLI: "codex"
+            agentCLI: "codex",
+            appShortcutSignatures: ["command+j", "command+shift+["]
         )
 
         let restored = try XCTUnwrap(IsolatedTerminalLaunch.from(payload: launch.payload()))
         XCTAssertEqual(restored, launch)
+        XCTAssertEqual(restored.appShortcutSignatures, ["command+j", "command+shift+["])
     }
 
     func testTerminalLaunchRejectsEmptyCommand() {
@@ -130,7 +132,10 @@ final class IsolatedToolProtocolTests: XCTestCase {
             agentCLI: .codex
         )
 
-        let launch = IsolatedTerminalLaunch(request: request)
+        let launch = IsolatedTerminalLaunch(
+            request: request,
+            appShortcutSignatures: ["command+j"]
+        )
         XCTAssertEqual(launch.command, ["codex", "--resume"])
         XCTAssertEqual(launch.environment["YAAW_EVENT_LOG"], "/tmp/e.log")
         XCTAssertEqual(launch.workingDirectory, "/Users/me/project")
@@ -138,6 +143,7 @@ final class IsolatedToolProtocolTests: XCTestCase {
         XCTAssertEqual(launch.captureLogMaximumBytes, 4096)
         XCTAssertEqual(launch.startupInput, "go\n")
         XCTAssertEqual(launch.agentCLI, "codex")
+        XCTAssertEqual(launch.appShortcutSignatures, ["command+j"])
     }
 
     func testIsolatedTerminalLaunchFromExecRequest() {

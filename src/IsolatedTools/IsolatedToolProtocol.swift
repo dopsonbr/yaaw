@@ -76,6 +76,10 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
     public var captureLogMaximumBytes: Int?
     public var startupInput: String?
     public var agentCLI: String?
+    public var themeID: String?
+    public var terminalFontFamily: String?
+    public var terminalFontSize: Double?
+    public var appShortcutSignatures: [String]
 
     public init(
         command: [String],
@@ -84,7 +88,11 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
         captureLogPath: String? = nil,
         captureLogMaximumBytes: Int? = nil,
         startupInput: String? = nil,
-        agentCLI: String? = nil
+        agentCLI: String? = nil,
+        themeID: String? = nil,
+        terminalFontFamily: String? = nil,
+        terminalFontSize: Double? = nil,
+        appShortcutSignatures: [String] = []
     ) {
         self.command = command
         self.environment = environment
@@ -93,6 +101,10 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
         self.captureLogMaximumBytes = captureLogMaximumBytes
         self.startupInput = startupInput
         self.agentCLI = agentCLI
+        self.themeID = Self.nilIfBlank(themeID)
+        self.terminalFontFamily = Self.nilIfBlank(terminalFontFamily)
+        self.terminalFontSize = terminalFontSize
+        self.appShortcutSignatures = appShortcutSignatures
     }
 
     public func payload() -> [String: String] {
@@ -105,6 +117,10 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
         payload["captureLogMaximumBytes"] = captureLogMaximumBytes.map(String.init)
         payload["startupInput"] = startupInput
         payload["agentCLI"] = agentCLI
+        payload["themeID"] = themeID
+        payload["terminalFontFamily"] = terminalFontFamily
+        payload["terminalFontSize"] = terminalFontSize.map { String($0) }
+        payload["appShortcutSignatures"] = Self.encodeJSON(appShortcutSignatures)
         return payload
     }
 
@@ -123,8 +139,17 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
             captureLogPath: payload["captureLogPath"],
             captureLogMaximumBytes: payload["captureLogMaximumBytes"].flatMap(Int.init),
             startupInput: payload["startupInput"],
-            agentCLI: payload["agentCLI"]
+            agentCLI: payload["agentCLI"],
+            themeID: payload["themeID"],
+            terminalFontFamily: payload["terminalFontFamily"],
+            terminalFontSize: payload["terminalFontSize"].flatMap(Double.init),
+            appShortcutSignatures: payload["appShortcutSignatures"].flatMap(decodeJSON) ?? []
         )
+    }
+
+    private static func nilIfBlank(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func encodeJSON<T: Encodable>(_ value: T) -> String? {

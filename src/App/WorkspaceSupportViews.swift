@@ -6,9 +6,7 @@ struct TerminalPlaceholderView: View {
     let request: TerminalLaunchRequest?
     let unavailableMessage: String
     let fonts: FontSettings
-    /// When true and the request is an agent PTY, render the terminal in an
-    /// isolated helper process instead of in-process.
-    var useIsolatedTerminal: Bool = false
+    var appShortcutSignatures: [String] = []
     var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
     var onDesktopNotification: (TerminalRole, String, String) -> Void = { _, _, _ in }
     var onFocusChange: (TerminalRole, Bool) -> Void = { _, _ in }
@@ -20,27 +18,23 @@ struct TerminalPlaceholderView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let request {
-                if useIsolatedTerminal {
-                    IsolatedAgentTerminalView(
-                        runtime: terminalRuntime,
-                        role: request.role,
-                        launch: IsolatedTerminalLaunch(request: request),
-                        fonts: fonts
-                    )
-                    .accessibilityLabel("\(request.title) terminal")
-                } else {
-                    GhosttyTerminalSurfaceView(
+                IsolatedAgentTerminalView(
+                    runtime: terminalRuntime,
+                    role: request.role,
+                    launch: IsolatedTerminalLaunch(
                         request: request,
-                        theme: appTheme,
+                        themeID: appTheme.id,
                         fonts: fonts,
-                        onTitleChange: onTitleChange,
-                        onDesktopNotification: onDesktopNotification,
-                        onFocusChange: onFocusChange,
-                        onClose: onClose,
-                        onCommandFinished: onCommandFinished
-                    )
-                    .accessibilityLabel("\(request.title) terminal")
-                }
+                        appShortcutSignatures: appShortcutSignatures
+                    ),
+                    fonts: fonts,
+                    onTitleChange: onTitleChange,
+                    onDesktopNotification: onDesktopNotification,
+                    onFocusChange: onFocusChange,
+                    onClose: onClose,
+                    onCommandFinished: onCommandFinished
+                )
+                .accessibilityLabel("\(request.title) terminal")
             } else {
                 Text(unavailableMessage)
                     .font(fonts.editorFont())
@@ -62,6 +56,11 @@ struct IsolatedAgentTerminalView: View {
     let role: TerminalRole
     let launch: IsolatedTerminalLaunch
     let fonts: FontSettings
+    var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
+    var onDesktopNotification: (TerminalRole, String, String) -> Void = { _, _, _ in }
+    var onFocusChange: (TerminalRole, Bool) -> Void = { _, _ in }
+    var onClose: (TerminalRole) -> Void = { _ in }
+    var onCommandFinished: (TerminalRole, Int?) -> Void = { _, _ in }
 
     private var instanceID: String { role.isolatedInstanceID }
     private var snapshot: IsolatedToolRuntimeSnapshot { runtime.snapshot(for: instanceID) }
@@ -73,12 +72,42 @@ struct IsolatedAgentTerminalView: View {
             IsolatedToolViewportReporter { frame, visible in
                 runtime.terminalSetViewport(instanceID: instanceID, frame: frame, visible: visible)
             }
+            .allowsToolHostFrontmostVisibility(true)
             .allowsHitTesting(false)
 
             overlay
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            runtime.terminalFocus(instanceID: instanceID, focused: true)
+        }
         .onAppear {
-            runtime.ensureTerminalLaunched(instanceID: instanceID, launch: launch)
+            runtime.ensureTerminalLaunched(
+                instanceID: instanceID,
+                role: role,
+                launch: launch,
+                handlers: IsolatedTerminalEventHandlers(
+                    onTitleChange: onTitleChange,
+                    onDesktopNotification: onDesktopNotification,
+                    onFocusChange: onFocusChange,
+                    onClose: onClose,
+                    onCommandFinished: onCommandFinished
+                )
+            )
+        }
+        .onChange(of: launch) {
+            runtime.ensureTerminalLaunched(
+                instanceID: instanceID,
+                role: role,
+                launch: launch,
+                handlers: IsolatedTerminalEventHandlers(
+                    onTitleChange: onTitleChange,
+                    onDesktopNotification: onDesktopNotification,
+                    onFocusChange: onFocusChange,
+                    onClose: onClose,
+                    onCommandFinished: onCommandFinished
+                )
+            )
         }
     }
 
@@ -118,7 +147,18 @@ struct IsolatedAgentTerminalView: View {
             if showRestart {
                 Button("Restart") {
                     runtime.terminalShutdown(instanceID: instanceID)
-                    runtime.ensureTerminalLaunched(instanceID: instanceID, launch: launch)
+                    runtime.ensureTerminalLaunched(
+                        instanceID: instanceID,
+                        role: role,
+                        launch: launch,
+                        handlers: IsolatedTerminalEventHandlers(
+                            onTitleChange: onTitleChange,
+                            onDesktopNotification: onDesktopNotification,
+                            onFocusChange: onFocusChange,
+                            onClose: onClose,
+                            onCommandFinished: onCommandFinished
+                        )
+                    )
                 }
             }
         }
@@ -132,7 +172,7 @@ struct BottomTerminalBar: View {
     let isExpanded: Bool
     let request: TerminalLaunchRequest?
     let fonts: FontSettings
-    var useIsolatedTerminal: Bool = false
+    let appShortcutSignatures: [String]
     let onToggle: () -> Void
     let onAppearExpanded: () -> Void
 
@@ -159,7 +199,7 @@ struct BottomTerminalBar: View {
                     request: request,
                     unavailableMessage: "Terminal unavailable for the selected thread",
                     fonts: fonts,
-                    useIsolatedTerminal: useIsolatedTerminal
+                    appShortcutSignatures: appShortcutSignatures
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear(perform: onAppearExpanded)

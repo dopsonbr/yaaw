@@ -14,6 +14,9 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var webView: WKWebView?
     private var terminalController: TerminalHostController?
     private var terminalView: TerminalView? { terminalController?.view }
+    private var terminalMouseDownMonitor: Any?
+    private var terminalKeyboardShortcutMonitor: Any?
+    private var terminalAppShortcutSignatures: Set<String> = []
     private var currentURLString: String?
     private var hasLaunchedTool = false
     private var isLoadingMarkdownPreview = false
@@ -31,6 +34,18 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSApp.setActivationPolicy(.accessory)
         startWatchdog()
         startInputReader()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        terminalController?.terminate()
+        if let terminalMouseDownMonitor {
+            NSEvent.removeMonitor(terminalMouseDownMonitor)
+            self.terminalMouseDownMonitor = nil
+        }
+        if let terminalKeyboardShortcutMonitor {
+            NSEvent.removeMonitor(terminalKeyboardShortcutMonitor)
+            self.terminalKeyboardShortcutMonitor = nil
+        }
     }
 
     private func startInputReader() {
@@ -146,6 +161,7 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return
         }
         hasLaunchedTool = true
+        terminalAppShortcutSignatures = Set(launch.appShortcutSignatures)
 
         let controller = TerminalHostController(launch: launch) {
             [cliToolKind, cliInstanceID] type, payload in
@@ -165,6 +181,7 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             defer: false
         )
         window.contentView = controller.view
+        window.title = cliInstanceID
         controller.view.autoresizingMask = [.width, .height]
         window.backgroundColor = .black
         window.isReleasedWhenClosed = false
@@ -173,6 +190,8 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.orderOut(nil)
         controller.view.setSurfaceVisible(false)
         self.window = window
+        installTerminalFocusMonitor()
+        installTerminalKeyboardShortcutMonitor()
 
         send(type: "ready")
     }
@@ -231,18 +250,13 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     private func setSurfaceVisible(_ visible: Bool) {
         guard let window else { return }
-        // Keep the surface visible while the user is interacting with our process
-        // cluster (the main app or any terminal/tool helper). Clicking a helper
-        // window deactivates the main app, which makes the parent's viewport
-        // reporter report the pane as not-visible; without this guard, focusing
-        // one terminal would hide its siblings in a split view.
-        if !visible && Self.isClusterFrontmost() {
-            return
-        }
         guard visible != isSurfaceVisible else { return }
         isSurfaceVisible = visible
         if visible {
             window.orderFrontRegardless()
+            if window.isKeyWindow, let terminalView {
+                window.makeFirstResponder(terminalView)
+            }
             terminalView?.setSurfaceVisible(true)
             terminalView?.fitToSize()
         } else {
@@ -251,13 +265,51 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    /// True when the frontmost app is the main app or one of its helper
-    /// processes — i.e. the user is interacting with our window cluster.
-    private static func isClusterFrontmost() -> Bool {
-        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
-        let pid = front.processIdentifier
-        if pid == getpid() || pid == getppid() { return true }
-        return front.executableURL?.lastPathComponent == "YAAWToolHost"
+    private func installTerminalFocusMonitor() {
+        guard terminalMouseDownMonitor == nil else { return }
+        terminalMouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) {
+            [weak self] event in
+            guard let self,
+                let window,
+                let terminalView,
+                event.window === window
+            else {
+                return event
+            }
+            let point = terminalView.convert(event.locationInWindow, from: nil)
+            if terminalView.bounds.contains(point) {
+                window.makeKeyAndOrderFront(nil)
+                window.makeFirstResponder(terminalView)
+            }
+            return event
+        }
+    }
+
+    private func installTerminalKeyboardShortcutMonitor() {
+        guard terminalKeyboardShortcutMonitor == nil else { return }
+        terminalKeyboardShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) {
+            [weak self] event in
+            guard let self,
+                let key = event.yaawShortcutKey,
+                event.yaawShortcutModifiers.contains(.command),
+                let signature = KeyboardShortcutDefinition(
+                    key: key,
+                    modifiers: Array(event.yaawShortcutModifiers)
+                ).signature
+            else {
+                return event
+            }
+
+            guard terminalAppShortcutSignatures.contains(signature) || signature == "command+q"
+            else {
+                return event
+            }
+
+            let modifiers = event.yaawShortcutModifiers.map(\.rawValue).sorted().joined(
+                separator: ",")
+            send(type: "keyboardShortcut", payload: ["key": key, "modifiers": modifiers])
+            return nil
+        }
     }
 
     private func startWatchdog() {
@@ -491,7 +543,8 @@ private final class TerminalHostController {
         // An empty environment means "inherit" (used for plain exec terminals
         // like the bottom shell / nvim / lazygit); agent PTY launches carry their
         // full environment. Ensure TERM is always set for the PTY.
-        var environment = launch.environment.isEmpty
+        var environment =
+            launch.environment.isEmpty
             ? ProcessInfo.processInfo.environment : launch.environment
         if environment["TERM"] == nil {
             environment["TERM"] = "xterm-256color"
@@ -542,8 +595,6 @@ private final class TerminalHostController {
                 pump.enqueueOutput(data)
             },
             onExit: { exitCode in
-                pump.enqueueFinish(
-                    exitCode: UInt32(bitPattern: exitCode ?? 0), runtimeMilliseconds: 0)
                 // Authoritative process-exit signal (forkpty child reaped).
                 onEvent("exited", ["exitCode": exitCode.map(String.init) ?? ""])
             }
@@ -556,13 +607,20 @@ private final class TerminalHostController {
             onLaunchFailure: { error in
                 pump.enqueueOutput(
                     Data("\r\nYAAW: failed to launch agent terminal: \(error)\r\n".utf8))
-                pump.enqueueFinish(exitCode: 127, runtimeMilliseconds: 0)
+                onEvent("exited", ["exitCode": "127"])
             }
         )
         self.driver = driver
         callbacks.driver = driver
 
-        let terminalConfiguration = TerminalConfiguration.default.fontSize(13)
+        let theme = launch.themeID.flatMap(ThemeCatalog.theme(id:)) ?? ThemeCatalog.defaultTheme
+        let fontSize = Float(launch.terminalFontSize ?? FontSettings().terminalSize)
+        var terminalConfiguration = Self.terminalConfiguration(for: theme, fontSize: fontSize)
+        if let family = launch.terminalFontFamily?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !family.isEmpty
+        {
+            terminalConfiguration = terminalConfiguration.fontFamily(family)
+        }
         let state = TerminalViewState(terminalConfiguration: terminalConfiguration)
         self.state = state
         let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
@@ -573,7 +631,7 @@ private final class TerminalHostController {
 
         let options = TerminalSurfaceOptions(
             backend: .inMemory(session),
-            fontSize: 13,
+            fontSize: fontSize,
             workingDirectory: launch.workingDirectory,
             context: .window
         )
@@ -591,6 +649,31 @@ private final class TerminalHostController {
     func terminate() {
         driver.terminate()
     }
+
+    private static func terminalConfiguration(
+        for theme: ThemeDefinition,
+        fontSize: Float
+    ) -> TerminalConfiguration {
+        TerminalConfiguration { config in
+            config.withBackground(themeHex(.background, in: theme))
+            config.withForeground(themeHex(.foreground, in: theme))
+            config.withSelectionBackground(themeHex(.currentLine, in: theme))
+            config.withSelectionForeground(themeHex(.foreground, in: theme))
+            config.withCursorColor(themeHex(.pink, in: theme))
+            config.withCursorText(themeHex(.background, in: theme))
+            config.withBoldColor(themeHex(.yellow, in: theme))
+            for (index, color) in theme.terminalANSIPalette.enumerated() {
+                config.withPalette(index, color: color)
+            }
+            config.withFontSize(fontSize)
+            config.withWindowPaddingX(0)
+            config.withWindowPaddingY(0)
+        }
+    }
+}
+
+private func themeHex(_ role: ThemeRole, in theme: ThemeDefinition) -> String {
+    theme.hex(for: role).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
 }
 
 /// Breaks the chicken-and-egg between the ghostty session (needs write/resize
@@ -648,6 +731,7 @@ private final class HelperTerminalDelegate:
 
     func terminalDidClose(processAlive: Bool) {
         state.terminalDidClose(processAlive: processAlive)
+        onEvent("closed", ["processAlive": String(processAlive)])
     }
 
     func terminalDidRingBell() {
@@ -667,6 +751,13 @@ private final class HelperTerminalDelegate:
         // Per-command completion (shell integration), not process exit — used for
         // activity tracking only; the parent derives activity from the capture log.
         state.terminalDidFinishCommand(exitCode: exitCode, durationNanos: durationNanos)
+        var payload: [String: String] = [
+            "durationNanos": String(durationNanos)
+        ]
+        if let exitCode {
+            payload["exitCode"] = String(exitCode)
+        }
+        onEvent("commandFinished", payload)
     }
 
     func terminalDidAttachSurface(_ surface: TerminalSurface) {

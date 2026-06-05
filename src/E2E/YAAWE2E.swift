@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import YAAWKit
 
@@ -304,6 +305,7 @@ private final class E2ERunner {
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
     }
 
+    // swiftlint:disable:next function_body_length
     private func runFocusedBehaviorAssertions() throws -> FocusedBehaviorResult {
         let databasePath = paths.stateDirectory.appendingPathComponent("focused-behavior.sqlite")
         let model = try makeModel(databasePath: databasePath)

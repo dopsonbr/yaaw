@@ -3,13 +3,25 @@ import Combine
 import Foundation
 import YAAWKit
 
+struct IsolatedTerminalEventHandlers {
+    var onTitleChange: (TerminalRole, String) -> Void = { _, _ in }
+    var onDesktopNotification: (TerminalRole, String, String) -> Void = { _, _, _ in }
+    var onFocusChange: (TerminalRole, Bool) -> Void = { _, _ in }
+    var onClose: (TerminalRole) -> Void = { _ in }
+    var onCommandFinished: (TerminalRole, Int?) -> Void = { _, _ in }
+}
+
 @MainActor
 final class IsolatedToolRuntime: ObservableObject {
     @Published private(set) var snapshotsByInstanceID: [String: IsolatedToolRuntimeSnapshot] = [:]
 
     var onNewSurfaceRequested: ((String) -> Void)?
+    var onKeyboardShortcut: ((String, [String]) -> Void)?
 
     private var hostsByInstanceID: [String: IsolatedToolHostProcess] = [:]
+    private var terminalLaunchesByInstanceID: [String: IsolatedTerminalLaunch] = [:]
+    private var terminalHandlersByInstanceID:
+        [String: (role: TerminalRole, handlers: IsolatedTerminalEventHandlers)] = [:]
     private let helperURLProvider: @MainActor () -> URL?
 
     init(helperURLProvider: @escaping @MainActor () -> URL? = IsolatedToolRuntime.defaultHelperURL)
@@ -40,7 +52,9 @@ final class IsolatedToolRuntime: ObservableObject {
         }
 
         apply(.launch, instanceID: instanceID)
+        let hostID = UUID()
         let host = IsolatedToolHostProcess(
+            hostID: hostID,
             helperURL: helperURL,
             kind: kind,
             instanceID: instanceID,
@@ -51,12 +65,15 @@ final class IsolatedToolRuntime: ObservableObject {
             },
             onExit: { [weak self] wasExpected in
                 Task { @MainActor in
-                    self?.handleExit(instanceID: instanceID, wasExpected: wasExpected)
+                    self?.handleExit(
+                        instanceID: instanceID,
+                        hostID: hostID,
+                        wasExpected: wasExpected)
                 }
             },
             onWriteFailure: { [weak self] in
                 Task { @MainActor in
-                    self?.handleWriteFailure(instanceID: instanceID)
+                    self?.handleWriteFailure(instanceID: instanceID, hostID: hostID)
                 }
             }
         )
@@ -117,8 +134,20 @@ final class IsolatedToolRuntime: ObservableObject {
     /// is not already running, and sends the one-time launch config. Unlike the
     /// browser, the helper persists while the pane is hidden — the agent keeps
     /// running — and is only torn down by `terminalShutdown`.
-    func ensureTerminalLaunched(instanceID: String, launch: IsolatedTerminalLaunch) {
+    func ensureTerminalLaunched(
+        instanceID: String,
+        role: TerminalRole,
+        launch: IsolatedTerminalLaunch,
+        handlers: IsolatedTerminalEventHandlers
+    ) {
+        terminalHandlersByInstanceID[instanceID] = (role, handlers)
+        if let existingLaunch = terminalLaunchesByInstanceID[instanceID],
+            existingLaunch != launch
+        {
+            shutdown(instanceID: instanceID)
+        }
         guard startHost(kind: .terminal, instanceID: instanceID) else { return }
+        terminalLaunchesByInstanceID[instanceID] = launch
         send(
             type: "launchTerminal",
             kind: .terminal,
@@ -212,7 +241,14 @@ final class IsolatedToolRuntime: ObservableObject {
     func shutdown(instanceID: String) {
         hostsByInstanceID[instanceID]?.shutdown()
         hostsByInstanceID[instanceID] = nil
+        terminalLaunchesByInstanceID[instanceID] = nil
         apply(.exited(nil), instanceID: instanceID)
+    }
+
+    func shutdownAllHosts() {
+        for instanceID in Array(hostsByInstanceID.keys) {
+            shutdown(instanceID: instanceID)
+        }
     }
 
     /// Shuts down every *browser* host except the active one. Terminal helpers
@@ -226,6 +262,7 @@ final class IsolatedToolRuntime: ObservableObject {
             guard let host = hostsByInstanceID[instanceID] else { continue }
             host.shutdown()
             hostsByInstanceID[instanceID] = nil
+            terminalLaunchesByInstanceID[instanceID] = nil
             apply(.exited(nil), instanceID: instanceID)
         }
     }
@@ -263,6 +300,17 @@ final class IsolatedToolRuntime: ObservableObject {
             case "titleChanged":
                 apply(
                     .titleChanged(envelope.payload["title"] ?? ""), instanceID: envelope.instanceID)
+                notifyTerminalTitleChanged(envelope)
+            case "desktopNotification":
+                notifyTerminalDesktopNotification(envelope)
+            case "focusChanged":
+                notifyTerminalFocusChanged(envelope)
+            case "closed":
+                notifyTerminalClosed(envelope)
+            case "commandFinished":
+                notifyTerminalCommandFinished(envelope)
+            case "keyboardShortcut":
+                notifyKeyboardShortcut(envelope)
             case "error":
                 apply(
                     .error(envelope.payload["message"] ?? "Tool host reported an error."),
@@ -273,6 +321,7 @@ final class IsolatedToolRuntime: ObservableObject {
                 apply(
                     .exited(envelope.payload["exitCode"].flatMap { Int32($0) }),
                     instanceID: envelope.instanceID)
+                notifyTerminalCommandFinished(envelope)
             case "newSurfaceRequested":
                 if let urlString = envelope.payload["urlString"], !urlString.isEmpty {
                     onNewSurfaceRequested?(urlString)
@@ -287,17 +336,21 @@ final class IsolatedToolRuntime: ObservableObject {
         }
     }
 
-    private func handleExit(instanceID: String, wasExpected: Bool) {
+    private func handleExit(instanceID: String, hostID: UUID, wasExpected: Bool) {
+        guard hostsByInstanceID[instanceID]?.hostID == hostID else { return }
         hostsByInstanceID[instanceID] = nil
+        terminalLaunchesByInstanceID[instanceID] = nil
         apply(
             wasExpected ? .exited(nil) : .crashed("Tool host exited unexpectedly."),
             instanceID: instanceID)
     }
 
-    private func handleWriteFailure(instanceID: String) {
+    private func handleWriteFailure(instanceID: String, hostID: UUID) {
         guard let host = hostsByInstanceID[instanceID] else { return }
+        guard host.hostID == hostID else { return }
         host.shutdown()
         hostsByInstanceID[instanceID] = nil
+        terminalLaunchesByInstanceID[instanceID] = nil
         apply(.crashed("Tool host stopped responding."), instanceID: instanceID)
     }
 
@@ -306,6 +359,69 @@ final class IsolatedToolRuntime: ObservableObject {
             snapshot(for: instanceID),
             action: action
         )
+    }
+
+    private func terminalHandler(for instanceID: String)
+        -> (role: TerminalRole, handlers: IsolatedTerminalEventHandlers)?
+    {
+        terminalHandlersByInstanceID[instanceID]
+    }
+
+    private func notifyTerminalTitleChanged(_ envelope: IsolatedToolEnvelope) {
+        guard envelope.toolKind == .terminal,
+            let handler = terminalHandler(for: envelope.instanceID)
+        else { return }
+        handler.handlers.onTitleChange(handler.role, envelope.payload["title"] ?? "")
+    }
+
+    private func notifyTerminalDesktopNotification(_ envelope: IsolatedToolEnvelope) {
+        guard envelope.toolKind == .terminal,
+            let handler = terminalHandler(for: envelope.instanceID)
+        else { return }
+        handler.handlers.onDesktopNotification(
+            handler.role,
+            envelope.payload["title"] ?? "",
+            envelope.payload["body"] ?? ""
+        )
+    }
+
+    private func notifyTerminalFocusChanged(_ envelope: IsolatedToolEnvelope) {
+        guard envelope.toolKind == .terminal,
+            let handler = terminalHandler(for: envelope.instanceID)
+        else { return }
+        handler.handlers.onFocusChange(
+            handler.role,
+            envelope.payload["focused"].flatMap(Bool.init) == true
+        )
+    }
+
+    private func notifyTerminalClosed(_ envelope: IsolatedToolEnvelope) {
+        guard envelope.toolKind == .terminal,
+            let handler = terminalHandler(for: envelope.instanceID)
+        else { return }
+        handler.handlers.onClose(handler.role)
+    }
+
+    private func notifyTerminalCommandFinished(_ envelope: IsolatedToolEnvelope) {
+        guard envelope.toolKind == .terminal,
+            let handler = terminalHandler(for: envelope.instanceID)
+        else { return }
+        handler.handlers.onCommandFinished(
+            handler.role,
+            envelope.payload["exitCode"].flatMap(Int.init)
+        )
+    }
+
+    private func notifyKeyboardShortcut(_ envelope: IsolatedToolEnvelope) {
+        guard envelope.toolKind == .terminal,
+            let key = envelope.payload["key"],
+            !key.isEmpty
+        else { return }
+        let modifiers =
+            envelope.payload["modifiers"]?
+            .split(separator: ",")
+            .map(String.init) ?? []
+        onKeyboardShortcut?(key, modifiers)
     }
 
     private static func defaultHelperURL() -> URL? {
@@ -333,6 +449,7 @@ private final class IsolatedToolHostProcess: @unchecked Sendable {
     /// disconnect rather than letting the parent's writes accumulate or block.
     private static let maxPendingWriteBytes = 4 * 1024 * 1024
 
+    fileprivate let hostID: UUID
     private let helperURL: URL
     fileprivate let kind: IsolatedToolKind
     private let instanceID: String
@@ -353,6 +470,7 @@ private final class IsolatedToolHostProcess: @unchecked Sendable {
     private var writeBroken = false
 
     init(
+        hostID: UUID,
         helperURL: URL,
         kind: IsolatedToolKind,
         instanceID: String,
@@ -360,6 +478,7 @@ private final class IsolatedToolHostProcess: @unchecked Sendable {
         onExit: @escaping (Bool) -> Void,
         onWriteFailure: @escaping () -> Void
     ) {
+        self.hostID = hostID
         self.helperURL = helperURL
         self.kind = kind
         self.instanceID = instanceID

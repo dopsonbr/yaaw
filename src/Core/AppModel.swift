@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Combine
 import Foundation
 
@@ -2665,7 +2666,8 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         cacheKey: FileIndexCacheKey
     ) -> (entries: [FileBrowserEntry], metadata: FileIndexMetadata)? {
         let rootPath = thread.workingDirectory.standardizedFileURL.path
-        for candidate in threads where candidate.id != thread.id
+        for candidate in threads
+        where candidate.id != thread.id
             && candidate.workingDirectory.standardizedFileURL.path == rootPath
         {
             guard let entries = fileBrowserEntriesByThreadID[candidate.id],

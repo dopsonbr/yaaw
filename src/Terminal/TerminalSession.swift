@@ -76,7 +76,12 @@ extension IsolatedTerminalLaunch {
     /// `agentPTY` carries the full descriptor (command/env/capture log/startup
     /// input); `exec` carries the bare command and an empty environment, which
     /// signals the helper to inherit its own (the app's) environment.
-    public init(request: TerminalLaunchRequest) {
+    public init(
+        request: TerminalLaunchRequest,
+        themeID: String? = nil,
+        fonts: FontSettings = FontSettings(),
+        appShortcutSignatures: [String] = []
+    ) {
         switch request.backend {
         case .agentPTY(let descriptor):
             self.init(
@@ -86,7 +91,11 @@ extension IsolatedTerminalLaunch {
                 captureLogPath: descriptor.captureLogURL?.path,
                 captureLogMaximumBytes: Int(descriptor.captureLogMaximumBytes),
                 startupInput: descriptor.startupInput,
-                agentCLI: request.agentCLI?.rawValue
+                agentCLI: request.agentCLI?.rawValue,
+                themeID: themeID,
+                terminalFontFamily: fonts.terminalFamily,
+                terminalFontSize: fonts.terminalSize,
+                appShortcutSignatures: appShortcutSignatures
             )
         case .exec:
             self.init(
@@ -96,7 +105,11 @@ extension IsolatedTerminalLaunch {
                 captureLogPath: nil,
                 captureLogMaximumBytes: nil,
                 startupInput: nil,
-                agentCLI: request.agentCLI?.rawValue
+                agentCLI: request.agentCLI?.rawValue,
+                themeID: themeID,
+                terminalFontFamily: fonts.terminalFamily,
+                terminalFontSize: fonts.terminalSize,
+                appShortcutSignatures: appShortcutSignatures
             )
         }
     }

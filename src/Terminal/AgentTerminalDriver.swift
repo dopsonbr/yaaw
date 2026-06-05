@@ -117,7 +117,8 @@ public final class AgentTerminalOutputPump: @unchecked Sendable {
         lock.lock()
         activeDeliveryID = deliveryID
         lock.unlock()
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + blockedDeliveryThreshold) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + blockedDeliveryThreshold)
+        {
             [weak self] in
             self?.recordBlockedDeliveryIfNeeded(
                 deliveryID: deliveryID,
@@ -183,7 +184,8 @@ public final class AgentTerminalProcessDriver: @unchecked Sendable {
         startupInputDelay: TimeInterval = 0.7,
         onLaunchFailure: @escaping @Sendable (Error) -> Void
     ) {
-        let startupInputData = startupInput
+        let startupInputData =
+            startupInput
             .flatMap { $0.isEmpty ? nil : $0.data(using: .utf8) }
         self.operationDriver = AgentTerminalOperationDriver(
             startupInput: startupInputData,

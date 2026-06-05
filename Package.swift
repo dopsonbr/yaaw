@@ -21,8 +21,7 @@ let package = Package(
         .executableTarget(
             name: "YAAW",
             dependencies: [
-                "YAAWKit",
-                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
+                "YAAWKit"
             ],
             path: "src/App",
             resources: [
