@@ -7,8 +7,8 @@
 
 ## Distribution
 
-- Current implementation uses `Package.swift` dependency `https://github.com/Lakr233/libghostty-spm.git` from `1.1.4` and imports only `GhosttyTerminal` inside `src/App/GhosttyTerminalSurfaceView.swift`.
+- Current implementation uses `Package.swift` dependency `https://github.com/Lakr233/libghostty-spm.git` from `1.1.4` and imports `GhosttyTerminal` only inside the isolated helper target `YAAWToolHost`.
 - Official Ghostty docs and repository currently describe `libghostty` as the embeddable API, with the public split starting at `libghostty-vt`; they do not publish a stable official SwiftUI/AppKit package for the full terminal surface as of the Plan 11 review on 2026-05-20.
-- Keep the wrapper boundary narrow. If Ghostty publishes an official full-surface Swift package later, change `Package.swift` and `src/App/GhosttyTerminalSurfaceView.swift`; do not move Ghostty types into `YAAWKit`.
+- Keep the wrapper boundary narrow. If Ghostty publishes an official full-surface Swift package later, change `Package.swift` and the `YAAWToolHost` terminal host code; do not move Ghostty types into `YAAWKit` or the main app target.
 - `script/build_and_run.sh --verify` signs the staged SwiftPM `.app` ad hoc, verifies the bundle signature, and rejects links to `/Applications/Ghostty.app`.
 - The current SwiftPM build does not require `/Applications/Ghostty.app`; Ghostty terminal code is provided by the Swift package artifact and system frameworks shown by `otool -L dist/YAAW.app/Contents/MacOS/YAAW`.

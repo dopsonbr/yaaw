@@ -276,7 +276,10 @@ final class FileBrowserTests: XCTestCase {
             result.entries.contains(
                 FileBrowserEntry(relativePath: ".git", isDirectory: true, isPruned: true)))
         // ...but their descendants are not eagerly indexed.
-        XCTAssertFalse(result.entries.contains { $0.relativePath.contains("/") && $0.relativePath.hasPrefix("node_modules/") })
+        XCTAssertFalse(
+            result.entries.contains {
+                $0.relativePath.contains("/") && $0.relativePath.hasPrefix("node_modules/")
+            })
         XCTAssertFalse(result.entries.contains { $0.relativePath.hasPrefix(".git/") })
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: root.appendingPathComponent(".yaaw").path))
@@ -470,9 +473,10 @@ final class FileBrowserTests: XCTestCase {
         let cacheKey = FileIndexCacheKey(
             root: fixture.root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
         let targetPath = "zz-special/warm-target.swift"
-        let entries = Self.largeSyntheticEntries(count: 12_000) + [
-            FileBrowserEntry(relativePath: targetPath, isDirectory: false)
-        ]
+        let entries =
+            Self.largeSyntheticEntries(count: 12_000) + [
+                FileBrowserEntry(relativePath: targetPath, isDirectory: false)
+            ]
         store.upsertCachedFileIndex(
             CachedFileIndex(
                 metadata: FileIndexMetadata(
@@ -572,13 +576,17 @@ final class FileBrowserTests: XCTestCase {
                         ignoredDirectoryCount: 0))))
 
         // The pruned placeholder is replaced by the loaded contents.
-        XCTAssertFalse(model.fileBrowserState.entries.contains { $0.relativePath == "node_modules" && $0.isPruned })
+        XCTAssertFalse(
+            model.fileBrowserState.entries.contains {
+                $0.relativePath == "node_modules" && $0.isPruned
+            })
         XCTAssertTrue(model.fileBrowserState.entries.contains(needle))
         XCTAssertEqual(model.fileBrowserState.metadata?.ignoredDirectoryCount, 0)
 
         // Lazily-loaded files now participate in fuzzy search.
         model.updateFileSearchQuery("needle.js")
-        XCTAssertEqual(model.fileBrowserState.visibleEntries.map(\.relativePath), [needle.relativePath])
+        XCTAssertEqual(
+            model.fileBrowserState.visibleEntries.map(\.relativePath), [needle.relativePath])
     }
 
     func testExpandingDirectoryIgnoresNonPrunedAndDuplicateRequests() throws {
@@ -621,7 +629,8 @@ final class FileBrowserTests: XCTestCase {
         model.selectThread(id: fixture.firstThreadID)
 
         // Switching back restores the first thread's expansion state unchanged.
-        XCTAssertEqual(model.expandedFolders(forThreadID: fixture.firstThreadID), ["src", "src/app"])
+        XCTAssertEqual(
+            model.expandedFolders(forThreadID: fixture.firstThreadID), ["src", "src/app"])
         XCTAssertEqual(model.expandedFolders(forThreadID: fixture.secondThreadID), ["docs"])
     }
 
@@ -830,7 +839,8 @@ final class FileBrowserTests: XCTestCase {
                     threadID: fixture.firstThreadID, root: fixture.firstRoot,
                     prunedPath: "worktrees", childFile: "worktrees/wt1/old.swift")))
         XCTAssertTrue(
-            model.fileBrowserState.entries.contains { $0.relativePath == "worktrees/wt1/old.swift" })
+            model.fileBrowserState.entries.contains { $0.relativePath == "worktrees/wt1/old.swift" }
+        )
 
         // A filesystem change forces a full reindex that re-prunes worktrees...
         model.refreshSelectedFileBrowser()
@@ -913,7 +923,8 @@ final class FileBrowserTests: XCTestCase {
         model.selectAdjacentFile(direction: .down)
         XCTAssertEqual(model.selectedFileRelativePath, adjacentTargetPath)
         model.updateFileSearchQuery("")
-        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
+        XCTAssertEqual(
+            model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
         XCTAssertFalse(model.fileBrowserState.isVisibleEntryLimitApplied)
         XCTAssertTrue(recorder.events.contains { $0.name == "file_index_completed" })
         XCTAssertTrue(recorder.events.contains { $0.name == "file_browser_search_completed" })
@@ -947,7 +958,8 @@ final class FileBrowserTests: XCTestCase {
 
         model.updateFileSearchQuery("")
 
-        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
+        XCTAssertEqual(
+            model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
         XCTAssertEqual(model.fileBrowserState.entries.count, entries.count)
         XCTAssertFalse(model.fileBrowserState.isVisibleEntryLimitApplied)
         XCTAssertFalse(model.fileBrowserState.isBrowseEntryLimitApplied)
@@ -976,7 +988,8 @@ final class FileBrowserTests: XCTestCase {
         )
 
         XCTAssertEqual(model.fileBrowserState.entries.count, entries.count)
-        XCTAssertEqual(model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
+        XCTAssertEqual(
+            model.fileBrowserState.visibleEntries.count, model.fileBrowserState.entries.count)
         XCTAssertTrue(model.fileBrowserState.entries.contains { !$0.isDirectory })
         XCTAssertTrue(model.fileBrowserState.visibleEntries.contains { !$0.isDirectory })
         XCTAssertFalse(model.fileBrowserState.isBrowseEntryLimitApplied)

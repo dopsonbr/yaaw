@@ -486,7 +486,8 @@ final class AgentCLIAdapterTests: XCTestCase {
         )
 
         XCTAssertNil(service.exactSessionLinkCandidate(for: thread))
-        XCTAssertEqual(service.sessionLinkCandidates(for: thread).first?.identity, "codex-history-1")
+        XCTAssertEqual(
+            service.sessionLinkCandidates(for: thread).first?.identity, "codex-history-1")
     }
 
     func testManualSessionLinkCandidatesRankDirectoryMatchesBeforeRecency() throws {

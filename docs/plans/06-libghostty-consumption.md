@@ -18,7 +18,7 @@ Rationale:
 - The official full-surface API exists in `include/ghostty.h`, but upstream does not currently publish it as a stable Swift Package product.
 - Homebrew/system linking would make app startup depend on a contributor's machine state and would not describe what is packaged into the final app.
 - `Lakr233/libghostty-spm` pins and distributes `GhosttyKit.xcframework` through SwiftPM and already provides a native AppKit/SwiftUI `TerminalSurfaceView` boundary.
-- The app remains insulated behind `src/App/GhosttyTerminalSurfaceView.swift`, so Plan 11 can swap the package out for an upstream official package or a directly vendored XCFramework without changing `AppModel`, terminal roles, or persistence.
+- Historical note: the app was originally insulated behind `src/App/GhosttyTerminalSurfaceView.swift`. After per-terminal process isolation, Ghostty ownership moved into `YAAWToolHost`, so the main app can swap helper packaging without moving Ghostty types into `AppModel`, terminal roles, or persistence.
 
 ## Build Prerequisites
 
@@ -29,7 +29,7 @@ Rationale:
 
 ## Bridge Boundary
 
-- `src/App/GhosttyTerminalSurfaceView.swift` is the only app-owned SwiftUI/AppKit boundary that attaches a Ghostty-backed terminal view.
+- `YAAWToolHost` is the only SwiftUI/AppKit boundary that attaches a Ghostty-backed terminal view.
 - Direct `libghostty` calls live in the Swift Package dependency, not in app state or feature code.
 - `RootView` only passes `TerminalLaunchRequest` values from `AppModel`; it does not touch libghostty types.
 - Unit tests continue to use `PlaceholderTerminalSessionManager` and do not require a Ghostty framework.
@@ -42,9 +42,9 @@ Rationale:
 
 ## Cleanup
 
-- `GhosttyTerminalRuntime.closeAll()` releases retained app-owned terminal state when `NSApplication.willTerminateNotification` fires.
-- Replacing a terminal role drops the prior state for that role.
-- Removing a SwiftUI container detaches the retained host view but does not kill the role's terminal; this preserves runtime state while the app process remains open.
+- The main app shuts down helper processes on `NSApplication.willTerminateNotification`, and helpers also exit if their parent process disappears.
+- Replacing a terminal role restarts that role's helper with the new launch payload.
+- Removing a SwiftUI pane hides the helper window but does not kill the role's terminal; this preserves runtime state while the app process remains open.
 
 ## Packaging Notes For Plan 11
 

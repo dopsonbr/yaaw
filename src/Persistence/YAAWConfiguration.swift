@@ -158,7 +158,9 @@ public struct AgentSettings: Codable, Equatable, Sendable {
     }
 
     fileprivate func validated() -> AgentSettings {
-        AgentSettings(default: `default`, launchDefaults: launchDefaults.validated())
+        AgentSettings(
+            default: `default`,
+            launchDefaults: launchDefaults.validated())
     }
 }
 

@@ -1,22 +1,33 @@
 import AppKit
+import Darwin
 import SwiftUI
 
 struct IsolatedToolViewportReporter: NSViewRepresentable {
     let onViewportChanged: (CGRect, Bool) -> Void
+    var allowsToolHostFrontmostVisibility = false
 
     func makeNSView(context: Context) -> ViewportView {
         let view = ViewportView()
         view.onViewportChanged = onViewportChanged
+        view.allowsToolHostFrontmostVisibility = allowsToolHostFrontmostVisibility
         return view
     }
 
     func updateNSView(_ nsView: ViewportView, context: Context) {
         nsView.onViewportChanged = onViewportChanged
+        nsView.allowsToolHostFrontmostVisibility = allowsToolHostFrontmostVisibility
         nsView.report()
+    }
+
+    func allowsToolHostFrontmostVisibility(_ allowed: Bool) -> Self {
+        var copy = self
+        copy.allowsToolHostFrontmostVisibility = allowed
+        return copy
     }
 
     final class ViewportView: NSView {
         var onViewportChanged: ((CGRect, Bool) -> Void)?
+        var allowsToolHostFrontmostVisibility = false
 
         deinit {
             NotificationCenter.default.removeObserver(self)
@@ -111,10 +122,23 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
             let visible =
                 !isHiddenOrHasHiddenAncestor
                 && window.isVisible
-                && NSApp.isActive
+                && isApplicationClusterFrontmost
                 && screenRect.width > 1
                 && screenRect.height > 1
             onViewportChanged?(screenRect, visible)
+        }
+
+        private var isApplicationClusterFrontmost: Bool {
+            guard allowsToolHostFrontmostVisibility else {
+                return NSApp.isActive
+            }
+            guard let frontmostApplication = NSWorkspace.shared.frontmostApplication else {
+                return NSApp.isActive
+            }
+            if frontmostApplication.processIdentifier == getpid() {
+                return true
+            }
+            return frontmostApplication.executableURL?.lastPathComponent == "YAAWToolHost"
         }
     }
 }

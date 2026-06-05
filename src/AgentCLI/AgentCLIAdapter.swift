@@ -457,7 +457,7 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
                 executableNameOverride: executableNameOverride,
                 permissionModes: permissionModes
             )
-                .command
+            .command
         }
         return terminalLaunchDescriptor(
             for: thread,
@@ -476,7 +476,7 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
             executableNameOverride: executableNameOverride,
             permissionModes: permissionModes
         )
-            .command
+        .command
         let helperBinURL = installNotifyHelperIfNeeded()
         let activityLogURL = activityLogURL(for: thread)
         let captureLogURL = captureLogURL(for: thread)
@@ -829,12 +829,14 @@ public final class AgentCLISessionBindingService: @unchecked Sendable {
         workingDirectory: URL
     ) -> [SessionLinkCandidate] {
         candidates.sorted { lhs, rhs in
-            let lhsDirectoryMatches = lhs.workingDirectory.map {
-                sameDirectory($0, workingDirectory)
-            } ?? false
-            let rhsDirectoryMatches = rhs.workingDirectory.map {
-                sameDirectory($0, workingDirectory)
-            } ?? false
+            let lhsDirectoryMatches =
+                lhs.workingDirectory.map {
+                    sameDirectory($0, workingDirectory)
+                } ?? false
+            let rhsDirectoryMatches =
+                rhs.workingDirectory.map {
+                    sameDirectory($0, workingDirectory)
+                } ?? false
             if lhsDirectoryMatches != rhsDirectoryMatches {
                 return lhsDirectoryMatches
             }

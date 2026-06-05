@@ -19,6 +19,23 @@ public enum TerminalRole: Hashable, Sendable {
             return .lazygit
         }
     }
+
+    /// Stable identifier for the out-of-process terminal helper that hosts this
+    /// role (one helper per role; persists while the role is live).
+    public var isolatedInstanceID: String {
+        switch self {
+        case .project(let threadID):
+            return "project:\(threadID.uuidString)"
+        case .bottom(let threadID):
+            return "bottom:\(threadID.uuidString)"
+        case .nvim(let threadID):
+            return "nvim:\(threadID.uuidString)"
+        case .nvimTab(let threadID, let tabID):
+            return "nvimTab:\(threadID.uuidString):\(tabID)"
+        case .lazygit(let threadID):
+            return "lazygit:\(threadID.uuidString)"
+        }
+    }
 }
 
 public struct TerminalLaunchRequest: Equatable, Sendable {
@@ -52,6 +69,50 @@ public struct TerminalLaunchRequest: Equatable, Sendable {
 public enum TerminalLaunchBackend: Equatable, Sendable {
     case exec
     case agentPTY(AgentTerminalLaunchDescriptor)
+}
+
+extension IsolatedTerminalLaunch {
+    /// Maps a terminal launch request to the payload for the isolated helper.
+    /// `agentPTY` carries the full descriptor (command/env/capture log/startup
+    /// input); `exec` carries the bare command and an empty environment, which
+    /// signals the helper to inherit its own (the app's) environment.
+    public init(
+        request: TerminalLaunchRequest,
+        themeID: String? = nil,
+        fonts: FontSettings = FontSettings(),
+        appShortcutSignatures: [String] = []
+    ) {
+        switch request.backend {
+        case .agentPTY(let descriptor):
+            self.init(
+                command: descriptor.command,
+                environment: descriptor.environment,
+                workingDirectory: request.workingDirectory.path,
+                captureLogPath: descriptor.captureLogURL?.path,
+                captureLogMaximumBytes: Int(descriptor.captureLogMaximumBytes),
+                startupInput: descriptor.startupInput,
+                agentCLI: request.agentCLI?.rawValue,
+                themeID: themeID,
+                terminalFontFamily: fonts.terminalFamily,
+                terminalFontSize: fonts.terminalSize,
+                appShortcutSignatures: appShortcutSignatures
+            )
+        case .exec:
+            self.init(
+                command: request.command,
+                environment: [:],
+                workingDirectory: request.workingDirectory.path,
+                captureLogPath: nil,
+                captureLogMaximumBytes: nil,
+                startupInput: nil,
+                agentCLI: request.agentCLI?.rawValue,
+                themeID: themeID,
+                terminalFontFamily: fonts.terminalFamily,
+                terminalFontSize: fonts.terminalSize,
+                appShortcutSignatures: appShortcutSignatures
+            )
+        }
+    }
 }
 
 public struct AgentTerminalLaunchDescriptor: Equatable, Sendable {

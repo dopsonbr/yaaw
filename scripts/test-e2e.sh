@@ -47,6 +47,77 @@ wait_for_process_exit() {
   return 1
 }
 
+terminal_helper_pids() {
+  { ps -axo pid=,args= 2>/dev/null || true; } | awk -v helper="$APP_BUNDLE/Contents/Helpers/YAAWToolHost" '
+    index($0, helper) > 0 && index($0, "--tool-kind terminal") > 0 {
+      print $1
+    }
+  '
+}
+
+assert_terminal_helper_running() {
+  local context="$1"
+  for _ in {1..80}; do
+    if [[ -n "$(terminal_helper_pids)" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "$APP_NAME expected a terminal YAAWToolHost helper during $context" >&2
+  return 1
+}
+
+helper_window_count_with_prefix() {
+  local prefix="$1"
+  osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "System Events"
+  set matchCount to 0
+  repeat with candidateProcess in (processes whose name is "YAAWToolHost")
+    tell candidateProcess
+      repeat with candidateWindow in windows
+        set windowTitle to ""
+        try
+          set windowTitle to value of attribute "AXTitle" of candidateWindow as text
+        end try
+        if windowTitle starts with "$prefix" then set matchCount to matchCount + 1
+      end repeat
+    end tell
+  end repeat
+  return matchCount
+end tell
+APPLESCRIPT
+}
+
+assert_helper_window_visible_with_prefix() {
+  local prefix="$1"
+  local context="$2"
+  local count=""
+  for _ in {1..80}; do
+    count="$(helper_window_count_with_prefix "$prefix")"
+    if [[ "$count" =~ ^[0-9]+$ && "$count" -gt 0 ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "$APP_NAME expected visible helper window '$prefix*' during $context but saw '$count'" >&2
+  return 1
+}
+
+assert_helper_window_hidden_with_prefix() {
+  local prefix="$1"
+  local context="$2"
+  local count=""
+  for _ in {1..80}; do
+    count="$(helper_window_count_with_prefix "$prefix")"
+    if [[ "$count" == "0" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "$APP_NAME expected hidden helper window '$prefix*' during $context but saw '$count'" >&2
+  return 1
+}
+
 SCREENSHOT_DIR="$ARTIFACT_DIR/screenshots"
 SCREENSHOT_BLOCKER="$SCREENSHOT_DIR/SCREENSHOT_BLOCKER.md"
 mkdir -p "$SCREENSHOT_DIR"
@@ -322,8 +393,43 @@ wait_for_sql_value() {
   return 1
 }
 
+click_screen_point() {
+  local x="$1"
+  local y="$2"
+  /usr/bin/swift - "$x" "$y" <<'SWIFT' >/dev/null
+import CoreGraphics
+import Foundation
+
+guard CommandLine.arguments.count == 3,
+      let x = Double(CommandLine.arguments[1]),
+      let y = Double(CommandLine.arguments[2])
+else {
+  fputs("usage: click_screen_point x y\n", stderr)
+  exit(2)
+}
+
+let point = CGPoint(x: x, y: y)
+let source = CGEventSource(stateID: .hidSystemState)
+CGEvent(
+  mouseEventSource: source,
+  mouseType: .leftMouseDown,
+  mouseCursorPosition: point,
+  mouseButton: .left
+)?.post(tap: .cghidEventTap)
+Thread.sleep(forTimeInterval: 0.08)
+CGEvent(
+  mouseEventSource: source,
+  mouseType: .leftMouseUp,
+  mouseCursorPosition: point,
+  mouseButton: .left
+)?.post(tap: .cghidEventTap)
+Thread.sleep(forTimeInterval: 0.35)
+SWIFT
+}
+
 focus_workspace_terminal() {
-  osascript <<APPLESCRIPT >/dev/null
+  local click_point
+  click_point="$(osascript <<APPLESCRIPT
 tell application "System Events"
   tell process "$APP_NAME"
     try
@@ -336,23 +442,20 @@ tell application "System Events"
     set windowPosition to position of window 1
     set baseX to item 1 of windowPosition
     set baseY to item 2 of windowPosition
-    click at {baseX + 470, baseY + 360}
-    delay 0.4
+    return ((baseX + 470) as string) & "," & ((baseY + 360) as string)
   end tell
 end tell
 APPLESCRIPT
+)"
+  local click_x="${click_point%,*}"
+  local click_y="${click_point#*,}"
+  click_screen_point "$click_x" "$click_y"
 }
 
 send_command_shortcut() {
   local key="$1"
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
-  tell process "$APP_NAME"
-    try
-      set frontmost to true
-    end try
-    perform action "AXRaise" of window 1
-  end tell
   keystroke "$key" using command down
 end tell
 APPLESCRIPT
@@ -372,12 +475,6 @@ send_command_shift_shortcut() {
   if [[ -n "$key_code" ]]; then
     osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
-  tell process "$APP_NAME"
-    try
-      set frontmost to true
-    end try
-    perform action "AXRaise" of window 1
-  end tell
   key code $key_code using {command down, shift down}
 end tell
 APPLESCRIPT
@@ -386,12 +483,6 @@ APPLESCRIPT
 
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
-  tell process "$APP_NAME"
-    try
-      set frontmost to true
-    end try
-    perform action "AXRaise" of window 1
-  end tell
   keystroke "$key" using {command down, shift down}
 end tell
 APPLESCRIPT
@@ -526,27 +617,17 @@ run_keyboard_input_probe() {
     fi
     sleep 0.1
   done
+  assert_terminal_helper_running "keyboard input probe"
+
+  focus_workspace_terminal
+  assert_helper_window_visible_with_prefix "project:" "keyboard input probe"
 
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
-  tell process "$APP_NAME"
-    try
-      set frontmost to true
-    end try
-    perform action "AXRaise" of window 1
-    set position of window 1 to {0, 25}
-    set size of window 1 to {1100, 732}
-    delay 1
-    set windowPosition to position of window 1
-    set baseX to item 1 of windowPosition
-    set baseY to item 2 of windowPosition
-    click at {baseX + 470, baseY + 360}
-    delay 1
-    set the clipboard to "$expected"
-    keystroke "v" using command down
-    delay 0.2
-    key code 36
-  end tell
+  set the clipboard to "$expected"
+  keystroke "v" using command down
+  delay 0.2
+  key code 36
 end tell
 APPLESCRIPT
 
@@ -565,6 +646,91 @@ APPLESCRIPT
   terminate_e2e_app
   launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
   return 1
+}
+
+run_isolated_terminal_visibility_probe() {
+  local database_path="$ARTIFACT_DIR/states/isolated-terminal-visibility.sqlite"
+  local screenshot_path="$SCREENSHOT_DIR/isolated-terminal-visibility.png"
+  local selected_tab_query="SELECT COALESCE((SELECT selected_tab_id FROM right_panel_tab_state ORDER BY thread_id LIMIT 1), '');"
+  local bottom_terminal_query="SELECT COALESCE((SELECT is_expanded FROM bottom_terminal_state ORDER BY thread_id LIMIT 1), 0);"
+
+  cp "$ARTIFACT_DIR/states/launch.sqlite" "$database_path"
+  sqlite3 "$database_path" "DELETE FROM bottom_terminal_state; UPDATE right_panel_modes SET mode = 'files'; UPDATE right_panel_tab_state SET selected_tab_id = 'files';"
+  launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "isolated terminal visibility probe"
+  assert_no_privacy_prompts "isolated terminal visibility probe"
+  focus_workspace_terminal
+  assert_terminal_helper_running "isolated terminal visibility probe"
+  assert_helper_window_visible_with_prefix "project:" "project terminal visibility"
+
+  send_command_shortcut "j"
+  wait_for_sql_value "$database_path" "$bottom_terminal_query" "1" "bottom terminal expansion" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+  assert_helper_window_visible_with_prefix "bottom:" "bottom terminal expansion" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+
+  send_command_shortcut "j"
+  wait_for_sql_value "$database_path" "$bottom_terminal_query" "0" "bottom terminal collapse" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+  assert_helper_window_hidden_with_prefix "bottom:" "bottom terminal collapse" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+
+  send_command_shortcut "2"
+  wait_for_sql_value "$database_path" "$selected_tab_query" "git" "git tab selection" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+  assert_helper_window_visible_with_prefix "lazygit:" "git tab selection" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+
+  send_command_shortcut "1"
+  wait_for_sql_value "$database_path" "$selected_tab_query" "files" "files tab selection" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+  assert_helper_window_hidden_with_prefix "lazygit:" "files tab selection" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+
+  osascript <<APPLESCRIPT >/dev/null
+tell application "System Events"
+  tell process "$APP_NAME"
+    perform action "AXRaise" of window 1
+    set size of window 1 to {980, 700}
+    delay 0.15
+    set size of window 1 to {1180, 820}
+    delay 0.15
+    set size of window 1 to {1040, 720}
+    delay 0.15
+    set size of window 1 to {1100, 760}
+  end tell
+end tell
+APPLESCRIPT
+  assert_helper_window_visible_with_prefix "project:" "window resize tracking" || {
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  }
+  capture_window "$screenshot_path" || true
+  terminate_e2e_app
 }
 
 run_settings_editor_probe() {
@@ -696,6 +862,7 @@ fi
 # verifies durable state transitions directly, while the launched app states
 # below verify real rendering and terminal behavior through screenshots.
 run_keyboard_input_probe
+run_isolated_terminal_visibility_probe
 run_workspace_shortcut_probe
 run_settings_editor_probe
 

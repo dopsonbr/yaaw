@@ -173,7 +173,7 @@ struct YAAWApp: App {
 
                 CommandMenu("Thread") {
                     ShortcutCommandButton(model: model, action: .newThread, title: "New Thread") {
-                        try? model.createThread(agentCLI: nil)
+                        _ = try? model.createThread(agentCLI: nil)
                     }
 
                     ShortcutCommandButton(
@@ -349,7 +349,7 @@ struct YAAWApp: App {
         panel.allowsMultipleSelection = false
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
         if panel.runModal() == .OK, let url = panel.url {
-            try? model.createProject(displayName: url.lastPathComponent, rootDirectory: url)
+            _ = try? model.createProject(displayName: url.lastPathComponent, rootDirectory: url)
         }
     }
 
@@ -509,18 +509,12 @@ private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
         shortcutPreflightMonitor.installIfNeeded()
     }
 
-    @MainActor
-    func applicationWillTerminate(_ notification: Notification) {
-        cleanupTerminalProcesses()
-    }
-
     private func installTerminationSignalHandlers() {
         for signalNumber in [SIGTERM, SIGINT] {
             _ = Darwin.signal(signalNumber, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .main)
             source.setEventHandler {
                 Task { @MainActor in
-                    GhosttyTerminalRuntime.closeAll()
                     NSApplication.shared.terminate(nil)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         Darwin.exit(0)
@@ -530,11 +524,6 @@ private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
             source.resume()
             terminationSignalSources.append(source)
         }
-    }
-
-    @MainActor
-    private func cleanupTerminalProcesses() {
-        GhosttyTerminalRuntime.closeAll()
     }
 
     func updateShortcutPreflightModel(_ model: AppModel) {

@@ -243,7 +243,8 @@ final class AppModelBenchmarks: BenchmarkCase {
 
     private static func seconds(from duration: Duration) -> Double {
         let components = duration.components
-        return Double(components.seconds) + Double(components.attoseconds) / 1_000_000_000_000_000_000
+        return Double(components.seconds) + Double(components.attoseconds)
+            / 1_000_000_000_000_000_000
     }
 
     private static func makeSnapshot(threadCount: Int) -> YAAWSnapshot {

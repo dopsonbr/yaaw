@@ -255,10 +255,10 @@ public final class AgentCLIOptionCatalogService: AgentCLIOptionCatalogServicing,
     }
 
     private static func stableHash(_ text: String) -> String {
-        var hash: UInt64 = 0xcbf29ce484222325
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in text.utf8 {
             hash ^= UInt64(byte)
-            hash &*= 0x100000001b3
+            hash &*= 0x100_0000_01b3
         }
         return String(format: "%016llx", hash)
     }

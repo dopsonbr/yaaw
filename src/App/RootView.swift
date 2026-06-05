@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AppKit
 import SwiftUI
 import YAAWKit
@@ -19,6 +20,10 @@ struct RootView: View {
     let onReloadSettings: () -> Void
     let onInstallLatestRelease: () -> Void
     @State private var isShowingUpdateConfirmation = false
+    // Shared across all terminal panes and stable for the app's lifetime, so
+    // isolated-terminal helpers persist while their thread is live even as panes
+    // mount/unmount on thread switches.
+    @StateObject private var terminalRuntime = IsolatedToolRuntime()
 
     var body: some View {
         GeometryReader { geometry in
@@ -77,6 +82,17 @@ struct RootView: View {
         .environment(\.fontSettings, model.configuration.fonts)
         .environment(\.appTheme, model.configuration.resolvedTheme)
         .environment(\.colorScheme, model.configuration.resolvedTheme.swiftUIColorScheme)
+        .environmentObject(terminalRuntime)
+        .onAppear {
+            // Tearing down a terminal kills only its isolated helper — never the
+            // app or sibling terminals (the user's "kill one thread" capability).
+            model.onTerminalTerminated = { [terminalRuntime] role in
+                terminalRuntime.terminalShutdown(instanceID: role.isolatedInstanceID)
+            }
+            terminalRuntime.onKeyboardShortcut = { key, modifiers in
+                handleForwardedTerminalShortcut(key: key, modifierRawValues: modifiers)
+            }
+        }
         .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
         .confirmationDialog(
             "Install the latest release?",
@@ -95,13 +111,24 @@ struct RootView: View {
         .onReceive(
             NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
         ) { _ in
-            GhosttyTerminalRuntime.closeAll()
+            terminalRuntime.shutdownAllHosts()
         }
     }
 
     private var selectedBottomTerminalRequest: TerminalLaunchRequest? {
         guard let selectedThreadID = model.selectedThreadID else { return nil }
         return model.terminalLaunchRequest(for: .bottom(threadID: selectedThreadID))
+    }
+
+    private var terminalAppShortcutSignatures: [String] {
+        var signatures = KeyboardShortcutAction.allCases.compactMap { action -> String? in
+            guard action.scope != .settings,
+                model.isKeyboardShortcutEnabled(for: action)
+            else { return nil }
+            return model.keyboardShortcutDefinition(for: action).signature
+        }
+        signatures.append("command+q")
+        return Array(Set(signatures)).sorted()
     }
 
     private var availableExternalOpenTools: [ExternalOpenToolID] {
@@ -169,6 +196,7 @@ struct RootView: View {
                 isExpanded: model.isBottomTerminalExpanded,
                 request: selectedBottomTerminalRequest,
                 fonts: model.configuration.fonts,
+                appShortcutSignatures: terminalAppShortcutSignatures,
                 onToggle: model.toggleBottomTerminal,
                 onAppearExpanded: {
                     model.activateSelectedBottomTerminal()
@@ -188,7 +216,7 @@ struct RootView: View {
 
     @ViewBuilder
     private var agentCLIRegion: some View {
-        MainWorkspaceView(model: model)
+        MainWorkspaceView(model: model, appShortcutSignatures: terminalAppShortcutSignatures)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -227,6 +255,7 @@ struct RootView: View {
         RightPanelView(
             model: model,
             defaultExternalEditorTool: defaultExternalEditorTool,
+            appShortcutSignatures: terminalAppShortcutSignatures,
             onOpenFileExternally: openFileExternally,
             onCopyPath: copyFileBrowserPath
         )
@@ -256,6 +285,94 @@ struct RootView: View {
             model.resetRightPanelWidth()
         case .bottomTerminal:
             model.resetGlobalTerminalHeight()
+        }
+    }
+
+    private func handleForwardedTerminalShortcut(key: String, modifierRawValues: [String]) {
+        let modifiers = modifierRawValues.compactMap(KeyboardShortcutModifier.init(rawValue:))
+        guard modifiers.count == modifierRawValues.count,
+            let signature = KeyboardShortcutDefinition(key: key, modifiers: modifiers).signature
+        else { return }
+
+        if signature == "command+q" {
+            NSApplication.shared.terminate(nil)
+            return
+        }
+
+        guard
+            let action = KeyboardShortcutAction.allCases.first(where: { action in
+                guard action.scope != .settings,
+                    model.isKeyboardShortcutEnabled(for: action)
+                else { return false }
+                return model.keyboardShortcutDefinition(for: action).signature == signature
+            })
+        else { return }
+
+        performForwardedTerminalShortcut(action)
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
+    private func performForwardedTerminalShortcut(_ action: KeyboardShortcutAction) {
+        switch action {
+        case .openSettings:
+            isSettingsOpen = true
+        case .newThread:
+            _ = try? model.createThread(agentCLI: nil)
+        case .toggleSelectedProjectPinned:
+            model.toggleSelectedProjectPinned()
+        case .moveSelectedProjectUp:
+            model.moveSelectedProject(direction: .up)
+        case .moveSelectedProjectDown:
+            model.moveSelectedProject(direction: .down)
+        case .toggleSelectedProjectExpanded:
+            model.toggleSelectedProjectExpanded()
+        case .toggleSelectedProjectArchiveExpanded:
+            model.toggleSelectedProjectArchiveExpanded()
+        case .toggleSelectedThreadPinned:
+            model.toggleSelectedThreadPinned()
+        case .archiveSelectedThread:
+            model.archiveSelectedThread()
+        case .unarchiveSelectedThread:
+            model.unarchiveSelectedThread()
+        case .toggleBottomTerminal:
+            model.toggleBottomTerminal()
+        case .navigateBack:
+            model.navigateBack()
+        case .navigateForward:
+            model.navigateForward()
+        case .previousRightPanelMode:
+            model.cycleRightPanelModeBackward()
+        case .nextRightPanelMode:
+            model.cycleRightPanelModeForward()
+        case .selectFilesRightPanelMode:
+            model.selectRightPanelMode(.files)
+        case .selectGitRightPanelMode:
+            model.selectRightPanelMode(.git)
+        case .selectNvimRightPanelMode:
+            model.selectRightPanelMode(.nvim)
+        case .toggleSidebar:
+            model.toggleSidebarCollapsed()
+        case .toggleRightPanel:
+            model.toggleRightPanelCollapsed()
+        case .swapMainAndRightPanels:
+            model.toggleWorkspaceSwap()
+        case .refreshFiles:
+            model.refreshSelectedFileBrowser()
+        case .openSelectedFileInNvim:
+            model.openSelectedFileInNvim()
+        case .newProject, .openNvimFilePicker, .openSelectedDirectoryExternalDefault,
+            .openSelectedDirectoryInVSCode, .openSelectedDirectoryInVSCodeInsiders,
+            .openSelectedDirectoryInSublimeText, .openSelectedDirectoryInZed,
+            .openSelectedDirectoryInFinder, .openSelectedDirectoryInTerminal,
+            .openSelectedDirectoryInGhostty, .openSelectedDirectoryInXcode,
+            .openSelectedDirectoryInWebStorm, .openSelectedFileExternalDefault,
+            .openSelectedFileInVSCode, .openSelectedFileInVSCodeInsiders,
+            .openSelectedFileInSublimeText, .openSelectedFileInZed,
+            .openSelectedFileInFinder, .openSelectedFileInTerminal,
+            .openSelectedFileInGhostty, .openSelectedFileInXcode,
+            .openSelectedFileInWebStorm, .saveSettings, .reloadSettings,
+            .revertSettings, .openSettingsExternal:
+            break
         }
     }
 }
@@ -787,8 +904,9 @@ private struct SettingsEditorView: View {
                 }
 
                 settingsRow("Markdown/HTML") {
-                    Picker("Markdown and HTML primary open", selection: markdownHTMLDefaultSelection)
-                    {
+                    Picker(
+                        "Markdown and HTML primary open", selection: markdownHTMLDefaultSelection
+                    ) {
                         Text("Preview").tag(FileBrowserMarkdownAndHTMLDefault.browserPreview)
                         Text("Editor").tag(FileBrowserMarkdownAndHTMLDefault.editor)
                     }
@@ -2403,6 +2521,7 @@ private struct ThreadRenameSheet: View {
 
 private struct MainWorkspaceView: View {
     @ObservedObject var model: AppModel
+    let appShortcutSignatures: [String]
     private let capturePoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var isSessionLinkSheetPresented = false
 
@@ -2436,6 +2555,7 @@ private struct MainWorkspaceView: View {
                         request: selectedProjectTerminalRequest,
                         unavailableMessage: selectedProjectTerminalUnavailableMessage,
                         fonts: model.configuration.fonts,
+                        appShortcutSignatures: appShortcutSignatures,
                         onTitleChange: { role, title in
                             if case .project(let threadID) = role {
                                 model.recordAgentCLITerminalTitle(threadID: threadID, title: title)
@@ -2647,6 +2767,7 @@ private struct SessionLinkSheet: View {
 private struct RightPanelView: View {
     @ObservedObject var model: AppModel
     let defaultExternalEditorTool: ExternalOpenToolID?
+    let appShortcutSignatures: [String]
     let onOpenFileExternally: (FileBrowserEntry, ExternalOpenToolID) -> Void
     let onCopyPath: (FileBrowserEntry, FileBrowserCopyPathStyle) -> Void
     @StateObject private var isolatedToolRuntime = IsolatedToolRuntime()
@@ -2699,7 +2820,10 @@ private struct RightPanelView: View {
                             Image(systemName: IconRole.disclosureExpanded.icon.systemSymbolName)
                                 .font(.system(size: 9, weight: ChromeMetrics.glyphWeight))
                         }
-                        .font(.system(size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight))
+                        .font(
+                            .system(
+                                size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight)
+                        )
                         .frame(width: 38, height: 32)
                         .contentShape(Rectangle())
                     }
@@ -2776,7 +2900,8 @@ private struct RightPanelView: View {
                 TerminalPlaceholderView(
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "nvim"),
-                    fonts: model.configuration.fonts
+                    fonts: model.configuration.fonts,
+                    appShortcutSignatures: appShortcutSignatures
                 )
                 .id(
                     "\(model.selectedThreadID?.uuidString ?? "none")-\(model.selectedRightPanelTab.id)"
@@ -2789,7 +2914,8 @@ private struct RightPanelView: View {
                 TerminalPlaceholderView(
                     request: selectedRightPanelRequest,
                     unavailableMessage: selectedRightPanelUnavailableMessage(tool: "lazygit"),
-                    fonts: model.configuration.fonts
+                    fonts: model.configuration.fonts,
+                    appShortcutSignatures: appShortcutSignatures
                 )
                 .id(model.selectedThreadID)
                 .onAppear {
@@ -2852,7 +2978,9 @@ private struct RightPanelView: View {
                         systemName: IconRole.rightPanelMode(mode(for: tab.kind)).icon
                             .systemSymbolName
                     )
-                    .font(.system(size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight))
+                    .font(
+                        .system(size: ChromeMetrics.toolbarGlyph, weight: ChromeMetrics.glyphWeight)
+                    )
                     .frame(width: 22, height: 32)
 
                     if showsTitle {

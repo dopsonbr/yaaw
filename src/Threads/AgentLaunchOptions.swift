@@ -45,7 +45,8 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
     ) -> [String] {
         guard let permissionModeID else { return [] }
         let supportedModes = permissionModes ?? AgentPermissionMode.supportedModes(for: agentCLI)
-        return supportedModes
+        return
+            supportedModes
             .first { $0.id == permissionModeID }?
             .arguments ?? []
     }
@@ -111,7 +112,8 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
         arguments.map { argument in
             let needsQuoting = argument.isEmpty || argument.contains { $0.isWhitespace }
             guard needsQuoting else { return argument }
-            return "\"\(argument.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+            return
+                "\"\(argument.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
         }
         .joined(separator: " ")
     }
