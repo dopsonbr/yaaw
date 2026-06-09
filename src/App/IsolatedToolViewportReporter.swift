@@ -145,15 +145,21 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
                 !isHiddenOrHasHiddenAncestor
                 && window.isVisible
                 && isApplicationVisibleForToolHost
-                && !isBlockedByAttachedWindow
+                && !isBlockedByAttachedWindow(over: screenRect)
                 && screenRect.width > 1
                 && screenRect.height > 1
             onViewportChanged?(screenRect, visible, isApplicationClusterFrontmost)
         }
 
-        private var isBlockedByAttachedWindow: Bool {
+        /// A sheet on the pane's own window always blocks (the whole window is
+        /// interaction-blocked, and the floating helper would look live above
+        /// it). An app-modal window only blocks the panes it actually covers —
+        /// hiding every terminal for any dialog anywhere was a bug.
+        private func isBlockedByAttachedWindow(over screenRect: CGRect) -> Bool {
             guard hidesWhenWindowHasAttachedSheet else { return false }
-            return window?.attachedSheet != nil || NSApp.modalWindow != nil
+            if window?.attachedSheet != nil { return true }
+            guard let modalWindow = NSApp.modalWindow else { return false }
+            return modalWindow.frame.intersects(screenRect)
         }
 
         private var isApplicationVisibleForToolHost: Bool {
