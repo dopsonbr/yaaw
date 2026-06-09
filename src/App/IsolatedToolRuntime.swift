@@ -163,6 +163,9 @@ final class IsolatedToolRuntime: ObservableObject {
             break
         case .relaunchProcess:
             shutdown(instanceID: instanceID)
+            // shutdown drops the per-instance caches; restore the handlers we
+            // were just given for the relaunched helper.
+            terminalHandlersByInstanceID[instanceID] = (role, handlers)
         }
         guard startHost(kind: .terminal, instanceID: instanceID) else { return }
         terminalLaunchesByInstanceID[instanceID] = launch
@@ -286,10 +289,16 @@ final class IsolatedToolRuntime: ObservableObject {
         ensureLaunched(kind: kind, instanceID: instanceID)
     }
 
+    /// Explicit teardown: also drops the per-instance handler and viewport
+    /// caches so closed threads don't accumulate state. Crash paths
+    /// (handleExit/handleWriteFailure) keep the viewport cache so a relaunch
+    /// can replay the last frame.
     func shutdown(instanceID: String) {
         hostsByInstanceID[instanceID]?.shutdown()
         hostsByInstanceID[instanceID] = nil
         terminalLaunchesByInstanceID[instanceID] = nil
+        terminalViewportPayloadsByInstanceID[instanceID] = nil
+        terminalHandlersByInstanceID[instanceID] = nil
         apply(.exited(nil), instanceID: instanceID)
     }
 
