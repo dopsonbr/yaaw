@@ -20,6 +20,7 @@ final class IsolatedToolRuntime: ObservableObject {
 
     private var hostsByInstanceID: [String: IsolatedToolHostProcess] = [:]
     private var terminalLaunchesByInstanceID: [String: IsolatedTerminalLaunch] = [:]
+    private var terminalViewportPayloadsByInstanceID: [String: [String: String]] = [:]
     private var terminalHandlersByInstanceID:
         [String: (role: TerminalRole, handlers: IsolatedTerminalEventHandlers)] = [:]
     private let helperURLProvider: @MainActor () -> URL?
@@ -153,6 +154,13 @@ final class IsolatedToolRuntime: ObservableObject {
             kind: .terminal,
             instanceID: instanceID,
             payload: launch.payload())
+        if let viewportPayload = terminalViewportPayloadsByInstanceID[instanceID] {
+            send(
+                type: "setViewport",
+                kind: .terminal,
+                instanceID: instanceID,
+                payload: viewportPayload)
+        }
     }
 
     func terminalSetViewport(
@@ -161,14 +169,16 @@ final class IsolatedToolRuntime: ObservableObject {
         visible: Bool,
         shouldFloatToolHost: Bool
     ) {
+        let payload = Self.viewportPayload(
+            frame: frame,
+            visible: visible,
+            shouldFloatToolHost: shouldFloatToolHost)
+        terminalViewportPayloadsByInstanceID[instanceID] = payload
         send(
             type: "setViewport",
             kind: .terminal,
             instanceID: instanceID,
-            payload: Self.viewportPayload(
-                frame: frame,
-                visible: visible,
-                shouldFloatToolHost: shouldFloatToolHost))
+            payload: payload)
     }
 
     func terminalFocus(instanceID: String, focused: Bool) {
@@ -304,6 +314,9 @@ final class IsolatedToolRuntime: ObservableObject {
             try hostsByInstanceID[instanceID]?.send(envelope)
         } catch {
             hostsByInstanceID[instanceID] = nil
+            if kind == .terminal {
+                terminalLaunchesByInstanceID[instanceID] = nil
+            }
             apply(
                 .crashed("Tool host command failed: \(error.localizedDescription)"),
                 instanceID: instanceID)
