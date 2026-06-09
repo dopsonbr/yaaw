@@ -330,6 +330,9 @@ final class IsolatedToolRuntime: ObservableObject {
         do {
             try hostsByInstanceID[instanceID]?.send(envelope)
         } catch {
+            // Shut the helper down before dropping the reference; otherwise
+            // the process keeps running with nothing tracking it.
+            hostsByInstanceID[instanceID]?.shutdown()
             hostsByInstanceID[instanceID] = nil
             if kind == .terminal {
                 terminalLaunchesByInstanceID[instanceID] = nil
