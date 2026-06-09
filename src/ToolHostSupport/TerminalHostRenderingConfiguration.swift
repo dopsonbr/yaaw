@@ -9,6 +9,18 @@ public struct TerminalHostRenderingConfiguration {
     public let appKitAppearanceName: NSAppearance.Name
     public let swiftUIColorScheme: ColorScheme
 
+    /// Resolves a rendering payload into concrete configuration, centralizing
+    /// the theme-catalog and font-size fallbacks.
+    public static func make(
+        for rendering: IsolatedTerminalRendering
+    ) -> TerminalHostRenderingConfiguration {
+        make(
+            for: rendering.themeID.flatMap(ThemeCatalog.theme(id:)) ?? ThemeCatalog.defaultTheme,
+            fontSize: Float(rendering.terminalFontSize ?? FontSettings().terminalSize),
+            fontFamily: rendering.terminalFontFamily
+        )
+    }
+
     public static func make(
         for theme: ThemeDefinition,
         fontSize: Float,

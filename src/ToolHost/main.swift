@@ -115,6 +115,8 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             terminalView?.fitToSize()
         case "terminate":
             terminalController?.terminate()
+        case "setRenderingConfiguration":
+            setRenderingConfiguration(payload: envelope.payload)
         case "load":
             load(urlString: envelope.payload["urlString"])
         case "goBack":
@@ -209,6 +211,19 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             let data = Data(base64Encoded: base64)
         else { return }
         terminalController?.sendInput(data)
+    }
+
+    /// Applies a rendering-only update (theme, fonts, shortcuts) to the live
+    /// terminal. Silently ignored before `launchTerminal`: stdin ordering
+    /// guarantees the launch arrives first, and an "error" reply would flip
+    /// the parent's phase to failed over a cosmetic update.
+    private func setRenderingConfiguration(payload: [String: String]) {
+        guard let terminalController else { return }
+        let rendering = IsolatedTerminalRendering.from(payload: payload)
+        terminalAppShortcutSignatures = Set(rendering.appShortcutSignatures)
+        let configuration = TerminalHostRenderingConfiguration.make(for: rendering)
+        terminalController.applyRenderingConfiguration(configuration)
+        window?.appearance = NSAppearance(named: configuration.appKitAppearanceName)
     }
 
     private func createBrowserWindow() {
@@ -640,13 +655,8 @@ private final class TerminalHostController {
         self.driver = driver
         callbacks.driver = driver
 
-        let theme = launch.themeID.flatMap(ThemeCatalog.theme(id:)) ?? ThemeCatalog.defaultTheme
         let fontSize = Float(launch.terminalFontSize ?? FontSettings().terminalSize)
-        let renderingConfiguration = TerminalHostRenderingConfiguration.make(
-            for: theme,
-            fontSize: fontSize,
-            fontFamily: launch.terminalFontFamily
-        )
+        let renderingConfiguration = TerminalHostRenderingConfiguration.make(for: launch.rendering)
         appKitAppearanceName = renderingConfiguration.appKitAppearanceName
 
         let state = TerminalViewState(
@@ -672,6 +682,19 @@ private final class TerminalHostController {
         state.setTerminalConfiguration(renderingConfiguration.terminalConfiguration)
         view.controller = state.controller
         view.configuration = options
+    }
+
+    /// Applies theme/font changes to the live surface without restarting the
+    /// hosted process. The update must go through the state mutators only:
+    /// touching `state.configuration`/`view.configuration` rebuilds the surface
+    /// on a font-size change and wipes the grid. Ghostty reflows the grid via
+    /// its cell-size action; `fitToSize` is a defensive no-op otherwise.
+    func applyRenderingConfiguration(_ configuration: TerminalHostRenderingConfiguration) {
+        state.setTheme(configuration.terminalTheme)
+        state.setTerminalConfiguration(configuration.terminalConfiguration)
+        state.adopt(colorScheme: configuration.swiftUIColorScheme)
+        view.appearance = NSAppearance(named: configuration.appKitAppearanceName)
+        view.fitToSize()
     }
 
     /// Programmatic input (paste / host-injected text) straight to the PTY.

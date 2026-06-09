@@ -17,8 +17,9 @@ public enum IsolatedToolRuntimePhase: String, Codable, Equatable, Sendable {
 
 public struct IsolatedToolEnvelope: Codable, Equatable, Sendable {
     // v2 adds the `terminal` tool kind and terminal-specific message types
-    // (launchTerminal, focus, input, resize, exited). The helper is bundled
-    // with the app, so parent and child are always built in lockstep.
+    // (launchTerminal, focus, input, resize, exited, setRenderingConfiguration).
+    // The helper is bundled with the app, so parent and child are always built
+    // in lockstep.
     public static let currentProtocolVersion = 2
 
     public var protocolVersion: Int
@@ -147,19 +148,112 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
         )
     }
 
-    private static func nilIfBlank(_ value: String?) -> String? {
+    fileprivate static func nilIfBlank(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private static func encodeJSON<T: Encodable>(_ value: T) -> String? {
+    fileprivate static func encodeJSON<T: Encodable>(_ value: T) -> String? {
         guard let data = try? JSONEncoder().encode(value) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    private static func decodeJSON<T: Decodable>(_ string: String) -> T? {
+    fileprivate static func decodeJSON<T: Decodable>(_ string: String) -> T? {
         guard let data = string.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
+    }
+}
+
+/// Rendering-only configuration for a terminal helper: everything the helper
+/// can apply to a live surface without restarting the hosted process. Carried
+/// in the `setRenderingConfiguration` envelope and embedded in the launch.
+public struct IsolatedTerminalRendering: Equatable, Sendable {
+    public var themeID: String?
+    public var terminalFontFamily: String?
+    public var terminalFontSize: Double?
+    public var appShortcutSignatures: [String]
+
+    public init(
+        themeID: String? = nil,
+        terminalFontFamily: String? = nil,
+        terminalFontSize: Double? = nil,
+        appShortcutSignatures: [String] = []
+    ) {
+        self.themeID = IsolatedTerminalLaunch.nilIfBlank(themeID)
+        self.terminalFontFamily = IsolatedTerminalLaunch.nilIfBlank(terminalFontFamily)
+        self.terminalFontSize = terminalFontSize
+        self.appShortcutSignatures = appShortcutSignatures
+    }
+
+    public func payload() -> [String: String] {
+        var payload: [String: String] = [:]
+        payload["themeID"] = themeID
+        payload["terminalFontFamily"] = terminalFontFamily
+        payload["terminalFontSize"] = terminalFontSize.map { String($0) }
+        payload["appShortcutSignatures"] = IsolatedTerminalLaunch.encodeJSON(appShortcutSignatures)
+        return payload
+    }
+
+    public static func from(payload: [String: String]) -> IsolatedTerminalRendering {
+        IsolatedTerminalRendering(
+            themeID: payload["themeID"],
+            terminalFontFamily: payload["terminalFontFamily"],
+            terminalFontSize: payload["terminalFontSize"].flatMap(Double.init),
+            appShortcutSignatures: payload["appShortcutSignatures"]
+                .flatMap(IsolatedTerminalLaunch.decodeJSON) ?? []
+        )
+    }
+}
+
+extension IsolatedTerminalLaunch {
+    public var rendering: IsolatedTerminalRendering {
+        IsolatedTerminalRendering(
+            themeID: themeID,
+            terminalFontFamily: terminalFontFamily,
+            terminalFontSize: terminalFontSize,
+            appShortcutSignatures: appShortcutSignatures
+        )
+    }
+
+    public mutating func applyRendering(_ rendering: IsolatedTerminalRendering) {
+        themeID = rendering.themeID
+        terminalFontFamily = rendering.terminalFontFamily
+        terminalFontSize = rendering.terminalFontSize
+        appShortcutSignatures = rendering.appShortcutSignatures
+    }
+
+    /// True when both launches describe the same hosted process — every field
+    /// except the rendering configuration matches. Compared by normalizing the
+    /// rendering on copies and using the synthesized `==`, so any field added
+    /// to the launch later defaults to process identity (safe: restart).
+    public func processIdentityMatches(_ other: IsolatedTerminalLaunch) -> Bool {
+        var lhs = self
+        var rhs = other
+        lhs.applyRendering(IsolatedTerminalRendering())
+        rhs.applyRendering(IsolatedTerminalRendering())
+        return lhs == rhs
+    }
+}
+
+/// Classifies what `ensureTerminalLaunched` must do when the view supplies a
+/// (possibly changed) launch for an instance.
+public enum IsolatedTerminalLaunchTransition: Equatable, Sendable {
+    /// No helper is tracked for the instance — start one.
+    case launchNew
+    /// The launch is unchanged — nothing to do.
+    case noChange
+    /// Only rendering fields changed — update the live helper in place.
+    case updateRendering
+    /// The hosted process itself changed — tear down and relaunch.
+    case relaunchProcess
+
+    public static func between(
+        _ existing: IsolatedTerminalLaunch?,
+        _ next: IsolatedTerminalLaunch
+    ) -> Self {
+        guard let existing else { return .launchNew }
+        if existing == next { return .noChange }
+        return existing.processIdentityMatches(next) ? .updateRendering : .relaunchProcess
     }
 }
 

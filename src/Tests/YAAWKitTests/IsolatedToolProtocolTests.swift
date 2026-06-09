@@ -165,6 +165,98 @@ final class IsolatedToolProtocolTests: XCTestCase {
         XCTAssertNil(launch.startupInput)
     }
 
+    private func makeLaunch() -> IsolatedTerminalLaunch {
+        IsolatedTerminalLaunch(
+            command: ["/usr/bin/env", "claude"],
+            environment: ["TERM": "xterm-256color"],
+            workingDirectory: "/Users/me/project",
+            captureLogPath: "/tmp/capture/abc.log",
+            captureLogMaximumBytes: 4096,
+            startupInput: "go\n",
+            agentCLI: "claude",
+            themeID: "dracula",
+            terminalFontFamily: "JetBrains Mono",
+            terminalFontSize: 15,
+            appShortcutSignatures: ["command+j"]
+        )
+    }
+
+    func testTerminalLaunchProcessIdentityIgnoresRenderingFields() {
+        let launch = makeLaunch()
+        var restyled = launch
+        restyled.applyRendering(
+            IsolatedTerminalRendering(
+                themeID: "light-2026",
+                terminalFontFamily: "Menlo",
+                terminalFontSize: 13,
+                appShortcutSignatures: ["command+k", "command+1"]
+            ))
+
+        XCTAssertNotEqual(restyled, launch)
+        XCTAssertTrue(launch.processIdentityMatches(restyled))
+        XCTAssertTrue(restyled.processIdentityMatches(launch))
+    }
+
+    func testTerminalLaunchProcessIdentityDetectsProcessChanges() {
+        let launch = makeLaunch()
+        let mutations: [(inout IsolatedTerminalLaunch) -> Void] = [
+            { $0.command = ["/bin/zsh", "-il"] },
+            { $0.environment["TERM"] = "dumb" },
+            { $0.workingDirectory = "/elsewhere" },
+            { $0.captureLogPath = nil },
+            { $0.captureLogMaximumBytes = 8192 },
+            { $0.startupInput = nil },
+            { $0.agentCLI = "codex" },
+        ]
+        for (index, mutate) in mutations.enumerated() {
+            var changed = launch
+            mutate(&changed)
+            XCTAssertFalse(
+                launch.processIdentityMatches(changed),
+                "identity mutation \(index) should not match")
+        }
+    }
+
+    func testTerminalRenderingPayloadRoundTrips() {
+        let rendering = IsolatedTerminalRendering(
+            themeID: "dracula",
+            terminalFontFamily: "JetBrains Mono",
+            terminalFontSize: 17,
+            appShortcutSignatures: ["command+j", "command+shift+["]
+        )
+
+        let restored = IsolatedTerminalRendering.from(payload: rendering.payload())
+        XCTAssertEqual(restored, rendering)
+        XCTAssertEqual(restored.appShortcutSignatures, ["command+j", "command+shift+["])
+
+        // Blank strings normalize to nil, matching the launch payload rules.
+        let blank = IsolatedTerminalRendering(themeID: "  ", terminalFontFamily: "")
+        XCTAssertNil(blank.themeID)
+        XCTAssertNil(blank.terminalFontFamily)
+        XCTAssertEqual(
+            IsolatedTerminalRendering.from(payload: blank.payload()),
+            IsolatedTerminalRendering())
+    }
+
+    func testTerminalLaunchTransitionClassification() {
+        let launch = makeLaunch()
+        var restyled = launch
+        restyled.applyRendering(IsolatedTerminalRendering(themeID: "light-2026"))
+        var relaunched = launch
+        relaunched.command = ["/bin/zsh", "-il"]
+        var relaunchedAndRestyled = relaunched
+        relaunchedAndRestyled.applyRendering(IsolatedTerminalRendering(themeID: "light-2026"))
+
+        XCTAssertEqual(IsolatedTerminalLaunchTransition.between(nil, launch), .launchNew)
+        XCTAssertEqual(IsolatedTerminalLaunchTransition.between(launch, launch), .noChange)
+        XCTAssertEqual(IsolatedTerminalLaunchTransition.between(launch, restyled), .updateRendering)
+        XCTAssertEqual(
+            IsolatedTerminalLaunchTransition.between(launch, relaunched), .relaunchProcess)
+        XCTAssertEqual(
+            IsolatedTerminalLaunchTransition.between(launch, relaunchedAndRestyled),
+            .relaunchProcess)
+    }
+
     func testRuntimeReducerTracksTerminalExit() {
         var snapshot = IsolatedToolRuntimeSnapshot()
         snapshot = IsolatedToolRuntimeReducer.reduce(snapshot, action: .launch)

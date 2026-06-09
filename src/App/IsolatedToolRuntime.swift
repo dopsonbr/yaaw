@@ -134,7 +134,9 @@ final class IsolatedToolRuntime: ObservableObject {
     /// Spawns the terminal helper for `instanceID` (one per TerminalRole) if it
     /// is not already running, and sends the one-time launch config. Unlike the
     /// browser, the helper persists while the pane is hidden — the agent keeps
-    /// running — and is only torn down by `terminalShutdown`.
+    /// running — and is only torn down by `terminalShutdown`. Rendering-only
+    /// launch changes (theme, fonts, shortcuts) are applied to the live helper
+    /// without restarting it, so the hosted agent survives settings tweaks.
     func ensureTerminalLaunched(
         instanceID: String,
         role: TerminalRole,
@@ -142,9 +144,24 @@ final class IsolatedToolRuntime: ObservableObject {
         handlers: IsolatedTerminalEventHandlers
     ) {
         terminalHandlersByInstanceID[instanceID] = (role, handlers)
-        if let existingLaunch = terminalLaunchesByInstanceID[instanceID],
-            existingLaunch != launch
+        switch IsolatedTerminalLaunchTransition.between(
+            terminalLaunchesByInstanceID[instanceID], launch)
         {
+        case .noChange, .launchNew:
+            break
+        case .updateRendering where hostsByInstanceID[instanceID] != nil:
+            terminalLaunchesByInstanceID[instanceID] = launch
+            send(
+                type: "setRenderingConfiguration",
+                kind: .terminal,
+                instanceID: instanceID,
+                payload: launch.rendering.payload())
+            return
+        case .updateRendering:
+            // Launch map has an entry but the host is gone (shouldn't happen —
+            // both are cleared together). Fall through to a fresh launch.
+            break
+        case .relaunchProcess:
             shutdown(instanceID: instanceID)
         }
         guard startHost(kind: .terminal, instanceID: instanceID) else { return }
