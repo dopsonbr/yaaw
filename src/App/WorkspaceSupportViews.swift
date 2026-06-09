@@ -69,10 +69,16 @@ struct IsolatedAgentTerminalView: View {
         ZStack {
             Color.black
 
-            IsolatedToolViewportReporter { frame, visible in
-                runtime.terminalSetViewport(instanceID: instanceID, frame: frame, visible: visible)
+            IsolatedToolViewportReporter { frame, visible, shouldFloatToolHost in
+                runtime.terminalSetViewport(
+                    instanceID: instanceID,
+                    frame: frame,
+                    visible: visible,
+                    shouldFloatToolHost: shouldFloatToolHost)
             }
             .allowsToolHostFrontmostVisibility(true)
+            .allowsInactiveApplicationVisibility(true)
+            .hidesWhenWindowHasAttachedSheet(true)
             .allowsHitTesting(false)
 
             overlay

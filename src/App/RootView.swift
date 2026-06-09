@@ -3193,8 +3193,12 @@ private struct BrowserPanel: View {
                 ZStack(alignment: .top) {
                     Color.white
 
-                    IsolatedToolViewportReporter { frame, visible in
-                        runtime.setViewport(instanceID: instanceID, frame: frame, visible: visible)
+                    IsolatedToolViewportReporter { frame, visible, shouldFloatToolHost in
+                        runtime.setViewport(
+                            instanceID: instanceID,
+                            frame: frame,
+                            visible: visible,
+                            shouldFloatToolHost: shouldFloatToolHost)
                     }
                     .allowsHitTesting(false)
 

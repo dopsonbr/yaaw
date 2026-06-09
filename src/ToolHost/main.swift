@@ -2,8 +2,10 @@ import AppKit
 import Darwin
 import Foundation
 import GhosttyTerminal
+import SwiftUI
 import WebKit
 import YAAWKit
+import YAAWToolHostSupport
 
 @MainActor
 final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
@@ -21,6 +23,7 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var hasLaunchedTool = false
     private var isLoadingMarkdownPreview = false
     private var isSurfaceVisible = false
+    private var shouldFloatSurface = true
     private var visibleLeaseDeadline: Date?
     private var watchdogTimer: Timer?
 
@@ -97,6 +100,8 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case "focus":
             if terminalView != nil {
                 NSApp.activate(ignoringOtherApps: true)
+                shouldFloatSurface = true
+                updateTerminalWindowLevel()
             }
             window?.makeKeyAndOrderFront(nil)
             if let terminalView {
@@ -182,6 +187,9 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         )
         window.contentView = controller.view
         window.title = cliInstanceID
+        let appearance = NSAppearance(named: controller.appKitAppearanceName)
+        window.appearance = appearance
+        controller.view.appearance = appearance
         controller.view.autoresizingMask = [.width, .height]
         window.backgroundColor = .black
         window.isReleasedWhenClosed = false
@@ -239,8 +247,13 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             animate: false
         )
         let visible = payload["visible"].flatMap(Bool.init) == true
+        shouldFloatSurface = payload["shouldFloat"].flatMap(Bool.init) ?? shouldFloatSurface
+        let levelChanged = updateTerminalWindowLevel()
         visibleLeaseDeadline = visible ? Date().addingTimeInterval(0.6) : nil
         setSurfaceVisible(visible)
+        if visible, isSurfaceVisible, levelChanged, shouldFloatSurface {
+            window.orderFrontRegardless()
+        }
         // Reflow the terminal grid to the new pane size while it stays visible
         // (setSurfaceVisible only fits on a visibility transition).
         if visible, terminalView != nil {
@@ -253,7 +266,11 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard visible != isSurfaceVisible else { return }
         isSurfaceVisible = visible
         if visible {
-            window.orderFrontRegardless()
+            if shouldFloatSurface {
+                window.orderFrontRegardless()
+            } else {
+                window.orderFront(nil)
+            }
             if window.isKeyWindow, let terminalView {
                 window.makeFirstResponder(terminalView)
             }
@@ -263,6 +280,15 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             terminalView?.setSurfaceVisible(false)
             window.orderOut(nil)
         }
+    }
+
+    @discardableResult
+    private func updateTerminalWindowLevel() -> Bool {
+        guard cliToolKind == .terminal, let window else { return false }
+        let desiredLevel: NSWindow.Level = shouldFloatSurface ? .floating : .normal
+        guard window.level != desiredLevel else { return false }
+        window.level = desiredLevel
+        return true
     }
 
     private func installTerminalFocusMonitor() {
@@ -524,6 +550,7 @@ private final class TerminalHostWindow: NSWindow {
 @MainActor
 private final class TerminalHostController {
     let view: TerminalView
+    let appKitAppearanceName: NSAppearance.Name
     private let state: TerminalViewState
     private let session: InMemoryTerminalSession
     private let gate: TerminalBackpressureGate
@@ -615,15 +642,21 @@ private final class TerminalHostController {
 
         let theme = launch.themeID.flatMap(ThemeCatalog.theme(id:)) ?? ThemeCatalog.defaultTheme
         let fontSize = Float(launch.terminalFontSize ?? FontSettings().terminalSize)
-        var terminalConfiguration = Self.terminalConfiguration(for: theme, fontSize: fontSize)
-        if let family = launch.terminalFontFamily?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !family.isEmpty
-        {
-            terminalConfiguration = terminalConfiguration.fontFamily(family)
-        }
-        let state = TerminalViewState(terminalConfiguration: terminalConfiguration)
+        let renderingConfiguration = TerminalHostRenderingConfiguration.make(
+            for: theme,
+            fontSize: fontSize,
+            fontFamily: launch.terminalFontFamily
+        )
+        appKitAppearanceName = renderingConfiguration.appKitAppearanceName
+
+        let state = TerminalViewState(
+            theme: renderingConfiguration.terminalTheme,
+            terminalConfiguration: renderingConfiguration.terminalConfiguration
+        )
+        state.adopt(colorScheme: renderingConfiguration.swiftUIColorScheme)
         self.state = state
         let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        view.appearance = NSAppearance(named: renderingConfiguration.appKitAppearanceName)
         self.view = view
         let delegate = HelperTerminalDelegate(state: state, onEvent: onEvent)
         self.delegate = delegate
@@ -636,7 +669,7 @@ private final class TerminalHostController {
             context: .window
         )
         state.configuration = options
-        state.setTerminalConfiguration(terminalConfiguration)
+        state.setTerminalConfiguration(renderingConfiguration.terminalConfiguration)
         view.controller = state.controller
         view.configuration = options
     }
@@ -650,30 +683,6 @@ private final class TerminalHostController {
         driver.terminate()
     }
 
-    private static func terminalConfiguration(
-        for theme: ThemeDefinition,
-        fontSize: Float
-    ) -> TerminalConfiguration {
-        TerminalConfiguration { config in
-            config.withBackground(themeHex(.background, in: theme))
-            config.withForeground(themeHex(.foreground, in: theme))
-            config.withSelectionBackground(themeHex(.currentLine, in: theme))
-            config.withSelectionForeground(themeHex(.foreground, in: theme))
-            config.withCursorColor(themeHex(.pink, in: theme))
-            config.withCursorText(themeHex(.background, in: theme))
-            config.withBoldColor(themeHex(.yellow, in: theme))
-            for (index, color) in theme.terminalANSIPalette.enumerated() {
-                config.withPalette(index, color: color)
-            }
-            config.withFontSize(fontSize)
-            config.withWindowPaddingX(0)
-            config.withWindowPaddingY(0)
-        }
-    }
-}
-
-private func themeHex(_ role: ThemeRole, in theme: ThemeDefinition) -> String {
-    theme.hex(for: role).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
 }
 
 /// Breaks the chicken-and-egg between the ghostty session (needs write/resize

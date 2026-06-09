@@ -32,10 +32,19 @@ let package = Package(
             name: "YAAWToolHost",
             dependencies: [
                 "YAAWKit",
+                "YAAWToolHostSupport",
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
             ],
             path: "src/ToolHost",
             sources: ["main.swift"]
+        ),
+        .target(
+            name: "YAAWToolHostSupport",
+            dependencies: [
+                "YAAWKit",
+                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
+            ],
+            path: "src/ToolHostSupport"
         ),
         .target(
             name: "YAAWKit",
@@ -49,6 +58,7 @@ let package = Package(
                 "E2E",
                 "Tests",
                 "ToolHost",
+                "ToolHostSupport",
             ],
             sources: [
                 "AgentCLI",
@@ -74,6 +84,14 @@ let package = Package(
             name: "YAAWKitTests",
             dependencies: ["YAAWKit"],
             path: "src/Tests/YAAWKitTests"
+        ),
+        .testTarget(
+            name: "YAAWToolHostSupportTests",
+            dependencies: [
+                "YAAWToolHostSupport",
+                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
+            ],
+            path: "src/Tests/YAAWToolHostSupportTests"
         ),
         .testTarget(
             name: "YAAWKitBenchmarks",

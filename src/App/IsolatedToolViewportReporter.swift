@@ -3,19 +3,27 @@ import Darwin
 import SwiftUI
 
 struct IsolatedToolViewportReporter: NSViewRepresentable {
-    let onViewportChanged: (CGRect, Bool) -> Void
+    /// Emits the viewport frame, whether the helper should be visible, and
+    /// whether its window should stay above the parent app's normal content.
+    let onViewportChanged: (CGRect, Bool, Bool) -> Void
     var allowsToolHostFrontmostVisibility = false
+    var allowsInactiveApplicationVisibility = false
+    var hidesWhenWindowHasAttachedSheet = false
 
     func makeNSView(context: Context) -> ViewportView {
         let view = ViewportView()
         view.onViewportChanged = onViewportChanged
         view.allowsToolHostFrontmostVisibility = allowsToolHostFrontmostVisibility
+        view.allowsInactiveApplicationVisibility = allowsInactiveApplicationVisibility
+        view.hidesWhenWindowHasAttachedSheet = hidesWhenWindowHasAttachedSheet
         return view
     }
 
     func updateNSView(_ nsView: ViewportView, context: Context) {
         nsView.onViewportChanged = onViewportChanged
         nsView.allowsToolHostFrontmostVisibility = allowsToolHostFrontmostVisibility
+        nsView.allowsInactiveApplicationVisibility = allowsInactiveApplicationVisibility
+        nsView.hidesWhenWindowHasAttachedSheet = hidesWhenWindowHasAttachedSheet
         nsView.report()
     }
 
@@ -25,9 +33,23 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
         return copy
     }
 
+    func allowsInactiveApplicationVisibility(_ allowed: Bool) -> Self {
+        var copy = self
+        copy.allowsInactiveApplicationVisibility = allowed
+        return copy
+    }
+
+    func hidesWhenWindowHasAttachedSheet(_ hides: Bool) -> Self {
+        var copy = self
+        copy.hidesWhenWindowHasAttachedSheet = hides
+        return copy
+    }
+
     final class ViewportView: NSView {
-        var onViewportChanged: ((CGRect, Bool) -> Void)?
+        var onViewportChanged: ((CGRect, Bool, Bool) -> Void)?
         var allowsToolHostFrontmostVisibility = false
+        var allowsInactiveApplicationVisibility = false
+        var hidesWhenWindowHasAttachedSheet = false
 
         deinit {
             NotificationCenter.default.removeObserver(self)
@@ -113,7 +135,7 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
 
         func report() {
             guard let window else {
-                onViewportChanged?(.zero, false)
+                onViewportChanged?(.zero, false, NSApp.isActive)
                 updateReportTimer()
                 return
             }
@@ -122,10 +144,23 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
             let visible =
                 !isHiddenOrHasHiddenAncestor
                 && window.isVisible
-                && isApplicationClusterFrontmost
+                && isApplicationVisibleForToolHost
+                && !isBlockedByAttachedWindow
                 && screenRect.width > 1
                 && screenRect.height > 1
-            onViewportChanged?(screenRect, visible)
+            onViewportChanged?(screenRect, visible, isApplicationClusterFrontmost)
+        }
+
+        private var isBlockedByAttachedWindow: Bool {
+            guard hidesWhenWindowHasAttachedSheet else { return false }
+            return window?.attachedSheet != nil || NSApp.modalWindow != nil
+        }
+
+        private var isApplicationVisibleForToolHost: Bool {
+            if allowsInactiveApplicationVisibility {
+                return true
+            }
+            return isApplicationClusterFrontmost
         }
 
         private var isApplicationClusterFrontmost: Bool {

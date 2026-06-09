@@ -333,6 +333,82 @@ if redErrorPixels > 1000 {
 SWIFT
 }
 
+assert_terminal_region_not_near_white() {
+  local screenshot_path="$1"
+  local label="$2"
+  local x_start_percent="$3"
+  local x_end_percent="$4"
+  local y_start_percent="$5"
+  local y_end_percent="$6"
+  /usr/bin/swift - "$screenshot_path" "$label" "$x_start_percent" "$x_end_percent" "$y_start_percent" "$y_end_percent" <<'SWIFT'
+import AppKit
+import Foundation
+
+let screenshotPath = CommandLine.arguments[1]
+let label = CommandLine.arguments[2]
+guard CommandLine.arguments.count == 7,
+      let xStartPercent = Int(CommandLine.arguments[3]),
+      let xEndPercent = Int(CommandLine.arguments[4]),
+      let yStartPercent = Int(CommandLine.arguments[5]),
+      let yEndPercent = Int(CommandLine.arguments[6]),
+      let image = NSImage(contentsOfFile: screenshotPath),
+      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+else {
+  fputs("Could not read screenshot or region arguments for \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+let width = cgImage.width
+let height = cgImage.height
+let bytesPerPixel = 4
+let bytesPerRow = width * bytesPerPixel
+var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+guard let context = CGContext(
+  data: &pixels,
+  width: width,
+  height: height,
+  bitsPerComponent: 8,
+  bytesPerRow: bytesPerRow,
+  space: CGColorSpaceCreateDeviceRGB(),
+  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+) else {
+  fputs("Could not create bitmap context for \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+let xRange = max(0, width * xStartPercent / 100)..<min(width, width * xEndPercent / 100)
+let yRange = max(0, height * yStartPercent / 100)..<min(height, height * yEndPercent / 100)
+var nearWhitePixels = 0
+var totalPixels = 0
+for y in yRange {
+  for x in xRange {
+    let offset = y * bytesPerRow + x * bytesPerPixel
+    let red = pixels[offset]
+    let green = pixels[offset + 1]
+    let blue = pixels[offset + 2]
+    if red >= 235 && green >= 235 && blue >= 235 {
+      nearWhitePixels += 1
+    }
+    totalPixels += 1
+  }
+}
+
+guard totalPixels > 0 else {
+  fputs("Empty screenshot region for \(label): \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+let nearWhiteRatio = Double(nearWhitePixels) / Double(totalPixels)
+if nearWhiteRatio > 0.45 {
+  let percent = String(format: "%.1f", nearWhiteRatio * 100)
+  fputs("\(label) terminal region is dominantly near-white in \(screenshotPath): \(percent)% near-white pixels\n", stderr)
+  exit(1)
+}
+SWIFT
+}
+
 launch_state() {
   local state="$1"
   local app_path="${2:-$ARTIFACT_DIR/bin:$PATH}"
@@ -651,6 +727,8 @@ APPLESCRIPT
 run_isolated_terminal_visibility_probe() {
   local database_path="$ARTIFACT_DIR/states/isolated-terminal-visibility.sqlite"
   local screenshot_path="$SCREENSHOT_DIR/isolated-terminal-visibility.png"
+  local launch_screenshot_path="$SCREENSHOT_DIR/isolated-terminal-visibility-launch.png"
+  local git_screenshot_path="$SCREENSHOT_DIR/isolated-terminal-visibility-git.png"
   local selected_tab_query="SELECT COALESCE((SELECT selected_tab_id FROM right_panel_tab_state ORDER BY thread_id LIMIT 1), '');"
   local bottom_terminal_query="SELECT COALESCE((SELECT is_expanded FROM bottom_terminal_state ORDER BY thread_id LIMIT 1), 0);"
 
@@ -661,6 +739,12 @@ run_isolated_terminal_visibility_probe() {
   focus_workspace_terminal
   assert_terminal_helper_running "isolated terminal visibility probe"
   assert_helper_window_visible_with_prefix "project:" "project terminal visibility"
+  capture_window "$launch_screenshot_path" || true
+  assert_terminal_region_not_near_white "$launch_screenshot_path" "project terminal launch" 22 78 12 78 || {
+    terminate_e2e_app
+    return 1
+  }
+  focus_workspace_terminal
 
   send_command_shortcut "j"
   wait_for_sql_value "$database_path" "$bottom_terminal_query" "1" "bottom terminal expansion" || {
@@ -697,6 +781,12 @@ run_isolated_terminal_visibility_probe() {
     terminate_e2e_app
     return 1
   }
+  capture_window "$git_screenshot_path" || true
+  assert_terminal_region_not_near_white "$git_screenshot_path" "git terminal tab" 73 98 12 88 || {
+    terminate_e2e_app
+    return 1
+  }
+  focus_workspace_terminal
 
   send_command_shortcut "1"
   wait_for_sql_value "$database_path" "$selected_tab_query" "files" "files tab selection" || {

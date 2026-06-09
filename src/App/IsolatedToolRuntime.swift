@@ -155,12 +155,20 @@ final class IsolatedToolRuntime: ObservableObject {
             payload: launch.payload())
     }
 
-    func terminalSetViewport(instanceID: String, frame: CGRect, visible: Bool) {
+    func terminalSetViewport(
+        instanceID: String,
+        frame: CGRect,
+        visible: Bool,
+        shouldFloatToolHost: Bool
+    ) {
         send(
             type: "setViewport",
             kind: .terminal,
             instanceID: instanceID,
-            payload: Self.viewportPayload(frame: frame, visible: visible))
+            payload: Self.viewportPayload(
+                frame: frame,
+                visible: visible,
+                shouldFloatToolHost: shouldFloatToolHost))
     }
 
     func terminalFocus(instanceID: String, focused: Bool) {
@@ -195,7 +203,12 @@ final class IsolatedToolRuntime: ObservableObject {
         shutdown(instanceID: instanceID)
     }
 
-    func setViewport(instanceID: String, frame: CGRect, visible: Bool) {
+    func setViewport(
+        instanceID: String,
+        frame: CGRect,
+        visible: Bool,
+        shouldFloatToolHost: Bool
+    ) {
         // Browser is single-tenant: showing one hides sibling browsers. Scoped
         // to browser-kind hosts (see hideAll), so terminals are unaffected.
         if visible {
@@ -205,7 +218,10 @@ final class IsolatedToolRuntime: ObservableObject {
             type: "setViewport",
             kind: .browser,
             instanceID: instanceID,
-            payload: Self.viewportPayload(frame: frame, visible: visible))
+            payload: Self.viewportPayload(
+                frame: frame,
+                visible: visible,
+                shouldFloatToolHost: shouldFloatToolHost))
     }
 
     func hide(instanceID: String) {
@@ -221,13 +237,18 @@ final class IsolatedToolRuntime: ObservableObject {
         }
     }
 
-    static func viewportPayload(frame: CGRect, visible: Bool) -> [String: String] {
+    static func viewportPayload(
+        frame: CGRect,
+        visible: Bool,
+        shouldFloatToolHost: Bool
+    ) -> [String: String] {
         [
             "x": String(Double(frame.origin.x)),
             "y": String(Double(frame.origin.y)),
             "width": String(Double(frame.size.width)),
             "height": String(Double(frame.size.height)),
             "visible": String(visible),
+            "shouldFloat": String(shouldFloatToolHost),
         ]
     }
 
