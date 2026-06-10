@@ -1343,10 +1343,10 @@ public final class YAMLConfigurationStore {
             let defaults = settings.defaults(for: kind)
             let mode = defaults.permissionModeID ?? AgentLaunchOptions.defaultPermissionModeID
             return """
-                  \(kind.rawValue):
-                    # default: permissionModeID default, additionalArguments []
-                    permissionModeID: \(yamlScalar(mode))
-                    additionalArguments: \(inlineList(defaults.additionalArguments))
+                    \(kind.rawValue):
+                      # default: permissionModeID default, additionalArguments []
+                      permissionModeID: \(yamlScalar(mode))
+                      additionalArguments: \(inlineList(defaults.additionalArguments))
                 """
         }
         .joined(separator: "\n")

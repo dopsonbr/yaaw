@@ -1299,6 +1299,34 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(configuration.fileBrowser.markdownAndHTMLDefault, .browserPreview)
     }
 
+    func testYAMLConfigurationSaveRendersAgentLaunchDefaultsAndReloadsThem() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+        let configuration = YAAWConfiguration(
+            agent: AgentSettings(
+                launchDefaults: AgentLaunchDefaultsSettings(
+                    claude: AgentLaunchDefaultSettings(
+                        permissionModeID: "claude-plan",
+                        additionalArguments: ["--model", "sonnet"]
+                    ),
+                    copilot: AgentLaunchDefaultSettings(permissionModeID: "copilot-yolo")
+                )
+            )
+        )
+
+        try store.save(configuration)
+
+        let reloaded = store.load()
+        XCTAssertEqual(reloaded.agent.launchDefaults, configuration.agent.launchDefaults)
+        XCTAssertEqual(reloaded.agent.launchDefaults.claude.permissionModeID, "claude-plan")
+        XCTAssertEqual(
+            reloaded.agent.launchDefaults.claude.additionalArguments,
+            ["--model", "sonnet"]
+        )
+        XCTAssertEqual(reloaded.agent.launchDefaults.copilot.permissionModeID, "copilot-yolo")
+        XCTAssertNil(reloaded.agent.launchDefaults.codex.permissionModeID)
+    }
+
     func testYAMLConfigurationSaveRendersFontSettingsAndReloadsThem() throws {
         let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
         let store = YAMLConfigurationStore(path: path)
