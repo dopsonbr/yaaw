@@ -40,6 +40,14 @@ struct GeneralSettingsView: View {
                     .accessibilityIdentifier("settings-refresh-cli-options-button")
                 }
 
+                SettingsGridRow(title: "Build") {
+                    Text(AppBuildInfo.summary)
+                        .font(fonts.interfaceFont(sizeOffset: -1))
+                        .foregroundStyle(themeUI(.secondaryLabel))
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("settings-build-commit-label")
+                }
+
                 SettingsGridRow(title: "Global chats") {
                     HStack(spacing: 8) {
                         TextField("Global chats directory", text: $model.globalChatsDirectoryText)

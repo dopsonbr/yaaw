@@ -38,6 +38,14 @@ APP_VERSION="${YAAW_APP_VERSION:-0.0.1}"
 BUILD_NUMBER="${YAAW_BUILD_NUMBER:-$APP_VERSION}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Stamp the packaged bundle with the exact commit it was built from so the
+# About panel and Settings can prove which build is running.
+GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"
+if [[ -n "$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null)" ]]; then
+  GIT_COMMIT="$GIT_COMMIT-dirty"
+fi
+
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
@@ -130,6 +138,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
   <string>$BUILD_NUMBER</string>
+  <key>YAAWBuildCommit</key>
+  <string>$GIT_COMMIT</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>

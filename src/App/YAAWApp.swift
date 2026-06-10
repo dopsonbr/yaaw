@@ -170,6 +170,14 @@ struct YAAWApp: App {
         .restorationBehavior(.disabled)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About YAAW") {
+                    NSApp.orderFrontStandardAboutPanel(options: [
+                        .version: AppBuildInfo.commit
+                    ])
+                }
+            }
+
             if startupError == nil {
                 CommandMenu("App") {
                     OpenSettingsCommandButton(model: model)
