@@ -82,7 +82,7 @@ final class SettingsModel {
     var statusMessage = "Loading settings..."
     var validationError: String?
     var isShowingDiscardConfirmation = false
-    var selectedThemeID = ThemeCatalog.defaultID
+    var selectedThemeID = ThemeSettings.systemActiveID
     var currentConfiguration = YAAWConfiguration()
     var globalChatsDirectoryText = ProjectSettings.defaultGlobalChatsDirectory
     var agentCommandTextByKind: [AgentCLIKind: String] = [:]
@@ -146,7 +146,7 @@ final class SettingsModel {
             do {
                 let configuration = try dependencies.validateText(text)
                 currentConfiguration = configuration
-                selectedThemeID = configuration.resolvedTheme.id
+                selectedThemeID = configuration.themeName
                 globalChatsDirectoryText = configuration.projects.globalChatsDirectory
                 syncAgentLaunchTextFields(with: configuration)
                 validationError = nil
@@ -167,7 +167,7 @@ final class SettingsModel {
             _ = try dependencies.saveText(editorText)
             let configuration = try dependencies.validateText(editorText)
             currentConfiguration = configuration
-            selectedThemeID = configuration.resolvedTheme.id
+            selectedThemeID = configuration.themeName
             globalChatsDirectoryText = configuration.projects.globalChatsDirectory
             syncAgentLaunchTextFields(with: configuration)
             lastSavedText = editorText
@@ -184,7 +184,7 @@ final class SettingsModel {
         do {
             let configuration = try dependencies.validateText(editorText)
             currentConfiguration = configuration
-            selectedThemeID = configuration.resolvedTheme.id
+            selectedThemeID = configuration.themeName
             globalChatsDirectoryText = configuration.projects.globalChatsDirectory
             syncAgentLaunchTextFields(with: configuration)
             validationError = nil
@@ -213,7 +213,7 @@ final class SettingsModel {
             editorText = renderedText
             lastSavedText = renderedText
             currentConfiguration = nextConfiguration
-            selectedThemeID = nextConfiguration.resolvedTheme.id
+            selectedThemeID = nextConfiguration.themeName
             globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
             syncAgentLaunchTextFields(with: nextConfiguration)
             validationError = nil
@@ -401,10 +401,34 @@ final class SettingsModel {
             validationError = nil
             statusMessage = "Theme saved and applied."
         } catch {
-            selectedThemeID = currentConfiguration.resolvedTheme.id
+            selectedThemeID = currentConfiguration.themeName
             validationError = "YAML validation failed: \(error)"
             statusMessage = "Theme was not changed."
         }
+    }
+
+    var systemLightThemeSelection: Binding<String> {
+        Binding(
+            get: { self.currentConfiguration.theme.light },
+            set: { newValue in
+                self.saveConfigurationMutation(
+                    successStatus: "Theme saved and applied.",
+                    failureStatus: "Theme was not changed."
+                ) { $0.theme.light = newValue }
+            }
+        )
+    }
+
+    var systemDarkThemeSelection: Binding<String> {
+        Binding(
+            get: { self.currentConfiguration.theme.dark },
+            set: { newValue in
+                self.saveConfigurationMutation(
+                    successStatus: "Theme saved and applied.",
+                    failureStatus: "Theme was not changed."
+                ) { $0.theme.dark = newValue }
+            }
+        )
     }
 
     func saveFontSettings(_ mutate: @escaping (inout FontSettings) -> Void) {
@@ -522,7 +546,7 @@ final class SettingsModel {
             editorText = renderedText
             lastSavedText = renderedText
             currentConfiguration = nextConfiguration
-            selectedThemeID = nextConfiguration.resolvedTheme.id
+            selectedThemeID = nextConfiguration.themeName
             globalChatsDirectoryText = nextConfiguration.projects.globalChatsDirectory
             syncAgentLaunchTextFields(with: nextConfiguration)
             validationError = nil

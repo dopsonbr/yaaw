@@ -7,7 +7,7 @@ The design favors a small, terminal-first desktop wrapper over a full IDE or age
 ## Product Principles
 
 - Native macOS shell.
-- Dracula by default, with built-in theme switching.
+- System appearance by default (pairing macOS Light / macOS Dark), with built-in theme switching.
 - Terminal-first workflow.
 - One agent CLI session terminal per thread.
 - Bring-your-own agent CLI, command-line harness, authentication, and model setup.
@@ -23,7 +23,7 @@ The design favors a small, terminal-first desktop wrapper over a full IDE or age
 
 ## Theme
 
-Use shared theme roles as the app's visual contract. Dracula is the default palette, and built-in light, dark, and high-contrast themes map to the same roles so all app and terminal surfaces change together.
+Use shared theme roles as the app's visual contract. Built-in light, dark, and high-contrast themes map to the same roles so all app and terminal surfaces change together. New installs default to System mode (`theme.active: system`), which follows the macOS appearance and switches between a configurable pairing (`theme.light` / `theme.dark`, defaulting to the macOS Light and macOS Dark themes built from Apple's system palette). Any single theme can still be pinned by setting `theme.active` to its id. The Dracula palette below documents each role's intent.
 
 | Token | Hex | Use |
 | --- | --- | --- |
@@ -270,5 +270,5 @@ Add more shortcuts only after the interaction model stabilizes.
 - Opening a file launches `nvim`, `vim`, or `vi` inside the right panel.
 - Opening Git mode launches `lazygit` or `git diff` inside the right panel.
 - Users can switch the right panel between Files, Browser, Git, and `nvim` by cycling tabs or clicking icons.
-- The full app uses the selected built-in theme, defaulting to Dracula.
+- The full app uses the selected built-in theme, defaulting to the System pairing that follows the macOS appearance.
 - A user can archive inactive threads.

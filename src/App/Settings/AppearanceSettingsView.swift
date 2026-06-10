@@ -11,6 +11,7 @@ struct AppearanceSettingsView: View {
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
                 SettingsGridRow(title: "Theme") {
                     Picker("Theme", selection: model.themeSelection) {
+                        Text("System (match macOS)").tag(ThemeSettings.systemActiveID)
                         ForEach(ThemeGroup.allCases) { group in
                             Section(group.displayName) {
                                 ForEach(ThemeCatalog.themes(in: group)) { theme in
@@ -22,6 +23,24 @@ struct AppearanceSettingsView: View {
                     .settingsMenuControl(maxWidth: 360)
                     .accessibilityLabel("Theme")
                     .accessibilityIdentifier("settings-theme-picker")
+                }
+
+                if model.selectedThemeID == ThemeSettings.systemActiveID {
+                    SettingsGridRow(title: "Light appearance") {
+                        themePicker(
+                            label: "Theme in the light appearance",
+                            selection: model.systemLightThemeSelection
+                        )
+                        .accessibilityIdentifier("settings-system-light-theme-picker")
+                    }
+
+                    SettingsGridRow(title: "Dark appearance") {
+                        themePicker(
+                            label: "Theme in the dark appearance",
+                            selection: model.systemDarkThemeSelection
+                        )
+                        .accessibilityIdentifier("settings-system-dark-theme-picker")
+                    }
                 }
 
                 SettingsGridRow(title: "Interface font") {
@@ -155,6 +174,23 @@ struct AppearanceSettingsView: View {
             + installedFontFamilies
             .filter { !pinnedValues.contains($0) }
             .map { ($0, $0) }
+    }
+
+    private func themePicker(
+        label: String,
+        selection: Binding<String>
+    ) -> some View {
+        Picker(label, selection: selection) {
+            ForEach(ThemeGroup.allCases) { group in
+                Section(group.displayName) {
+                    ForEach(ThemeCatalog.themes(in: group)) { theme in
+                        Text(theme.displayName).tag(theme.id)
+                    }
+                }
+            }
+        }
+        .settingsMenuControl(maxWidth: 360)
+        .accessibilityLabel(label)
     }
 
     private func fontFamilyPicker(

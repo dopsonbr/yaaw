@@ -20,7 +20,8 @@ struct SettingsWindowView: View {
         .environment(\.colorScheme, appModel.resolvedTheme.swiftUIColorScheme)
         .onAppear(perform: model.loadIfNeeded)
         .onChange(of: appModel.configuration.themeName) { _, newThemeID in
-            model.selectedThemeID = ThemeCatalog.theme(id: newThemeID)?.id ?? ThemeCatalog.defaultID
+            // themeName is already validated: "system" or a catalog theme id.
+            model.selectedThemeID = newThemeID
         }
         .confirmationDialog(
             "Discard unsaved settings changes?",

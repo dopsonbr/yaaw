@@ -1395,7 +1395,8 @@ final class PersistenceTests: XCTestCase {
         )
 
         XCTAssertEqual(configuration.themeName, "dark-plus")
-        XCTAssertEqual(configuration.resolvedTheme.displayName, "Dark+")
+        XCTAssertEqual(
+            configuration.resolvedTheme(systemAppearanceIsDark: true).displayName, "Dark+")
     }
 
     func testYAMLConfigurationLegacyFixedThemeKeepsWorkingWithoutPairingKeys() throws {

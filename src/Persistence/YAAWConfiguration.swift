@@ -78,13 +78,6 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         theme.resolvedTheme(systemAppearanceIsDark: systemAppearanceIsDark)
     }
 
-    /// Interim appearance-blind resolution (system mode resolves to the dark
-    /// pairing). Superseded by `AppModel.resolvedTheme`, which supplies the
-    /// live system appearance.
-    public var resolvedTheme: ThemeDefinition {
-        resolvedTheme(systemAppearanceIsDark: true)
-    }
-
     public var ignoreRules: [String] {
         fileIndexing.ignoreRules
     }
