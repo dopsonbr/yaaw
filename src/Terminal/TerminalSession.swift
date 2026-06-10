@@ -95,6 +95,7 @@ extension IsolatedTerminalLaunch {
                 themeID: themeID,
                 terminalFontFamily: fonts.terminalFamily,
                 terminalFontSize: fonts.terminalSize,
+                terminalFontLigatures: fonts.ligatures,
                 appShortcutSignatures: appShortcutSignatures
             )
         case .exec:
@@ -109,6 +110,7 @@ extension IsolatedTerminalLaunch {
                 themeID: themeID,
                 terminalFontFamily: fonts.terminalFamily,
                 terminalFontSize: fonts.terminalSize,
+                terminalFontLigatures: fonts.ligatures,
                 appShortcutSignatures: appShortcutSignatures
             )
         }

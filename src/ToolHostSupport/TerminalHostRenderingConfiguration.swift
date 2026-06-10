@@ -17,14 +17,16 @@ public struct TerminalHostRenderingConfiguration {
         make(
             for: rendering.themeID.flatMap(ThemeCatalog.theme(id:)) ?? ThemeCatalog.defaultTheme,
             fontSize: Float(rendering.terminalFontSize ?? FontSettings().terminalSize),
-            fontFamily: rendering.terminalFontFamily
+            fontFamily: rendering.terminalFontFamily,
+            ligatures: rendering.terminalFontLigatures ?? true
         )
     }
 
     public static func make(
         for theme: ThemeDefinition,
         fontSize: Float,
-        fontFamily: String?
+        fontFamily: String?,
+        ligatures: Bool = true
     ) -> TerminalHostRenderingConfiguration {
         let terminalThemeConfiguration = Self.terminalThemeConfiguration(for: theme)
         var terminalConfiguration = Self.nonThemeTerminalConfiguration(fontSize: fontSize)
@@ -32,6 +34,15 @@ public struct TerminalHostRenderingConfiguration {
             !family.isEmpty
         {
             terminalConfiguration = terminalConfiguration.fontFamily(family)
+        }
+        if !ligatures {
+            // Ghostty shapes font-default ligatures automatically; disabling
+            // requires opting out of each OpenType feature explicitly.
+            terminalConfiguration =
+                terminalConfiguration
+                .custom("font-feature", "-calt")
+                .custom("font-feature", "-liga")
+                .custom("font-feature", "-dlig")
         }
 
         return TerminalHostRenderingConfiguration(

@@ -222,17 +222,21 @@ final class IsolatedToolProtocolTests: XCTestCase {
             themeID: "dracula",
             terminalFontFamily: "JetBrains Mono",
             terminalFontSize: 17,
+            terminalFontLigatures: false,
             appShortcutSignatures: ["command+j", "command+shift+["]
         )
 
         let restored = IsolatedTerminalRendering.from(payload: rendering.payload())
         XCTAssertEqual(restored, rendering)
         XCTAssertEqual(restored.appShortcutSignatures, ["command+j", "command+shift+["])
+        XCTAssertEqual(restored.terminalFontLigatures, false)
 
         // Blank strings normalize to nil, matching the launch payload rules.
         let blank = IsolatedTerminalRendering(themeID: "  ", terminalFontFamily: "")
         XCTAssertNil(blank.themeID)
         XCTAssertNil(blank.terminalFontFamily)
+        // An absent ligatures key stays nil (default: enabled).
+        XCTAssertNil(blank.terminalFontLigatures)
         XCTAssertEqual(
             IsolatedTerminalRendering.from(payload: blank.payload()),
             IsolatedTerminalRendering())
@@ -242,6 +246,8 @@ final class IsolatedToolProtocolTests: XCTestCase {
         let launch = makeLaunch()
         var restyled = launch
         restyled.applyRendering(IsolatedTerminalRendering(themeID: "light-2026"))
+        var ligaturesToggled = launch
+        ligaturesToggled.terminalFontLigatures = false
         var relaunched = launch
         relaunched.command = ["/bin/zsh", "-il"]
         var relaunchedAndRestyled = relaunched
@@ -250,6 +256,9 @@ final class IsolatedToolProtocolTests: XCTestCase {
         XCTAssertEqual(IsolatedTerminalLaunchTransition.between(nil, launch), .launchNew)
         XCTAssertEqual(IsolatedTerminalLaunchTransition.between(launch, launch), .noChange)
         XCTAssertEqual(IsolatedTerminalLaunchTransition.between(launch, restyled), .updateRendering)
+        // A ligature toggle is rendering-only: live update, no agent restart.
+        XCTAssertEqual(
+            IsolatedTerminalLaunchTransition.between(launch, ligaturesToggled), .updateRendering)
         XCTAssertEqual(
             IsolatedTerminalLaunchTransition.between(launch, relaunched), .relaunchProcess)
         XCTAssertEqual(

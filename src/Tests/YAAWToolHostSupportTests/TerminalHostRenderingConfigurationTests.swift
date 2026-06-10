@@ -28,6 +28,33 @@ final class TerminalHostRenderingConfigurationTests: XCTestCase {
         XCTAssertFalse(nonThemeConfig.contains("background ="))
         XCTAssertFalse(nonThemeConfig.contains("foreground ="))
         XCTAssertFalse(nonThemeConfig.contains("palette ="))
+        // Ligatures default to on: Ghostty shapes them without extra config.
+        XCTAssertFalse(nonThemeConfig.contains("font-feature"))
+    }
+
+    func testDisablingLigaturesEmitsFontFeatureOptOuts() throws {
+        let disabled = TerminalHostRenderingConfiguration.make(
+            for: IsolatedTerminalRendering(
+                themeID: "dracula",
+                terminalFontFamily: "JetBrains Mono",
+                terminalFontSize: 17,
+                terminalFontLigatures: false
+            )
+        )
+        let disabledConfig = disabled.terminalConfiguration.rendered
+        XCTAssertTrue(disabledConfig.contains("font-feature = -calt"))
+        XCTAssertTrue(disabledConfig.contains("font-feature = -liga"))
+        XCTAssertTrue(disabledConfig.contains("font-feature = -dlig"))
+
+        // An absent flag means enabled and emits no font-feature lines.
+        let defaulted = TerminalHostRenderingConfiguration.make(
+            for: IsolatedTerminalRendering(
+                themeID: "dracula",
+                terminalFontFamily: "JetBrains Mono",
+                terminalFontSize: 17
+            )
+        )
+        XCTAssertFalse(defaulted.terminalConfiguration.rendered.contains("font-feature"))
     }
 
     @MainActor

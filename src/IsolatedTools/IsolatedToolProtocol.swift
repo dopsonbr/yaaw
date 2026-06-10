@@ -80,6 +80,8 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
     public var themeID: String?
     public var terminalFontFamily: String?
     public var terminalFontSize: Double?
+    /// `nil` means the default: ligatures enabled.
+    public var terminalFontLigatures: Bool?
     public var appShortcutSignatures: [String]
 
     public init(
@@ -93,6 +95,7 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
         themeID: String? = nil,
         terminalFontFamily: String? = nil,
         terminalFontSize: Double? = nil,
+        terminalFontLigatures: Bool? = nil,
         appShortcutSignatures: [String] = []
     ) {
         self.command = command
@@ -105,6 +108,7 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
         self.themeID = Self.nilIfBlank(themeID)
         self.terminalFontFamily = Self.nilIfBlank(terminalFontFamily)
         self.terminalFontSize = terminalFontSize
+        self.terminalFontLigatures = terminalFontLigatures
         self.appShortcutSignatures = appShortcutSignatures
     }
 
@@ -121,6 +125,7 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
         payload["themeID"] = themeID
         payload["terminalFontFamily"] = terminalFontFamily
         payload["terminalFontSize"] = terminalFontSize.map { String($0) }
+        payload["terminalFontLigatures"] = terminalFontLigatures.map(String.init)
         payload["appShortcutSignatures"] = Self.encodeJSON(appShortcutSignatures)
         return payload
     }
@@ -144,6 +149,7 @@ public struct IsolatedTerminalLaunch: Equatable, Sendable {
             themeID: payload["themeID"],
             terminalFontFamily: payload["terminalFontFamily"],
             terminalFontSize: payload["terminalFontSize"].flatMap(Double.init),
+            terminalFontLigatures: payload["terminalFontLigatures"].flatMap(Bool.init),
             appShortcutSignatures: payload["appShortcutSignatures"].flatMap(decodeJSON) ?? []
         )
     }
@@ -171,17 +177,21 @@ public struct IsolatedTerminalRendering: Equatable, Sendable {
     public var themeID: String?
     public var terminalFontFamily: String?
     public var terminalFontSize: Double?
+    /// `nil` means the default: ligatures enabled.
+    public var terminalFontLigatures: Bool?
     public var appShortcutSignatures: [String]
 
     public init(
         themeID: String? = nil,
         terminalFontFamily: String? = nil,
         terminalFontSize: Double? = nil,
+        terminalFontLigatures: Bool? = nil,
         appShortcutSignatures: [String] = []
     ) {
         self.themeID = IsolatedTerminalLaunch.nilIfBlank(themeID)
         self.terminalFontFamily = IsolatedTerminalLaunch.nilIfBlank(terminalFontFamily)
         self.terminalFontSize = terminalFontSize
+        self.terminalFontLigatures = terminalFontLigatures
         self.appShortcutSignatures = appShortcutSignatures
     }
 
@@ -190,6 +200,7 @@ public struct IsolatedTerminalRendering: Equatable, Sendable {
         payload["themeID"] = themeID
         payload["terminalFontFamily"] = terminalFontFamily
         payload["terminalFontSize"] = terminalFontSize.map { String($0) }
+        payload["terminalFontLigatures"] = terminalFontLigatures.map(String.init)
         payload["appShortcutSignatures"] = IsolatedTerminalLaunch.encodeJSON(appShortcutSignatures)
         return payload
     }
@@ -199,6 +210,7 @@ public struct IsolatedTerminalRendering: Equatable, Sendable {
             themeID: payload["themeID"],
             terminalFontFamily: payload["terminalFontFamily"],
             terminalFontSize: payload["terminalFontSize"].flatMap(Double.init),
+            terminalFontLigatures: payload["terminalFontLigatures"].flatMap(Bool.init),
             appShortcutSignatures: payload["appShortcutSignatures"]
                 .flatMap(IsolatedTerminalLaunch.decodeJSON) ?? []
         )
@@ -211,6 +223,7 @@ extension IsolatedTerminalLaunch {
             themeID: themeID,
             terminalFontFamily: terminalFontFamily,
             terminalFontSize: terminalFontSize,
+            terminalFontLigatures: terminalFontLigatures,
             appShortcutSignatures: appShortcutSignatures
         )
     }
@@ -219,6 +232,7 @@ extension IsolatedTerminalLaunch {
         themeID = rendering.themeID
         terminalFontFamily = rendering.terminalFontFamily
         terminalFontSize = rendering.terminalFontSize
+        terminalFontLigatures = rendering.terminalFontLigatures
         appShortcutSignatures = rendering.appShortcutSignatures
     }
 
