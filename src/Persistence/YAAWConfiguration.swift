@@ -304,14 +304,15 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
     public var active: String
     public var custom: [String: String]
 
-    public init(active: String = "dracula", custom: [String: String] = [:]) {
+    public init(active: String = ThemeCatalog.defaultID, custom: [String: String] = [:]) {
         self.active = active
         self.custom = custom
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.active = try container.decodeIfPresent(String.self, forKey: .active) ?? "dracula"
+        self.active =
+            try container.decodeIfPresent(String.self, forKey: .active) ?? ThemeCatalog.defaultID
         self.custom = try container.decodeIfPresent([String: String].self, forKey: .custom) ?? [:]
     }
 
@@ -393,7 +394,7 @@ public struct FontSettings: Codable, Equatable, Sendable {
     public init(
         interfaceFamily: String = "system",
         interfaceSize: Double = 13,
-        editorFamily: String = "system-monospace",
+        editorFamily: String = "JetBrains Mono",
         editorSize: Double = 13,
         terminalFamily: String = "JetBrains Mono",
         terminalSize: Double = 15,
@@ -417,7 +418,7 @@ public struct FontSettings: Codable, Equatable, Sendable {
         self.interfaceSize =
             try container.decodeIfPresent(Double.self, forKey: .interfaceSize) ?? 13
         self.editorFamily =
-            try container.decodeIfPresent(String.self, forKey: .editorFamily) ?? "system-monospace"
+            try container.decodeIfPresent(String.self, forKey: .editorFamily) ?? "JetBrains Mono"
         self.editorSize = try container.decodeIfPresent(Double.self, forKey: .editorSize) ?? 13
         self.terminalFamily =
             try container.decodeIfPresent(String.self, forKey: .terminalFamily) ?? "JetBrains Mono"
@@ -1229,7 +1230,7 @@ public final class YAMLConfigurationStore {
               globalChatsDirectory: \(yamlScalar(configuration.projects.globalChatsDirectory))
 
             theme:
-              # default: dracula
+              # default: ghostty-default
               # active now: controls app chrome, file browser colors, settings, panels, and terminals.
               # supported: \(ThemeCatalog.supportedIDs.joined(separator: ", "))
               active: \(configuration.theme.active)
@@ -1249,7 +1250,7 @@ public final class YAMLConfigurationStore {
               interfaceFamily: \(yamlScalar(configuration.fonts.interfaceFamily))
               # default: 13
               interfaceSize: \(configuration.fonts.interfaceSize.formattedFontSize)
-              # default: system-monospace
+              # default: JetBrains Mono
               # active now: controls in-app YAML/editor-style text.
               # use system-monospace for the native macOS monospaced font, or a real installed font family name.
               editorFamily: \(yamlScalar(configuration.fonts.editorFamily))

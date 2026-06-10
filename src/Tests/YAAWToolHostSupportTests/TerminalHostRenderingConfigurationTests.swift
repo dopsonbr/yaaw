@@ -7,9 +7,9 @@ import YAAWKit
 @testable import YAAWToolHostSupport
 
 final class TerminalHostRenderingConfigurationTests: XCTestCase {
-    func testDraculaColorsRenderThroughGhosttyThemeForBothAppearances() {
+    func testDraculaColorsRenderThroughGhosttyThemeForBothAppearances() throws {
         let configuration = TerminalHostRenderingConfiguration.make(
-            for: ThemeCatalog.defaultTheme,
+            for: try XCTUnwrap(ThemeCatalog.theme(id: "dracula")),
             fontSize: 17,
             fontFamily: "JetBrains Mono"
         )
@@ -31,9 +31,9 @@ final class TerminalHostRenderingConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testGhosttyStateUsesYAAWThemeEvenBeforeDarkAppearanceAdoption() {
+    func testGhosttyStateUsesYAAWThemeEvenBeforeDarkAppearanceAdoption() throws {
         let configuration = TerminalHostRenderingConfiguration.make(
-            for: ThemeCatalog.defaultTheme,
+            for: try XCTUnwrap(ThemeCatalog.theme(id: "dracula")),
             fontSize: 15,
             fontFamily: nil
         )

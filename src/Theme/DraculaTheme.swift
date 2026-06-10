@@ -133,7 +133,7 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
             ]
         }
 
-        if id == ThemeCatalog.defaultID {
+        if id == "dracula" {
             return [
                 "#21222c",
                 "#ff5555",
@@ -276,7 +276,7 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
 }
 
 public enum ThemeCatalog {
-    public static let defaultID = "dracula"
+    public static let defaultID = "ghostty-default"
 
     public static let themes: [ThemeDefinition] = [
         theme(
@@ -558,11 +558,13 @@ public enum ThemeCatalog {
 }
 
 public enum DraculaTheme {
-    public static let tokens: [DraculaToken] = ThemeCatalog.defaultTheme.tokens.map {
+    private static let theme = ThemeCatalog.theme(id: "dracula")!
+
+    public static let tokens: [DraculaToken] = theme.tokens.map {
         DraculaToken(role: $0.role, hex: $0.hex)
     }
 
     public static func hex(for role: ThemeRole) -> String {
-        ThemeCatalog.defaultTheme.hex(for: role)
+        theme.hex(for: role)
     }
 }

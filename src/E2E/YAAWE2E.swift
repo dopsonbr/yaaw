@@ -319,7 +319,7 @@ private final class E2ERunner {
             settingsText.contains("interfaceFamily: system"),
             "settings YAML exposes the interface font family")
         try assert(
-            settingsText.contains("editorFamily: system-monospace"),
+            settingsText.contains("editorFamily: \"JetBrains Mono\""),
             "settings YAML exposes the editor font family")
         try assert(
             settingsText.contains("terminalFamily: \"JetBrains Mono\""),

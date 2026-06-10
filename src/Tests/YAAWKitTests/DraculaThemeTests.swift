@@ -3,9 +3,9 @@ import XCTest
 @testable import YAAWKit
 
 final class DraculaThemeTests: XCTestCase {
-    func testThemeCatalogExposesSupportedThemesWithDraculaDefault() {
-        XCTAssertEqual(ThemeCatalog.defaultID, "dracula")
-        XCTAssertEqual(ThemeCatalog.defaultTheme.id, "dracula")
+    func testThemeCatalogExposesSupportedThemesWithGhosttyDefault() {
+        XCTAssertEqual(ThemeCatalog.defaultID, "ghostty-default")
+        XCTAssertEqual(ThemeCatalog.defaultTheme.id, "ghostty-default")
         XCTAssertEqual(
             ThemeCatalog.supportedIDs,
             [
@@ -86,7 +86,7 @@ final class DraculaThemeTests: XCTestCase {
 
     func testDraculaTerminalANSIPaletteMatchesCanonicalTerminalColors() {
         XCTAssertEqual(
-            ThemeCatalog.defaultTheme.terminalANSIPalette,
+            ThemeCatalog.theme(id: "dracula")?.terminalANSIPalette,
             [
                 "#21222c",
                 "#ff5555",
