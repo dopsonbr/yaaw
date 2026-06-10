@@ -5,9 +5,11 @@ import YAAWKit
 
 @main
 struct YAAWApp: App {
+    static let settingsWindowID = "yaaw-settings"
+
     @NSApplicationDelegateAdaptor(YAAWApplicationDelegate.self) private var appDelegate
     @StateObject private var model: AppModel
-    @State private var isSettingsOpen = false
+    @State private var settingsModel: SettingsModel
     private let startupError: Error?
     private let databasePath: URL
     private let configurationPath: URL
@@ -42,6 +44,7 @@ struct YAAWApp: App {
                 ]
             )
         )
+        let appModel: AppModel
         do {
             diagnostics.record(DiagnosticEvent(category: "Lifecycle", name: "app_starting"))
             let store = try SQLiteYAAWStore(
@@ -57,18 +60,16 @@ struct YAAWApp: App {
                 captureDirectory: Self.captureDirectory(
                     environment: environment, envPrefix: envPrefix, applied: &appliedOverrides)
             )
-            _model = StateObject(
-                wrappedValue: AppModel(
-                    store: store,
-                    agentCLIBindings: agentCLIBindings,
-                    externalToolResolver: externalToolResolver,
-                    configuration: configuration,
-                    diagnosticRecorder: diagnostics,
-                    notificationDispatcher: MacSystemThreadActivityNotificationDispatcher.shared,
-                    badgeUpdater: MacDockThreadActivityBadgeUpdater.shared,
-                    isApplicationActive: { NSApplication.shared.isActive },
-                    environment: environment
-                )
+            appModel = AppModel(
+                store: store,
+                agentCLIBindings: agentCLIBindings,
+                externalToolResolver: externalToolResolver,
+                configuration: configuration,
+                diagnosticRecorder: diagnostics,
+                notificationDispatcher: MacSystemThreadActivityNotificationDispatcher.shared,
+                badgeUpdater: MacDockThreadActivityBadgeUpdater.shared,
+                isApplicationActive: { NSApplication.shared.isActive },
+                environment: environment
             )
             diagnostics.record(DiagnosticEvent(category: "Lifecycle", name: "app_ready"))
             startupError = nil
@@ -80,9 +81,47 @@ struct YAAWApp: App {
                     metadata: ["error": String(describing: error)]
                 )
             )
-            _model = StateObject(wrappedValue: AppModel(store: InMemoryYAAWStore.helloWorld()))
+            appModel = AppModel(store: InMemoryYAAWStore.helloWorld())
             startupError = error
         }
+        _model = StateObject(wrappedValue: appModel)
+        _settingsModel = State(
+            initialValue: Self.makeSettingsModel(
+                configurationStore: configurationStore,
+                configurationPath: configurationPath,
+                appModel: appModel
+            )
+        )
+    }
+
+    private static func makeSettingsModel(
+        configurationStore: YAMLConfigurationStore,
+        configurationPath: URL,
+        appModel: AppModel
+    ) -> SettingsModel {
+        SettingsModel(
+            dependencies: SettingsModel.Dependencies(
+                settingsPath: configurationPath,
+                loadText: { try configurationStore.loadText() },
+                validateText: { try configurationStore.validate(text: $0) },
+                saveText: { text in
+                    try configurationStore.saveText(text)
+                    let configuration = try configurationStore.validate(text: text)
+                    appModel.reloadConfiguration(configuration)
+                    return configuration
+                },
+                openExternal: {
+                    try? configurationStore.ensureFileExists()
+                    NSWorkspace.shared.open(configurationPath)
+                },
+                reloadConfiguration: {
+                    appModel.reloadConfiguration(configurationStore.load())
+                },
+                refreshAgentCLIOptions: {
+                    appModel.refreshAgentCLIOptionCatalog()
+                }
+            )
+        )
     }
 
     var body: some Scene {
@@ -96,14 +135,7 @@ struct YAAWApp: App {
                 } else {
                     RootView(
                         model: model,
-                        isSettingsOpen: $isSettingsOpen,
                         externalOpenWorkspace: externalOpenWorkspace,
-                        settingsPath: configurationPath,
-                        onLoadSettingsText: loadSettingsText,
-                        onValidateSettingsText: validateSettingsText,
-                        onSaveSettingsText: saveSettingsText,
-                        onOpenSettingsFile: openSettingsFile,
-                        onReloadSettings: reloadSettings,
                         onInstallLatestRelease: installLatestRelease
                     )
                 }
@@ -121,10 +153,7 @@ struct YAAWApp: App {
         .commands {
             if startupError == nil {
                 CommandMenu("App") {
-                    ShortcutCommandButton(model: model, action: .openSettings, title: "Settings...")
-                    {
-                        isSettingsOpen = true
-                    }
+                    OpenSettingsCommandButton(model: model)
                 }
 
                 CommandMenu("Project") {
@@ -340,6 +369,14 @@ struct YAAWApp: App {
                 }
             }
         }
+
+        Window("Settings", id: Self.settingsWindowID) {
+            if startupError == nil {
+                SettingsWindowView(model: settingsModel, appModel: model)
+            }
+        }
+        .defaultSize(width: 980, height: 680)
+        .restorationBehavior(.disabled)
     }
 
     private func createProjectFromPanel() {
@@ -431,31 +468,6 @@ struct YAAWApp: App {
         return AgentCLISessionBindingService.defaultCaptureDirectory()
     }
 
-    private func openSettingsFile() {
-        try? configurationStore.ensureFileExists()
-        NSWorkspace.shared.open(configurationPath)
-    }
-
-    private func loadSettingsText() throws -> String {
-        try configurationStore.loadText()
-    }
-
-    private func validateSettingsText(_ text: String) throws -> YAAWConfiguration {
-        try configurationStore.validate(text: text)
-    }
-
-    @discardableResult
-    private func saveSettingsText(_ text: String) throws -> YAAWConfiguration {
-        try configurationStore.saveText(text)
-        let configuration = try configurationStore.validate(text: text)
-        model.reloadConfiguration(configuration)
-        return configuration
-    }
-
-    private func reloadSettings() {
-        model.reloadConfiguration(configurationStore.load())
-    }
-
     private func installLatestRelease() {
         do {
             try updateInstaller.installLatestRelease()
@@ -528,6 +540,17 @@ private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func updateShortcutPreflightModel(_ model: AppModel) {
         shortcutPreflightMonitor.updateModel(model)
+    }
+}
+
+private struct OpenSettingsCommandButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        ShortcutCommandButton(model: model, action: .openSettings, title: "Settings...") {
+            openWindow(id: YAAWApp.settingsWindowID)
+        }
     }
 }
 

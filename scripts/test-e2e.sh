@@ -586,11 +586,51 @@ on findByIdentifier(rootElement, targetIdentifier)
   return missing value
 end findByIdentifier
 
+on findInWindows(processName, targetIdentifier)
+  tell application "System Events"
+    tell process processName
+      set windowElements to windows
+    end tell
+    repeat with windowElement in windowElements
+      set foundElement to my findByIdentifier(windowElement, targetIdentifier)
+      if foundElement is not missing value then return foundElement
+    end repeat
+  end tell
+  return missing value
+end findInWindows
+
+on selectSidebarRow(labelElement)
+  tell application "System Events"
+    set currentElement to labelElement
+    repeat 8 times
+      try
+        if (value of attribute "AXRole" of currentElement as text) is "AXRow" then
+          set value of attribute "AXSelected" of currentElement to true
+          return true
+        end if
+      end try
+      try
+        set currentElement to (value of attribute "AXParent" of currentElement)
+      on error
+        return false
+      end try
+    end repeat
+  end tell
+  return false
+end selectSidebarRow
+
 tell application "System Events"
   tell process "$APP_NAME"
+    set sidebarItem to missing value
     repeat 80 times
-      set editorContainer to my findByIdentifier(window 1, "settings-yaml-editor")
-      if editorContainer is not missing value then return
+      set sidebarItem to my findInWindows("$APP_NAME", "settings-sidebar-config-file")
+      if sidebarItem is not missing value then exit repeat
+      delay 0.1
+    end repeat
+    if sidebarItem is missing value then error "settings sidebar not found after Cmd+,"
+    if not (my selectSidebarRow(sidebarItem)) then error "settings sidebar row could not be selected"
+    repeat 80 times
+      if my findInWindows("$APP_NAME", "settings-yaml-editor") is not missing value then return
       delay 0.1
     end repeat
     error "settings YAML editor not found after Cmd+,"
@@ -871,6 +911,39 @@ on findTextArea(rootElement)
   return missing value
 end findTextArea
 
+on findInWindows(processName, targetIdentifier)
+  tell application "System Events"
+    tell process processName
+      set windowElements to windows
+    end tell
+    repeat with windowElement in windowElements
+      set foundElement to my findByIdentifier(windowElement, targetIdentifier)
+      if foundElement is not missing value then return foundElement
+    end repeat
+  end tell
+  return missing value
+end findInWindows
+
+on selectSidebarRow(labelElement)
+  tell application "System Events"
+    set currentElement to labelElement
+    repeat 8 times
+      try
+        if (value of attribute "AXRole" of currentElement as text) is "AXRow" then
+          set value of attribute "AXSelected" of currentElement to true
+          return true
+        end if
+      end try
+      try
+        set currentElement to (value of attribute "AXParent" of currentElement)
+      on error
+        return false
+      end try
+    end repeat
+  end tell
+  return false
+end selectSidebarRow
+
 tell application "System Events"
   tell process "$APP_NAME"
     try
@@ -881,9 +954,18 @@ tell application "System Events"
     if openButton is missing value then error "settings button not found"
     click openButton
 
+    set sidebarItem to missing value
+    repeat 80 times
+      set sidebarItem to my findInWindows("$APP_NAME", "settings-sidebar-config-file")
+      if sidebarItem is not missing value then exit repeat
+      delay 0.1
+    end repeat
+    if sidebarItem is missing value then error "settings sidebar not found"
+    if not (my selectSidebarRow(sidebarItem)) then error "settings sidebar row could not be selected"
+
     set editorContainer to missing value
     repeat 80 times
-      set editorContainer to my findByIdentifier(window 1, "settings-yaml-editor")
+      set editorContainer to my findInWindows("$APP_NAME", "settings-yaml-editor")
       if editorContainer is not missing value then exit repeat
       delay 0.1
     end repeat
@@ -907,21 +989,29 @@ tell application "System Events"
     set updatedText to value of editorArea as text
     if updatedText does not contain "default: claude" then error "settings YAML editor did not accept edited text"
 
-    set saveButton to my findByIdentifier(window 1, "settings-save-button")
+    set saveButton to my findInWindows("$APP_NAME", "settings-save-button")
     if saveButton is missing value then error "settings save button not found"
     click saveButton
     delay 0.5
 
-    set backButton to my findByIdentifier(window 1, "settings-back-button")
-    if backButton is missing value then error "settings back button not found"
-    click backButton
+    set settingsWindow to missing value
+    repeat with windowElement in windows
+      if my findByIdentifier(windowElement, "settings-yaml-editor") is not missing value then
+        set settingsWindow to windowElement
+        exit repeat
+      end if
+    end repeat
+    if settingsWindow is missing value then error "settings window not found for close"
+    click (first button of settingsWindow whose subrole is "AXCloseButton")
 
     repeat 50 times
-      set returnedButton to my findByIdentifier(window 1, "open-settings-button")
-      if returnedButton is not missing value then return
+      if my findInWindows("$APP_NAME", "settings-yaml-editor") is missing value then exit repeat
       delay 0.1
     end repeat
-    error "settings back button did not return to workspace"
+    if my findInWindows("$APP_NAME", "settings-yaml-editor") is not missing value then error "settings window did not close"
+
+    set returnedButton to my findInWindows("$APP_NAME", "open-settings-button")
+    if returnedButton is missing value then error "workspace window not reachable after closing settings"
   end tell
 end tell
 APPLESCRIPT
