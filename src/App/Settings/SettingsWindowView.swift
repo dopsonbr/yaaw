@@ -67,7 +67,9 @@ struct SettingsWindowView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
-        .background(dracula(.background))
+        .background(
+            SidebarMaterialBackground(tintOpacity: appModel.resolvedTheme.materialTintOpacity)
+        )
         .toolbar(removing: .sidebarToggle)
     }
 
@@ -125,4 +127,37 @@ struct SettingsWindowView: View {
             }
         )
     }
+}
+
+/// Behind-window sidebar material under the theme tint, matching the main
+/// window's sidebar treatment. Reduce Transparency and high-contrast themes
+/// (tint opacity 1) render fully opaque.
+private struct SidebarMaterialBackground: View {
+    let tintOpacity: Double
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let effectiveOpacity = reduceTransparency ? 1.0 : tintOpacity
+        ZStack {
+            if effectiveOpacity < 1 {
+                BehindWindowSidebarMaterial()
+            }
+            Rectangle()
+                .fill(dracula(.background))
+                .opacity(effectiveOpacity)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct BehindWindowSidebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }

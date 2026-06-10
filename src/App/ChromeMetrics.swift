@@ -16,8 +16,9 @@ enum ChromeMetrics {
     static let sidebarGlyph: CGFloat = 13
     static let statusGlyph: CGFloat = 12
 
-    // Selection / hover treatment.
-    static let selectionCornerRadius: CGFloat = 6
+    // Selection / hover treatment. The radius stays concentric with the
+    // rounder macOS 26 control geometry.
+    static let selectionCornerRadius: CGFloat = 8
     static let rowHInset: CGFloat = 4
 
     // Default chrome symbol weight.

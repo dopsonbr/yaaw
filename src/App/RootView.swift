@@ -1179,7 +1179,6 @@ private struct ProjectCreationSheet: View {
         }
         .padding(28)
         .frame(width: 560)
-        .background(dracula(.background))
     }
 
     private func chooseDirectory() {
@@ -1278,7 +1277,6 @@ private struct ThreadRenameSheet: View {
         }
         .padding(24)
         .frame(width: 420)
-        .background(dracula(.background))
     }
 
     private func renameThread() {
@@ -1482,7 +1480,6 @@ private struct SessionLinkSheet: View {
         }
         .padding(24)
         .frame(width: 520)
-        .background(dracula(.background))
     }
 
     private var candidates: [SessionLinkCandidate] {

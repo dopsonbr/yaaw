@@ -66,7 +66,6 @@ struct ThreadChoiceSheet: View {
         }
         .padding(24)
         .frame(width: 760)
-        .background(dracula(.background))
         .foregroundStyle(dracula(.foreground))
     }
 
