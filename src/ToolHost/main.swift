@@ -288,11 +288,12 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 window.orderFrontRegardless()
             }
         }
-        // Reflow the terminal grid to the new pane size while it stays visible
-        // (setSurfaceVisible only fits on a visibility transition).
-        if visible, terminalView != nil {
-            terminalView?.fitToSize()
-        }
+        // Re-assert the grid size on every viewport tick, hidden or not. The
+        // parent reports at least every 0.15s, so a surface whose size drifted
+        // from the window (e.g. a resize the renderer dropped while occluded
+        // or mid-level-change) self-heals on the next tick instead of leaving
+        // a stale grid + PTY over a wider pane.
+        terminalView?.fitToSize()
     }
 
     /// Orders the surface window in. Headless, it slots in directly above the
