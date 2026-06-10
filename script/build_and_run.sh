@@ -145,6 +145,17 @@ if command -v codesign >/dev/null 2>&1; then
 fi
 
 open_app() {
+  # `open -n` always starts a new instance. Quit any instance still running
+  # from this bundle first: a stale instance keeps floating terminal panes
+  # alive at their old frames, which then overlay the new instance's layout
+  # (mixed/stale terminal content and window slivers after panel changes).
+  # SIGTERM gives the old app a clean shutdown, which also tears down its
+  # YAAWToolHost helpers.
+  /usr/bin/pkill -f "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    /usr/bin/pgrep -f "$APP_BUNDLE/Contents/MacOS/$APP_NAME" >/dev/null 2>&1 || break
+    sleep 0.2
+  done
   /usr/bin/open -n "$APP_BUNDLE"
 }
 
