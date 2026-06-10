@@ -583,7 +583,6 @@ private struct SidebarView: View {
             .foregroundStyle(dracula(.comment))
         }
         .padding(18)
-        .background(dracula(.background))
         .sheet(isPresented: $isProjectSheetPresented) {
             ProjectCreationSheet(model: model)
         }

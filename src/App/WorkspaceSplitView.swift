@@ -136,6 +136,13 @@ private final class WorkspaceSplitHostView: NSView {
     private let sidebarDivider = WorkspaceDividerView(orientation: .vertical)
     private let rightDivider = WorkspaceDividerView(orientation: .vertical)
     private let bottomDivider = WorkspaceDividerView(orientation: .horizontal)
+    // Sidebar chrome: behind-window material under a theme tint, per the
+    // Liquid Glass guidance that navigation floats above the content layer.
+    // The content regions keep an opaque theme backdrop.
+    private let sidebarBackdrop = NSVisualEffectView()
+    private let sidebarTint = NSView()
+    private let contentBackdrop = NSView()
+    private var accessibilityObserver: NSObjectProtocol?
 
     private var configuration = WorkspaceSplitConfiguration(
         layoutState: .defaults,
@@ -185,6 +192,14 @@ private final class WorkspaceSplitHostView: NSView {
     override func layout() {
         super.layout()
         let metrics = layoutMetrics()
+        sidebarBackdrop.frame = metrics.sidebarFrame
+        sidebarTint.frame = metrics.sidebarFrame
+        contentBackdrop.frame = NSRect(
+            x: metrics.sidebarFrame.maxX,
+            y: 0,
+            width: max(0, bounds.width - metrics.sidebarFrame.maxX),
+            height: bounds.height
+        )
         sidebarHost.frame = metrics.sidebarFrame
         sidebarDivider.frame = metrics.sidebarDividerFrame
         mainHost.frame = metrics.mainFrame
@@ -199,7 +214,15 @@ private final class WorkspaceSplitHostView: NSView {
 
     private func setup() {
         wantsLayer = true
+        sidebarBackdrop.material = .sidebar
+        sidebarBackdrop.blendingMode = .behindWindow
+        sidebarBackdrop.state = .followsWindowActiveState
+        sidebarTint.wantsLayer = true
+        contentBackdrop.wantsLayer = true
         for view in [
+            contentBackdrop,
+            sidebarBackdrop,
+            sidebarTint,
             sidebarHost,
             mainHost,
             rightHost,
@@ -209,6 +232,15 @@ private final class WorkspaceSplitHostView: NSView {
             bottomDivider,
         ] {
             addSubview(view)
+        }
+        accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.applyTheme()
+            }
         }
         sidebarDivider.accessibilityLabel = "Resize sidebar"
         rightDivider.accessibilityLabel = "Resize right-side area"
@@ -229,10 +261,19 @@ private final class WorkspaceSplitHostView: NSView {
     }
 
     private func applyTheme() {
-        layer?.backgroundColor = NSColor(hex: configuration.theme.hex(for: .background)).cgColor
-        let fill = NSColor(hex: configuration.theme.hex(for: .currentLine))
-        let line = NSColor(hex: configuration.theme.hex(for: .comment))
-        let active = NSColor(hex: configuration.theme.hex(for: .cyan))
+        let theme = configuration.theme
+        // Reduce Transparency restores the exact opaque pre-material rendering;
+        // high-contrast themes opt out via materialTintOpacity == 1.
+        let reduceTransparency =
+            NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        let tintOpacity = reduceTransparency ? 1.0 : theme.materialTintOpacity
+        sidebarBackdrop.isHidden = tintOpacity >= 1.0
+        sidebarTint.layer?.backgroundColor =
+            NSColor(hex: theme.materialTintHex).withAlphaComponent(tintOpacity).cgColor
+        contentBackdrop.layer?.backgroundColor = NSColor(hex: theme.hex(for: .background)).cgColor
+        let fill = NSColor(hex: theme.hex(for: .currentLine))
+        let line = NSColor(hex: theme.hex(for: .comment))
+        let active = NSColor(hex: theme.hex(for: .cyan))
         for divider in [sidebarDivider, rightDivider, bottomDivider] {
             divider.fillColor = fill
             divider.lineColor = line
