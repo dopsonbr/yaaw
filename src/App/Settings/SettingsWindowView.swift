@@ -16,8 +16,8 @@ struct SettingsWindowView: View {
         .foregroundStyle(dracula(.foreground))
         .font(model.effectiveFonts.interfaceFont())
         .environment(\.fontSettings, model.effectiveFonts)
-        .environment(\.appTheme, model.currentConfiguration.resolvedTheme)
-        .environment(\.colorScheme, model.currentConfiguration.resolvedTheme.swiftUIColorScheme)
+        .environment(\.appTheme, appModel.resolvedTheme)
+        .environment(\.colorScheme, appModel.resolvedTheme.swiftUIColorScheme)
         .onAppear(perform: model.loadIfNeeded)
         .onChange(of: appModel.configuration.themeName) { _, newThemeID in
             model.selectedThemeID = ThemeCatalog.theme(id: newThemeID)?.id ?? ThemeCatalog.defaultID

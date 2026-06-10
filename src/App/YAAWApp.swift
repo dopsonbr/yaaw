@@ -66,6 +66,7 @@ struct YAAWApp: App {
                 agentCLIBindings: agentCLIBindings,
                 externalToolResolver: externalToolResolver,
                 configuration: configuration,
+                systemAppearanceIsDark: Self.seededSystemAppearanceIsDark(),
                 diagnosticRecorder: diagnostics,
                 // Headless e2e never activates the app, so the active-app
                 // suppression can't kick in and real Notification Center
@@ -87,7 +88,9 @@ struct YAAWApp: App {
                     metadata: ["error": String(describing: error)]
                 )
             )
-            appModel = AppModel(store: InMemoryYAAWStore.helloWorld())
+            appModel = AppModel(
+                store: InMemoryYAAWStore.helloWorld(),
+                systemAppearanceIsDark: Self.seededSystemAppearanceIsDark())
             startupError = error
         }
         _model = StateObject(wrappedValue: appModel)
@@ -98,6 +101,12 @@ struct YAAWApp: App {
                 appModel: appModel
             )
         )
+    }
+
+    /// Pre-AppKit guess at the system appearance so the first frame renders the
+    /// right pairing; the KVO observer corrects it within the first runloop.
+    private static func seededSystemAppearanceIsDark() -> Bool {
+        UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
     }
 
     private static func makeSettingsModel(
@@ -151,6 +160,7 @@ struct YAAWApp: App {
             .onAppear {
                 if startupError == nil {
                     appDelegate.updateShortcutPreflightModel(model)
+                    appDelegate.installSystemAppearanceObserver(for: model)
                 }
             }
         }
@@ -521,6 +531,7 @@ extension AppModel {
 private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
     private var terminationSignalSources: [DispatchSourceSignal] = []
     private let shortcutPreflightMonitor = AppShortcutPreflightMonitor()
+    @MainActor private let systemAppearanceObserver = SystemAppearanceObserver()
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Headless e2e runs must never take focus or appear in the Dock; the
@@ -557,6 +568,15 @@ private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func updateShortcutPreflightModel(_ model: AppModel) {
         shortcutPreflightMonitor.updateModel(model)
+    }
+
+    /// Delegate-owned so appearance flips keep flowing to the model even if the
+    /// main window closes while the settings window stays open.
+    @MainActor
+    func installSystemAppearanceObserver(for model: AppModel) {
+        systemAppearanceObserver.install { isDark in
+            model.updateSystemAppearance(isDark: isDark)
+        }
     }
 }
 

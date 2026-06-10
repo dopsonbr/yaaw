@@ -64,6 +64,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
     @Published public private(set) var selectedFileRelativePath: String?
     @Published public private(set) var browserUnavailableMessagesByThreadID: [UUID: String]
     @Published public private(set) var configuration: YAAWConfiguration
+    @Published public private(set) var systemAppearanceIsDark: Bool
     @Published public private(set) var agentCLIOptionCatalog: AgentCLIOptionCatalog
     @Published public private(set) var expandedProjectIDs: Set<UUID>
     @Published public private(set) var expandedArchivedProjectIDs: Set<UUID>
@@ -129,6 +130,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         fileIndexer: FileIndexing = BackgroundFileIndexer(),
         externalToolResolver: any AgentCLIExecutableResolving = PATHAgentCLIExecutableResolver(),
         configuration: YAAWConfiguration = YAAWConfiguration(),
+        systemAppearanceIsDark: Bool = true,
         diagnosticRecorder: DiagnosticEventRecording = LoggerDiagnosticEventRecorder.shared,
         notificationDispatcher: any ThreadActivityNotificationDispatching =
             NoopThreadActivityNotificationDispatcher(),
@@ -153,6 +155,7 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
         self.isApplicationActive = isApplicationActive
         let validatedConfiguration = configuration.validated(diagnosticRecorder: diagnosticRecorder)
         self.configuration = validatedConfiguration
+        self.systemAppearanceIsDark = systemAppearanceIsDark
         self.agentCLIOptionCatalog = agentCLIOptionCatalogService.loadCatalog()
         self.environment = environment
         self.homeDirectory = homeDirectory
@@ -605,6 +608,17 @@ public final class AppModel: ObservableObject, @unchecked Sendable {
             ]
         )
         refreshSelectedFileBrowser()
+    }
+
+    /// The active theme, resolving the System pairing against the live macOS
+    /// appearance pushed in by the app layer.
+    public var resolvedTheme: ThemeDefinition {
+        configuration.resolvedTheme(systemAppearanceIsDark: systemAppearanceIsDark)
+    }
+
+    public func updateSystemAppearance(isDark: Bool) {
+        guard systemAppearanceIsDark != isDark else { return }
+        systemAppearanceIsDark = isDark
     }
 
     public var selectedProjectDirectoryState: ProjectDirectoryState? {

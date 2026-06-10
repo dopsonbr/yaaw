@@ -56,8 +56,8 @@ struct RootView: View {
         .foregroundStyle(dracula(.foreground))
         .font(model.configuration.fonts.interfaceFont())
         .environment(\.fontSettings, model.configuration.fonts)
-        .environment(\.appTheme, model.configuration.resolvedTheme)
-        .environment(\.colorScheme, model.configuration.resolvedTheme.swiftUIColorScheme)
+        .environment(\.appTheme, model.resolvedTheme)
+        .environment(\.colorScheme, model.resolvedTheme.swiftUIColorScheme)
         .environmentObject(terminalRuntime)
         .onAppear {
             // Tearing down a terminal kills only its isolated helper — never the
@@ -158,7 +158,7 @@ struct RootView: View {
             isSidebarCollapsed: model.layoutState.isSidebarCollapsed,
             isRightPanelCollapsed: model.layoutState.isRightPanelCollapsed,
             isBottomTerminalExpanded: model.isBottomTerminalExpanded,
-            theme: model.configuration.resolvedTheme,
+            theme: model.resolvedTheme,
             onResize: updateLayoutFromSplitView,
             onReset: resetSplitDivider
         ) {

@@ -577,8 +577,47 @@ private final class E2ERunner {
             model.configuration.themeName == "light-high-contrast",
             "settings reload applied selected built-in theme")
         try assert(
-            model.configuration.resolvedTheme.group == .highContrast,
+            model.resolvedTheme.group == .highContrast,
             "selected theme resolved to high contrast group")
+        try assert(
+            model.resolvedTheme.id == "light-high-contrast",
+            "fixed theme ignores the system appearance")
+
+        model.reloadConfiguration(
+            YAAWConfiguration(theme: ThemeSettings(active: "system")))
+        model.updateSystemAppearance(isDark: false)
+        try assert(
+            model.resolvedTheme.id == "macos-light",
+            "system mode resolved the light pairing in the light appearance")
+        model.updateSystemAppearance(isDark: true)
+        try assert(
+            model.resolvedTheme.id == "macos-dark",
+            "system mode resolved the dark pairing in the dark appearance")
+        model.reloadConfiguration(
+            YAAWConfiguration(
+                theme: ThemeSettings(active: "system", light: "solarized-light", dark: "dracula")))
+        model.updateSystemAppearance(isDark: false)
+        try assert(
+            model.resolvedTheme.id == "solarized-light",
+            "system mode honored a custom light pairing")
+        model.updateSystemAppearance(isDark: true)
+        try assert(
+            model.resolvedTheme.id == "dracula",
+            "system mode honored a custom dark pairing")
+
+        model.reloadConfiguration(
+            YAAWConfiguration(
+                theme: ThemeSettings(active: "light-high-contrast"),
+                fonts: FontSettings(
+                    interfaceFamily: "Avenir Next",
+                    interfaceSize: 14,
+                    editorFamily: "SF Mono",
+                    editorSize: 15,
+                    terminalFamily: "JetBrains Mono",
+                    terminalSize: 16
+                )
+            )
+        )
         try assert(
             model.configuration.fonts.interfaceFamily == "Avenir Next",
             "settings reload applied interface font family")

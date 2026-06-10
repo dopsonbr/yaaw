@@ -2267,7 +2267,7 @@ final class AppModelTests: XCTestCase {
             YAAWConfiguration(theme: ThemeSettings(active: "solarized-light")))
 
         XCTAssertEqual(model.configuration.themeName, "solarized-light")
-        XCTAssertEqual(model.configuration.resolvedTheme.displayName, "Solarized Light")
+        XCTAssertEqual(model.resolvedTheme.displayName, "Solarized Light")
         XCTAssertTrue(
             recorder.events.contains {
                 $0.category == "Configuration"
@@ -2275,6 +2275,40 @@ final class AppModelTests: XCTestCase {
                     && $0.metadata["theme"] == "solarized-light"
             }
         )
+    }
+
+    func testSystemAppearanceDrivesResolvedThemeForSystemMode() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(
+            store: fixture.store,
+            configuration: YAAWConfiguration(theme: ThemeSettings(active: "system")),
+            systemAppearanceIsDark: true
+        )
+
+        XCTAssertEqual(model.resolvedTheme.id, "macos-dark")
+        model.updateSystemAppearance(isDark: false)
+        XCTAssertEqual(model.resolvedTheme.id, "macos-light")
+
+        // A fixed theme ignores appearance flips.
+        model.reloadConfiguration(YAAWConfiguration(theme: ThemeSettings(active: "dracula")))
+        model.updateSystemAppearance(isDark: true)
+        XCTAssertEqual(model.resolvedTheme.id, "dracula")
+    }
+
+    func testUpdateSystemAppearanceIgnoresRedundantFlips() throws {
+        let fixture = AppModelFixture()
+        let model = AppModel(store: fixture.store, systemAppearanceIsDark: false)
+
+        var publishCount = 0
+        let cancellable = model.$systemAppearanceIsDark.dropFirst().sink { _ in
+            publishCount += 1
+        }
+        defer { cancellable.cancel() }
+
+        model.updateSystemAppearance(isDark: false)
+        XCTAssertEqual(publishCount, 0)
+        model.updateSystemAppearance(isDark: true)
+        XCTAssertEqual(publishCount, 1)
     }
 
     func testReloadConfigurationAppliesFontsAndRecordsDiagnostic() throws {
