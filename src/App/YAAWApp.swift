@@ -17,7 +17,37 @@ struct YAAWApp: App {
     private let updateInstaller = AppUpdateInstaller.shared
     @MainActor private let externalOpenWorkspace = ExternalOpenWorkspace()
 
+    /// Two live instances of the same bundle identifier corrupt each other:
+    /// every pane is a floating helper window, so the older instance's
+    /// terminals keep hovering over the newer instance's layout (stale-width
+    /// content, dead margins, mixed glyphs after any panel change). Instances
+    /// can come from different install paths (/Applications vs dist), which
+    /// no launch script can reliably sweep — the newest launch wins instead.
+    ///
+    /// Lives in App.init, not the app delegate: LaunchServices launches do
+    /// not deliver the delegate's launching callbacks. SIGTERM rather than
+    /// NSRunningApplication.terminate() because the app ignores the quit
+    /// Apple event while unfocused.
+    private static let duplicateInstanceSweep: Void = {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let myPid = ProcessInfo.processInfo.processIdentifier
+        let myLaunch = NSRunningApplication.current.launchDate ?? Date()
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != myPid }
+            .filter { ($0.launchDate ?? .distantPast) <= myLaunch }
+        guard !others.isEmpty else { return }
+        for app in others {
+            Darwin.kill(app.processIdentifier, SIGTERM)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            for app in others where !app.isTerminated {
+                app.forceTerminate()
+            }
+        }
+    }()
+
     init() {
+        _ = Self.duplicateInstanceSweep
         var environment = ProcessInfo.processInfo.environment
         let envPrefix = Self.envPrefix()
         let diagnostics = LoggerDiagnosticEventRecorder.shared
