@@ -79,12 +79,26 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
     public let displayName: String
     public let group: ThemeGroup
     public let tokens: [ThemeToken]
+    /// Explicit 16-color terminal palette; `nil` derives one from the role tokens.
+    public let ansiPalette: [String]?
+    /// Themes built from the macOS system palette let chrome use pure system
+    /// materials instead of theme-tinted ones.
+    public let prefersSystemMaterials: Bool
 
-    public init(id: String, displayName: String, group: ThemeGroup, tokens: [ThemeToken]) {
+    public init(
+        id: String,
+        displayName: String,
+        group: ThemeGroup,
+        tokens: [ThemeToken],
+        ansiPalette: [String]? = nil,
+        prefersSystemMaterials: Bool = false
+    ) {
         self.id = id
         self.displayName = displayName
         self.group = group
         self.tokens = tokens
+        self.ansiPalette = ansiPalette
+        self.prefersSystemMaterials = prefersSystemMaterials
     }
 
     public func hex(for role: ThemeRole) -> String {
@@ -111,47 +125,22 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
         }
     }
 
-    public var terminalANSIPalette: [String] {
-        if id == "ghostty-default" {
-            return [
-                "#1d1f21",
-                "#cc6666",
-                "#b5bd68",
-                "#f0c674",
-                "#81a2be",
-                "#b294bb",
-                "#8abeb7",
-                "#c5c8c6",
-                "#666666",
-                "#d54e53",
-                "#b9ca4a",
-                "#e7c547",
-                "#7aa6da",
-                "#c397d8",
-                "#70c0b1",
-                "#eaeaea",
-            ]
-        }
+    /// Tint color for translucent chrome materials (sidebar, settings sidebar).
+    public var materialTintHex: String {
+        hex(for: .background)
+    }
 
-        if id == "dracula" {
-            return [
-                "#21222c",
-                "#ff5555",
-                "#50fa7b",
-                "#f1fa8c",
-                "#bd93f9",
-                "#ff79c6",
-                "#8be9fd",
-                "#f8f8f2",
-                "#6272a4",
-                "#ff6e6e",
-                "#69ff94",
-                "#ffffa5",
-                "#d6acff",
-                "#ff92df",
-                "#a4ffff",
-                "#ffffff",
-            ]
+    /// Opacity of the theme tint layered over chrome materials. System-palette
+    /// themes use the bare material; high-contrast themes stay fully opaque.
+    public var materialTintOpacity: Double {
+        if prefersSystemMaterials { return 0.0 }
+        if group == .highContrast { return 1.0 }
+        return 0.7
+    }
+
+    public var terminalANSIPalette: [String] {
+        if let ansiPalette {
+            return ansiPalette
         }
 
         let isLight = group == .light || id == "light-high-contrast"
@@ -277,8 +266,46 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
 
 public enum ThemeCatalog {
     public static let defaultID = "ghostty-default"
+    /// Themes the System appearance mode pairs with macOS light/dark by default.
+    public static let defaultLightID = "macos-light"
+    public static let defaultDarkID = "macos-dark"
 
     public static let themes: [ThemeDefinition] = [
+        theme(
+            id: "macos-light",
+            displayName: "macOS Light",
+            group: .light,
+            background: "#f5f5f7",
+            currentLine: "#e3e3e8",
+            foreground: "#1d1d1f",
+            comment: "#6e6e73",
+            cyan: "#007aff",
+            green: "#248a3d",
+            orange: "#c93400",
+            pink: "#d30f45",
+            purple: "#8944ab",
+            red: "#d70015",
+            yellow: "#946300",
+            ansiPalette: [
+                "#1d1d1f",
+                "#d70015",
+                "#248a3d",
+                "#946300",
+                "#0040dd",
+                "#8944ab",
+                "#0071a4",
+                "#e3e3e8",
+                "#6e6e73",
+                "#ff3b30",
+                "#34c759",
+                "#ffcc00",
+                "#007aff",
+                "#af52de",
+                "#30b0c7",
+                "#ffffff",
+            ],
+            prefersSystemMaterials: true
+        ),
         theme(
             id: "light-2026",
             displayName: "Light 2026",
@@ -360,6 +387,41 @@ public enum ThemeCatalog {
             yellow: "#b58900"
         ),
         theme(
+            id: "macos-dark",
+            displayName: "macOS Dark",
+            group: .dark,
+            background: "#1e1e1e",
+            currentLine: "#2d2d2d",
+            foreground: "#f5f5f7",
+            comment: "#98989d",
+            cyan: "#0a84ff",
+            green: "#32d74b",
+            orange: "#ff9f0a",
+            pink: "#ff375f",
+            purple: "#bf5af2",
+            red: "#ff453a",
+            yellow: "#ffd60a",
+            ansiPalette: [
+                "#1e1e1e",
+                "#ff453a",
+                "#32d74b",
+                "#ffd60a",
+                "#0a84ff",
+                "#bf5af2",
+                "#64d2ff",
+                "#d1d1d6",
+                "#58585e",
+                "#ff6961",
+                "#30db5b",
+                "#ffd426",
+                "#409cff",
+                "#da8fff",
+                "#70d7ff",
+                "#f5f5f7",
+            ],
+            prefersSystemMaterials: true
+        ),
+        theme(
             id: "dracula",
             displayName: "Dracula",
             group: .dark,
@@ -373,7 +435,25 @@ public enum ThemeCatalog {
             pink: "#ff79c6",
             purple: "#bd93f9",
             red: "#ff5555",
-            yellow: "#f1fa8c"
+            yellow: "#f1fa8c",
+            ansiPalette: [
+                "#21222c",
+                "#ff5555",
+                "#50fa7b",
+                "#f1fa8c",
+                "#bd93f9",
+                "#ff79c6",
+                "#8be9fd",
+                "#f8f8f2",
+                "#6272a4",
+                "#ff6e6e",
+                "#69ff94",
+                "#ffffa5",
+                "#d6acff",
+                "#ff92df",
+                "#a4ffff",
+                "#ffffff",
+            ]
         ),
         theme(
             id: "ghostty-default",
@@ -389,7 +469,25 @@ public enum ThemeCatalog {
             pink: "#b294bb",
             purple: "#81a2be",
             red: "#cc6666",
-            yellow: "#f0c674"
+            yellow: "#f0c674",
+            ansiPalette: [
+                "#1d1f21",
+                "#cc6666",
+                "#b5bd68",
+                "#f0c674",
+                "#81a2be",
+                "#b294bb",
+                "#8abeb7",
+                "#c5c8c6",
+                "#666666",
+                "#d54e53",
+                "#b9ca4a",
+                "#e7c547",
+                "#7aa6da",
+                "#c397d8",
+                "#70c0b1",
+                "#eaeaea",
+            ]
         ),
         theme(
             id: "dark-2026",
@@ -534,7 +632,9 @@ public enum ThemeCatalog {
         pink: String,
         purple: String,
         red: String,
-        yellow: String
+        yellow: String,
+        ansiPalette: [String]? = nil,
+        prefersSystemMaterials: Bool = false
     ) -> ThemeDefinition {
         ThemeDefinition(
             id: id,
@@ -552,7 +652,9 @@ public enum ThemeCatalog {
                 ThemeToken(role: .purple, hex: purple),
                 ThemeToken(role: .red, hex: red),
                 ThemeToken(role: .yellow, hex: yellow),
-            ]
+            ],
+            ansiPalette: ansiPalette,
+            prefersSystemMaterials: prefersSystemMaterials
         )
     }
 }

@@ -1153,7 +1153,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(template.contains("# default: [nvim, vim, vi]"))
         XCTAssertTrue(template.contains("globalChatsDirectory: \"~/yaaw\""))
         XCTAssertTrue(template.contains("fileBrowserPack: material-file-icons"))
-        XCTAssertTrue(template.contains("# supported: light-2026, light-modern"))
+        XCTAssertTrue(template.contains("# supported: macos-light, light-2026, light-modern"))
         XCTAssertFalse(template.contains("only dracula is implemented"))
         XCTAssertTrue(template.contains("interfaceFamily: system"))
         XCTAssertTrue(template.contains("editorFamily: \"JetBrains Mono\""))

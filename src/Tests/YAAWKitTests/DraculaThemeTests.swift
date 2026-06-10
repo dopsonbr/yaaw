@@ -9,11 +9,13 @@ final class DraculaThemeTests: XCTestCase {
         XCTAssertEqual(
             ThemeCatalog.supportedIDs,
             [
+                "macos-light",
                 "light-2026",
                 "light-modern",
                 "light-plus",
                 "quiet-light",
                 "solarized-light",
+                "macos-dark",
                 "dracula",
                 "ghostty-default",
                 "dark-2026",
@@ -25,6 +27,8 @@ final class DraculaThemeTests: XCTestCase {
                 "light-high-contrast",
             ]
         )
+        XCTAssertEqual(ThemeCatalog.defaultLightID, "macos-light")
+        XCTAssertEqual(ThemeCatalog.defaultDarkID, "macos-dark")
     }
 
     func testEveryBuiltInThemeHasRequiredValidHexTokens() {
@@ -106,6 +110,86 @@ final class DraculaThemeTests: XCTestCase {
                 "#ffffff",
             ]
         )
+    }
+
+    func testMacOSThemesExposeAppleSystemTokens() throws {
+        let light = try XCTUnwrap(ThemeCatalog.theme(id: "macos-light"))
+        XCTAssertEqual(light.group, .light)
+        XCTAssertEqual(light.hex(for: .background), "#f5f5f7")
+        XCTAssertEqual(light.hex(for: .currentLine), "#e3e3e8")
+        XCTAssertEqual(light.hex(for: .foreground), "#1d1d1f")
+        XCTAssertEqual(light.hex(for: .comment), "#6e6e73")
+        XCTAssertEqual(light.hex(for: .cyan), "#007aff")
+
+        let dark = try XCTUnwrap(ThemeCatalog.theme(id: "macos-dark"))
+        XCTAssertEqual(dark.group, .dark)
+        XCTAssertEqual(dark.hex(for: .background), "#1e1e1e")
+        XCTAssertEqual(dark.hex(for: .currentLine), "#2d2d2d")
+        XCTAssertEqual(dark.hex(for: .foreground), "#f5f5f7")
+        XCTAssertEqual(dark.hex(for: .comment), "#98989d")
+        XCTAssertEqual(dark.hex(for: .cyan), "#0a84ff")
+    }
+
+    func testMacOSThemesExposeExplicitANSIPalettes() throws {
+        let light = try XCTUnwrap(ThemeCatalog.theme(id: "macos-light"))
+        XCTAssertEqual(
+            light.terminalANSIPalette,
+            [
+                "#1d1d1f", "#d70015", "#248a3d", "#946300",
+                "#0040dd", "#8944ab", "#0071a4", "#e3e3e8",
+                "#6e6e73", "#ff3b30", "#34c759", "#ffcc00",
+                "#007aff", "#af52de", "#30b0c7", "#ffffff",
+            ]
+        )
+
+        let dark = try XCTUnwrap(ThemeCatalog.theme(id: "macos-dark"))
+        XCTAssertEqual(
+            dark.terminalANSIPalette,
+            [
+                "#1e1e1e", "#ff453a", "#32d74b", "#ffd60a",
+                "#0a84ff", "#bf5af2", "#64d2ff", "#d1d1d6",
+                "#58585e", "#ff6961", "#30db5b", "#ffd426",
+                "#409cff", "#da8fff", "#70d7ff", "#f5f5f7",
+            ]
+        )
+    }
+
+    func testMacOSThemesMeetTextContrast() throws {
+        for id in ["macos-light", "macos-dark"] {
+            let theme = try XCTUnwrap(ThemeCatalog.theme(id: id))
+            XCTAssertGreaterThanOrEqual(
+                contrastRatio(theme.hex(for: .foreground), theme.hex(for: .background)),
+                7, id
+            )
+            XCTAssertGreaterThanOrEqual(
+                contrastRatio(theme.uiHex(for: .secondaryLabel), theme.hex(for: .background)),
+                4.5, id
+            )
+        }
+    }
+
+    func testMaterialTintFollowsThemeKind() throws {
+        let light = try XCTUnwrap(ThemeCatalog.theme(id: "macos-light"))
+        let dark = try XCTUnwrap(ThemeCatalog.theme(id: "macos-dark"))
+        XCTAssertTrue(light.prefersSystemMaterials)
+        XCTAssertTrue(dark.prefersSystemMaterials)
+        XCTAssertEqual(light.materialTintOpacity, 0.0)
+        XCTAssertEqual(dark.materialTintOpacity, 0.0)
+
+        let dracula = try XCTUnwrap(ThemeCatalog.theme(id: "dracula"))
+        XCTAssertFalse(dracula.prefersSystemMaterials)
+        XCTAssertEqual(dracula.materialTintOpacity, 0.7)
+        XCTAssertEqual(dracula.materialTintHex, dracula.hex(for: .background))
+
+        let highContrast = try XCTUnwrap(ThemeCatalog.theme(id: "dark-high-contrast"))
+        XCTAssertEqual(highContrast.materialTintOpacity, 1.0)
+    }
+
+    func testGhosttyDefaultKeepsExplicitANSIPalette() throws {
+        let theme = try XCTUnwrap(ThemeCatalog.theme(id: "ghostty-default"))
+        XCTAssertEqual(theme.terminalANSIPalette.first, "#1d1f21")
+        XCTAssertEqual(theme.terminalANSIPalette.last, "#eaeaea")
+        XCTAssertEqual(theme.terminalANSIPalette.count, 16)
     }
 
     private func isValidHexColor(_ value: String) -> Bool {
