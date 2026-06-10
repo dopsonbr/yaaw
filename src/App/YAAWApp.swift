@@ -156,6 +156,9 @@ struct YAAWApp: App {
                 }
             }
             .frame(minWidth: 1100, minHeight: 700)
+            // Drives NSWindow.appearance so the native titlebar and other
+            // window chrome render in the active theme's light/dark style.
+            .preferredColorScheme(model.resolvedTheme.swiftUIColorScheme)
             .toolbar(removing: .title)
             .onAppear {
                 if startupError == nil {
@@ -389,6 +392,7 @@ struct YAAWApp: App {
         Window("Settings", id: Self.settingsWindowID) {
             if startupError == nil {
                 SettingsWindowView(model: settingsModel, appModel: model)
+                    .preferredColorScheme(model.resolvedTheme.swiftUIColorScheme)
             }
         }
         .defaultSize(width: 980, height: 680)
