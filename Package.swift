@@ -65,6 +65,7 @@ let package = Package(
                 "Core",
                 "Diagnostics",
                 "FileBrowser",
+                "Fonts/BundledFontCatalog.swift",
                 "Icons",
                 "IsolatedTools",
                 "Layout",
@@ -75,6 +76,9 @@ let package = Package(
                 "Terminal",
                 "Theme",
                 "Threads",
+            ],
+            resources: [
+                .copy("Fonts/Resources/JetBrainsMono")
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")

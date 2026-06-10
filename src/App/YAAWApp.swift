@@ -21,6 +21,7 @@ struct YAAWApp: App {
         var environment = ProcessInfo.processInfo.environment
         let envPrefix = Self.envPrefix()
         let diagnostics = LoggerDiagnosticEventRecorder.shared
+        BundledFontCatalog.registerBundledFonts(diagnosticRecorder: diagnostics)
         var appliedOverrides: [String] = []
         if let pathOverride = environment["\(envPrefix)PATH"] {
             environment["PATH"] = pathOverride

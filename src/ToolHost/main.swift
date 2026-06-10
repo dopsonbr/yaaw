@@ -854,6 +854,7 @@ private func argumentValue(after flag: String) -> String? {
     return arguments[index + 1]
 }
 
+BundledFontCatalog.registerBundledFonts(diagnosticRecorder: LoggerDiagnosticEventRecorder.shared)
 let toolKind =
     argumentValue(after: "--tool-kind").flatMap(IsolatedToolKind.init(rawValue:)) ?? .browser
 let instanceID = argumentValue(after: "--instance-id") ?? UUID().uuidString
