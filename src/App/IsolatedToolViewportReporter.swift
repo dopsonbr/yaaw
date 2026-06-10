@@ -3,9 +3,16 @@ import Darwin
 import SwiftUI
 
 struct IsolatedToolViewportReporter: NSViewRepresentable {
-    /// Emits the viewport frame, whether the helper should be visible, and
-    /// whether its window should stay above the parent app's normal content.
-    let onViewportChanged: (CGRect, Bool, Bool) -> Void
+    /// True when the e2e suite drives the app without ever activating it.
+    /// Panes stay visible despite the app being inactive, and helpers order
+    /// themselves relative to the parent window instead of floating.
+    static let isHeadlessE2E =
+        ProcessInfo.processInfo.environment["YAAW_E2E_HEADLESS"] == "1"
+
+    /// Emits the viewport frame, whether the helper should be visible,
+    /// whether its window should stay above the parent app's normal content,
+    /// and the parent window's window number (for relative ordering).
+    let onViewportChanged: (CGRect, Bool, Bool, Int) -> Void
     var allowsToolHostFrontmostVisibility = false
     var allowsInactiveApplicationVisibility = false
     var hidesWhenWindowHasAttachedSheet = false
@@ -46,7 +53,7 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
     }
 
     final class ViewportView: NSView {
-        var onViewportChanged: ((CGRect, Bool, Bool) -> Void)?
+        var onViewportChanged: ((CGRect, Bool, Bool, Int) -> Void)?
         var allowsToolHostFrontmostVisibility = false
         var allowsInactiveApplicationVisibility = false
         var hidesWhenWindowHasAttachedSheet = false
@@ -135,7 +142,7 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
 
         func report() {
             guard let window else {
-                onViewportChanged?(.zero, false, NSApp.isActive)
+                onViewportChanged?(.zero, false, NSApp.isActive, 0)
                 updateReportTimer()
                 return
             }
@@ -149,7 +156,8 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
                 && !isCoveredBySiblingWindow(over: screenRect)
                 && screenRect.width > 1
                 && screenRect.height > 1
-            onViewportChanged?(screenRect, visible, isApplicationClusterFrontmost)
+            onViewportChanged?(
+                screenRect, visible, isApplicationClusterFrontmost, window.windowNumber)
         }
 
         /// A sheet on the pane's own window always blocks (the whole window is
@@ -182,6 +190,9 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
         }
 
         private var isApplicationVisibleForToolHost: Bool {
+            if IsolatedToolViewportReporter.isHeadlessE2E {
+                return true
+            }
             if allowsInactiveApplicationVisibility {
                 return true
             }

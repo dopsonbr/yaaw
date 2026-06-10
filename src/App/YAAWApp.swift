@@ -66,7 +66,12 @@ struct YAAWApp: App {
                 externalToolResolver: externalToolResolver,
                 configuration: configuration,
                 diagnosticRecorder: diagnostics,
-                notificationDispatcher: MacSystemThreadActivityNotificationDispatcher.shared,
+                // Headless e2e never activates the app, so the active-app
+                // suppression can't kick in and real Notification Center
+                // banners (plus the authorization prompt) would fire mid-run.
+                notificationDispatcher: environment["YAAW_E2E_HEADLESS"] == "1"
+                    ? NoopThreadActivityNotificationDispatcher()
+                    : MacSystemThreadActivityNotificationDispatcher.shared,
                 badgeUpdater: MacDockThreadActivityBadgeUpdater.shared,
                 isApplicationActive: { NSApplication.shared.isActive },
                 environment: environment
@@ -515,6 +520,17 @@ extension AppModel {
 private final class YAAWApplicationDelegate: NSObject, NSApplicationDelegate {
     private var terminationSignalSources: [DispatchSourceSignal] = []
     private let shortcutPreflightMonitor = AppShortcutPreflightMonitor()
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Headless e2e runs must never take focus or appear in the Dock; the
+        // accessory policy is applied before any window shows to avoid an
+        // activation flash.
+        if Bundle.main.bundleIdentifier == "dev.dopsonbr.YAAW.E2E",
+            ProcessInfo.processInfo.environment["YAAW_E2E_HEADLESS"] == "1"
+        {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installTerminationSignalHandlers()

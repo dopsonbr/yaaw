@@ -4,10 +4,18 @@ import YAAWKit
 
 @main
 struct YAAWE2E {
-    static func main() throws {
-        let options = try E2EOptions(arguments: CommandLine.arguments)
-        let runner = E2ERunner(artifactsDirectory: options.artifactsDirectory)
-        try runner.run()
+    static func main() async {
+        do {
+            if try await E2EDriverCommands.run(arguments: CommandLine.arguments) {
+                return
+            }
+            let options = try E2EOptions(arguments: CommandLine.arguments)
+            let runner = E2ERunner(artifactsDirectory: options.artifactsDirectory)
+            try runner.run()
+        } catch {
+            FileHandle.standardError.write(Data("YAAWE2E: \(error)\n".utf8))
+            exit(1)
+        }
     }
 }
 

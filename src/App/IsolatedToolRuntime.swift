@@ -187,12 +187,14 @@ final class IsolatedToolRuntime: ObservableObject {
         instanceID: String,
         frame: CGRect,
         visible: Bool,
-        shouldFloatToolHost: Bool
+        shouldFloatToolHost: Bool,
+        parentWindowNumber: Int = 0
     ) {
         let payload = Self.viewportPayload(
             frame: frame,
             visible: visible,
-            shouldFloatToolHost: shouldFloatToolHost)
+            shouldFloatToolHost: shouldFloatToolHost,
+            parentWindowNumber: parentWindowNumber)
         terminalViewportPayloadsByInstanceID[instanceID] = payload
         send(
             type: "setViewport",
@@ -237,7 +239,8 @@ final class IsolatedToolRuntime: ObservableObject {
         instanceID: String,
         frame: CGRect,
         visible: Bool,
-        shouldFloatToolHost: Bool
+        shouldFloatToolHost: Bool,
+        parentWindowNumber: Int = 0
     ) {
         // Browser is single-tenant: showing one hides sibling browsers. Scoped
         // to browser-kind hosts (see hideAll), so terminals are unaffected.
@@ -251,7 +254,8 @@ final class IsolatedToolRuntime: ObservableObject {
             payload: Self.viewportPayload(
                 frame: frame,
                 visible: visible,
-                shouldFloatToolHost: shouldFloatToolHost))
+                shouldFloatToolHost: shouldFloatToolHost,
+                parentWindowNumber: parentWindowNumber))
     }
 
     func hide(instanceID: String) {
@@ -270,7 +274,8 @@ final class IsolatedToolRuntime: ObservableObject {
     static func viewportPayload(
         frame: CGRect,
         visible: Bool,
-        shouldFloatToolHost: Bool
+        shouldFloatToolHost: Bool,
+        parentWindowNumber: Int = 0
     ) -> [String: String] {
         [
             "x": String(Double(frame.origin.x)),
@@ -279,6 +284,7 @@ final class IsolatedToolRuntime: ObservableObject {
             "height": String(Double(frame.size.height)),
             "visible": String(visible),
             "shouldFloat": String(shouldFloatToolHost),
+            "parentWindowNumber": String(parentWindowNumber),
         ]
     }
 

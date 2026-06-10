@@ -9,10 +9,17 @@ import YAAWToolHostSupport
 
 @MainActor
 final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
+    /// Headless e2e mode (inherited from the parent app's environment): the
+    /// helper must never activate itself or raise its windows above other
+    /// apps' work; it orders itself just above the parent app window instead.
+    private let isHeadlessE2E =
+        ProcessInfo.processInfo.environment["YAAW_E2E_HEADLESS"] == "1"
+
     private let decoder = JSONDecoder()
     private let cliToolKind: IsolatedToolKind
     private let cliInstanceID: String
     private var window: NSWindow?
+    private var parentWindowNumber = 0
     private var webView: WKWebView?
     private var terminalController: TerminalHostController?
     private var terminalView: TerminalView? { terminalController?.view }
@@ -98,12 +105,17 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         case "hide":
             setSurfaceVisible(false)
         case "focus":
-            if terminalView != nil {
-                NSApp.activate(ignoringOtherApps: true)
-                shouldFloatSurface = true
-                updateTerminalWindowLevel()
+            if isHeadlessE2E {
+                window?.makeKey()
+                orderSurfaceFront()
+            } else {
+                if terminalView != nil {
+                    NSApp.activate(ignoringOtherApps: true)
+                    shouldFloatSurface = true
+                    updateTerminalWindowLevel()
+                }
+                window?.makeKeyAndOrderFront(nil)
             }
-            window?.makeKeyAndOrderFront(nil)
             if let terminalView {
                 window?.makeFirstResponder(terminalView)
             }
@@ -261,13 +273,20 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             display: true,
             animate: false
         )
+        parentWindowNumber = payload["parentWindowNumber"].flatMap(Int.init) ?? parentWindowNumber
         let visible = payload["visible"].flatMap(Bool.init) == true
         shouldFloatSurface = payload["shouldFloat"].flatMap(Bool.init) ?? shouldFloatSurface
         let levelChanged = updateTerminalWindowLevel()
         visibleLeaseDeadline = visible ? Date().addingTimeInterval(0.6) : nil
         setSurfaceVisible(visible)
-        if visible, isSurfaceVisible, levelChanged, shouldFloatSurface {
-            window.orderFrontRegardless()
+        if visible, isSurfaceVisible {
+            if isHeadlessE2E {
+                // Re-assert ordering just above the parent window; the helper
+                // never floats headless, so z-order is not self-correcting.
+                orderSurfaceFront()
+            } else if levelChanged, shouldFloatSurface {
+                window.orderFrontRegardless()
+            }
         }
         // Reflow the terminal grid to the new pane size while it stays visible
         // (setSurfaceVisible only fits on a visibility transition).
@@ -276,16 +295,26 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
+    /// Orders the surface window in. Headless, it slots in directly above the
+    /// parent app window in global z-order so it never covers the user's work;
+    /// headed, floating surfaces order front regardless as before.
+    private func orderSurfaceFront() {
+        guard let window else { return }
+        if isHeadlessE2E, parentWindowNumber != 0 {
+            window.order(.above, relativeTo: parentWindowNumber)
+        } else if shouldFloatSurface {
+            window.orderFrontRegardless()
+        } else {
+            window.orderFront(nil)
+        }
+    }
+
     private func setSurfaceVisible(_ visible: Bool) {
         guard let window else { return }
         guard visible != isSurfaceVisible else { return }
         isSurfaceVisible = visible
         if visible {
-            if shouldFloatSurface {
-                window.orderFrontRegardless()
-            } else {
-                window.orderFront(nil)
-            }
+            orderSurfaceFront()
             if window.isKeyWindow, let terminalView {
                 window.makeFirstResponder(terminalView)
             }
@@ -319,7 +348,12 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             }
             let point = terminalView.convert(event.locationInWindow, from: nil)
             if terminalView.bounds.contains(point) {
-                window.makeKeyAndOrderFront(nil)
+                if isHeadlessE2E {
+                    window.makeKey()
+                    orderSurfaceFront()
+                } else {
+                    window.makeKeyAndOrderFront(nil)
+                }
                 window.makeFirstResponder(terminalView)
             }
             return event
@@ -330,27 +364,38 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard terminalKeyboardShortcutMonitor == nil else { return }
         terminalKeyboardShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) {
             [weak self] event in
-            guard let self,
-                let key = event.yaawShortcutKey,
+            guard let self else { return event }
+
+            if let key = event.yaawShortcutKey,
                 event.yaawShortcutModifiers.contains(.command),
                 let signature = KeyboardShortcutDefinition(
                     key: key,
                     modifiers: Array(event.yaawShortcutModifiers)
-                ).signature
-            else {
-                return event
+                ).signature,
+                terminalAppShortcutSignatures.contains(signature) || signature == "command+q"
+            {
+                let modifiers = event.yaawShortcutModifiers.map(\.rawValue).sorted().joined(
+                    separator: ",")
+                send(type: "keyboardShortcut", payload: ["key": key, "modifiers": modifiers])
+                return nil
             }
 
-            guard terminalAppShortcutSignatures.contains(signature) || signature == "command+q"
-            else {
-                return event
-            }
+            return routeHeadlessKeyEventIfNeeded(event)
+        }
+    }
 
-            let modifiers = event.yaawShortcutModifiers.map(\.rawValue).sorted().joined(
-                separator: ",")
-            send(type: "keyboardShortcut", payload: ["key": key, "modifiers": modifiers])
+    /// Headless, the helper app is never active, so the window server does not
+    /// route posted keyboard events through normal key-window dispatch. Local
+    /// monitors still fire before dispatch, so deliver the event straight to
+    /// the terminal view and swallow it (returning the event would drop it).
+    private func routeHeadlessKeyEventIfNeeded(_ event: NSEvent) -> NSEvent? {
+        guard isHeadlessE2E, !NSApp.isActive, let terminalView else { return event }
+        if let eventWindow = event.window, eventWindow !== window { return event }
+        if event.modifierFlags.contains(.command), terminalView.performKeyEquivalent(with: event) {
             return nil
         }
+        terminalView.keyDown(with: event)
+        return nil
     }
 
     private func startWatchdog() {

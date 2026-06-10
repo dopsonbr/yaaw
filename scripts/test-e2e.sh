@@ -5,6 +5,24 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_ARTIFACT_DIR="${TMPDIR:-/tmp}/yaaw-e2e-artifacts/latest"
 ARTIFACT_DIR="${YAAW_E2E_ARTIFACTS:-$DEFAULT_ARTIFACT_DIR}"
 APP_NAME="YAAW-E2E"
+APP_BUNDLE_ID="dev.dopsonbr.YAAW.E2E"
+
+# Headless is the default: the app and its tool-host helpers never take
+# focus or raise windows over the user's work. Pass --headed for the legacy
+# focus-driven behavior (occasional full-fidelity check of OS key routing).
+HEADLESS=1
+for arg in "$@"; do
+  if [[ "$arg" == "--headed" ]]; then
+    HEADLESS=0
+  fi
+done
+
+# Interpolated into AppleScript blocks that resize windows: raising is only
+# allowed in headed runs ("delay 0" is an AppleScript no-op).
+RAISE_WINDOW_LINE='perform action "AXRaise" of window 1'
+if [[ "$HEADLESS" == "1" ]]; then
+  RAISE_WINDOW_LINE="delay 0"
+fi
 
 cd "$ROOT_DIR"
 
@@ -51,6 +69,30 @@ terminal_helper_pids() {
   { ps -axo pid=,args= 2>/dev/null || true; } | awk -v helper="$APP_BUNDLE/Contents/Helpers/YAAWToolHost" '
     index($0, helper) > 0 && index($0, "--tool-kind terminal") > 0 {
       print $1
+    }
+  '
+}
+
+app_pid() {
+  running_e2e_app_pids | head -n 1
+}
+
+all_helper_pids() {
+  { ps -axo pid=,args= 2>/dev/null || true; } | awk -v helper="$APP_BUNDLE/Contents/Helpers/YAAWToolHost" '
+    index($0, helper) > 0 {
+      print $1
+    }
+  '
+}
+
+helper_pid_for_instance_prefix() {
+  local prefix="$1"
+  { ps -axo pid=,args= 2>/dev/null || true; } | awk \
+    -v helper="$APP_BUNDLE/Contents/Helpers/YAAWToolHost" \
+    -v needle="--instance-id $prefix" '
+    index($0, helper) > 0 && index($0, needle) > 0 {
+      print $1
+      exit
     }
   '
 }
@@ -125,6 +167,23 @@ mkdir -p "$SCREENSHOT_DIR"
 
 RUNNER_STATUS=0
 swift run YAAWE2E --artifacts "$ARTIFACT_DIR" || RUNNER_STATUS=$?
+E2E_TOOL="$(swift build --show-bin-path)/YAAWE2E"
+
+FOCUS_BLOCKER="$ARTIFACT_DIR/FOCUS_BLOCKER.md"
+: >"$FOCUS_BLOCKER"
+
+# The headless contract: the e2e app must never become the frontmost app.
+# (The user keeps working during a run, so the frontmost app legitimately
+# changes between checks — only the e2e app going frontmost is a failure.)
+assert_no_focus_steal() {
+  [[ "$HEADLESS" == "1" ]] || return 0
+  local context="$1"
+  local now
+  now="$("$E2E_TOOL" frontmost 2>/dev/null || echo unknown)"
+  if [[ "$now" == "$APP_BUNDLE_ID" ]]; then
+    echo "- $APP_NAME became frontmost during $context" >>"$FOCUS_BLOCKER"
+  fi
+}
 
 cleanup() {
   terminate_e2e_app
@@ -133,6 +192,7 @@ cleanup() {
   launchctl unsetenv YAAW_E2E_CAPTURE_DIRECTORY >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_PATH >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_E2E_HEADLESS >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
@@ -143,6 +203,11 @@ set_launch_environment() {
   launchctl setenv YAAW_E2E_CONFIG_PATH "$ARTIFACT_DIR/config/settings.yaml"
   launchctl setenv YAAW_E2E_CAPTURE_DIRECTORY "$ARTIFACT_DIR/captures"
   launchctl setenv YAAW_E2E_PATH "$app_path"
+  if [[ "$HEADLESS" == "1" ]]; then
+    launchctl setenv YAAW_E2E_HEADLESS "1"
+  else
+    launchctl unsetenv YAAW_E2E_HEADLESS >/dev/null 2>&1 || true
+  fi
 }
 
 wait_for_window() {
@@ -190,8 +255,13 @@ launch_e2e_app() {
   set_launch_environment "$database_path" "$app_path"
 
   for attempt in 1 2 3; do
-    /usr/bin/open -n "$APP_BUNDLE"
+    if [[ "$HEADLESS" == "1" ]]; then
+      /usr/bin/open -g -n "$APP_BUNDLE"
+    else
+      /usr/bin/open -n "$APP_BUNDLE"
+    fi
     if wait_for_window; then
+      assert_no_focus_steal "$context"
       return 0
     fi
     echo "$APP_NAME launch attempt $attempt did not expose a window for $context" >&2
@@ -237,16 +307,39 @@ APPLESCRIPT
 
 capture_window() {
   local output_path="$1"
-  local window_info
-  window_info="$(osascript <<APPLESCRIPT 2>/dev/null || true
-tell application "System Events"
-  tell process "$APP_NAME"
-    try
+
+  if [[ "$HEADLESS" == "1" ]]; then
+    local main_pid
+    main_pid="$(app_pid)"
+    if [[ -n "$main_pid" ]]; then
+      local owner_args=()
+      local helper_pid
+      while IFS= read -r helper_pid; do
+        [[ -n "$helper_pid" ]] && owner_args+=(--owner-pid "$helper_pid")
+      done < <(all_helper_pids)
+      if "$E2E_TOOL" screenshot --output "$output_path" --main-pid "$main_pid" \
+        "${owner_args[@]}" 2>/dev/null; then
+        return 0
+      fi
+    fi
+    echo "ScreenCaptureKit capture failed for $output_path; using region capture fallback." >&2
+  fi
+
+  local raise_lines=""
+  if [[ "$HEADLESS" != "1" ]]; then
+    raise_lines='try
       set frontmost to true
     end try
     try
       perform action "AXRaise" of window 1
-    end try
+    end try'
+  fi
+
+  local window_info
+  window_info="$(osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "System Events"
+  tell process "$APP_NAME"
+    $raise_lines
     set windowPosition to position of window 1
     set windowSize to size of window 1
     set windowID to ""
@@ -431,7 +524,7 @@ launch_state() {
     osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
   tell process "$APP_NAME"
-    perform action "AXRaise" of window 1
+    $RAISE_WINDOW_LINE
     set size of window 1 to {980, 700}
     delay 0.15
     set size of window 1 to {1180, 820}
@@ -447,6 +540,7 @@ APPLESCRIPT
   assert_no_privacy_prompts "$state"
   capture_window "$screenshot_path"
   assert_no_terminal_launch_failure "$screenshot_path"
+  assert_no_focus_steal "visual state $state"
   terminate_e2e_app
 }
 
@@ -503,15 +597,31 @@ Thread.sleep(forTimeInterval: 0.35)
 SWIFT
 }
 
+# Pid that keyboard shortcuts target in headless mode: the focused project
+# terminal helper (the same window that receives keystrokes in headed mode).
+KEY_TARGET_PID=""
+
+key_target_pid() {
+  if [[ -z "$KEY_TARGET_PID" ]]; then
+    KEY_TARGET_PID="$(helper_pid_for_instance_prefix "project:")"
+  fi
+  printf '%s' "$KEY_TARGET_PID"
+}
+
 focus_workspace_terminal() {
+  local raise_lines=""
+  if [[ "$HEADLESS" != "1" ]]; then
+    raise_lines='try
+      set frontmost to true
+    end try
+    perform action "AXRaise" of window 1'
+  fi
+
   local click_point
   click_point="$(osascript <<APPLESCRIPT
 tell application "System Events"
   tell process "$APP_NAME"
-    try
-      set frontmost to true
-    end try
-    perform action "AXRaise" of window 1
+    $raise_lines
     set position of window 1 to {0, 25}
     set size of window 1 to {1100, 732}
     delay 0.5
@@ -525,11 +635,37 @@ APPLESCRIPT
 )"
   local click_x="${click_point%,*}"
   local click_y="${click_point#*,}"
-  click_screen_point "$click_x" "$click_y"
+  if [[ "$HEADLESS" == "1" ]]; then
+    KEY_TARGET_PID=""
+    local target_pid
+    target_pid="$(key_target_pid)"
+    if [[ -z "$target_pid" ]]; then
+      target_pid="$(app_pid)"
+    fi
+    "$E2E_TOOL" send-click --pid "$target_pid" --x "$click_x" --y "$click_y"
+    sleep 0.4
+  else
+    click_screen_point "$click_x" "$click_y"
+  fi
+}
+
+driver_key_name() {
+  case "$1" in
+    ",") printf 'comma' ;;
+    "[") printf 'lbracket' ;;
+    "]") printf 'rbracket' ;;
+    ".") printf 'period' ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 send_command_shortcut() {
   local key="$1"
+  if [[ "$HEADLESS" == "1" ]]; then
+    "$E2E_TOOL" send-key --pid "$(key_target_pid)" \
+      --key "$(driver_key_name "$key")" --modifiers command
+    return
+  fi
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
   keystroke "$key" using command down
@@ -539,6 +675,11 @@ APPLESCRIPT
 
 send_command_shift_shortcut() {
   local key="$1"
+  if [[ "$HEADLESS" == "1" ]]; then
+    "$E2E_TOOL" send-key --pid "$(key_target_pid)" \
+      --key "$(driver_key_name "$key")" --modifiers command,shift
+    return
+  fi
   local key_code=""
   case "$key" in
     "[")
@@ -738,14 +879,20 @@ run_keyboard_input_probe() {
   focus_workspace_terminal
   assert_helper_window_visible_with_prefix "project:" "keyboard input probe"
 
-  osascript <<APPLESCRIPT >/dev/null
+  printf '%s' "$expected" | /usr/bin/pbcopy
+  if [[ "$HEADLESS" == "1" ]]; then
+    "$E2E_TOOL" send-key --pid "$(key_target_pid)" --key v --modifiers command
+    sleep 0.2
+    "$E2E_TOOL" send-key --pid "$(key_target_pid)" --key return
+  else
+    osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
-  set the clipboard to "$expected"
   keystroke "v" using command down
   delay 0.2
   key code 36
 end tell
 APPLESCRIPT
+  fi
 
   for _ in {1..80}; do
     if grep -aR "YAAW_ENTER_RECEIVED=.*$expected" "$ARTIFACT_DIR/captures" >/dev/null 2>&1; then
@@ -843,7 +990,7 @@ run_isolated_terminal_visibility_probe() {
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
   tell process "$APP_NAME"
-    perform action "AXRaise" of window 1
+    $RAISE_WINDOW_LINE
     set size of window 1 to {980, 700}
     delay 0.15
     set size of window 1 to {1180, 820}
@@ -869,6 +1016,14 @@ run_settings_editor_probe() {
 
   launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "settings editor"
   assert_no_privacy_prompts "settings editor"
+
+  local settings_probe_raise_lines="delay 0"
+  if [[ "$HEADLESS" != "1" ]]; then
+    settings_probe_raise_lines='try
+      set frontmost to true
+    end try
+    perform action "AXRaise" of window 1'
+  fi
 
   if ! osascript <<APPLESCRIPT >/dev/null
 on findByIdentifier(rootElement, targetIdentifier)
@@ -946,10 +1101,7 @@ end selectSidebarRow
 
 tell application "System Events"
   tell process "$APP_NAME"
-    try
-      set frontmost to true
-    end try
-    perform action "AXRaise" of window 1
+    $settings_probe_raise_lines
     set openButton to my findByIdentifier(window 1, "open-settings-button")
     if openButton is missing value then error "settings button not found"
     click openButton
@@ -978,13 +1130,9 @@ tell application "System Events"
     if existingText does not contain "# YAAW settings." then error "settings YAML text did not load"
 
     set replacementText to "version: 1" & linefeed & "agent:" & linefeed & "  default: claude" & linefeed
-    click editorArea
     set focused of editorArea to true
     delay 0.2
-    keystroke "a" using command down
-    delay 0.1
-    set the clipboard to replacementText
-    keystroke "v" using command down
+    set value of editorArea to replacementText
     delay 0.4
     set updatedText to value of editorArea as text
     if updatedText does not contain "default: claude" then error "settings YAML editor did not accept edited text"
@@ -1042,9 +1190,13 @@ fi
 # verifies durable state transitions directly, while the launched app states
 # below verify real rendering and terminal behavior through screenshots.
 run_keyboard_input_probe
+assert_no_focus_steal "keyboard input probe"
 run_isolated_terminal_visibility_probe
+assert_no_focus_steal "isolated terminal visibility probe"
 run_workspace_shortcut_probe
+assert_no_focus_steal "workspace shortcut probe"
 run_settings_editor_probe
+assert_no_focus_steal "settings editor probe"
 
 for state in launch project-creation files nvim git missing-directory bottom-terminal panel-resize panel-collapse; do
   launch_state "$state"
@@ -1057,6 +1209,16 @@ if [[ -s "$SCREENSHOT_BLOCKER" ]]; then
   exit 1
 else
   rm -f "$SCREENSHOT_BLOCKER"
+fi
+
+if [[ -s "$FOCUS_BLOCKER" ]]; then
+  cat "$FOCUS_BLOCKER" >&2
+  # CI runners have no user at the screen; warn without failing there.
+  if [[ "${CI:-}" != "true" ]]; then
+    exit 1
+  fi
+else
+  rm -f "$FOCUS_BLOCKER"
 fi
 
 echo "E2E artifacts: $ARTIFACT_DIR"
