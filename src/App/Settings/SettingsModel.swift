@@ -458,6 +458,13 @@ final class SettingsModel {
         )
     }
 
+    var fontLigaturesSelection: Binding<Bool> {
+        Binding(
+            get: { self.effectiveFonts.ligatures },
+            set: { newValue in self.saveFontSettings { $0.ligatures = newValue } }
+        )
+    }
+
     var fileBrowserFontFamilySelection: Binding<String> {
         Binding(
             get: { self.effectiveFonts.fileBrowserFamily },

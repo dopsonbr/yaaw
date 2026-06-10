@@ -390,6 +390,8 @@ public struct FontSettings: Codable, Equatable, Sendable {
     public var fileBrowserFamily: String
     /// File browser list size. `0` means inherit the interface size.
     public var fileBrowserSize: Double
+    /// Whether editor and terminal text shapes font ligatures (when the font has them).
+    public var ligatures: Bool
 
     public init(
         interfaceFamily: String = "system",
@@ -399,7 +401,8 @@ public struct FontSettings: Codable, Equatable, Sendable {
         terminalFamily: String = "JetBrains Mono",
         terminalSize: Double = 15,
         fileBrowserFamily: String = FontSettings.inheritFamily,
-        fileBrowserSize: Double = 0
+        fileBrowserSize: Double = 0,
+        ligatures: Bool = true
     ) {
         self.interfaceFamily = interfaceFamily
         self.interfaceSize = interfaceSize
@@ -409,6 +412,7 @@ public struct FontSettings: Codable, Equatable, Sendable {
         self.terminalSize = terminalSize
         self.fileBrowserFamily = fileBrowserFamily
         self.fileBrowserSize = fileBrowserSize
+        self.ligatures = ligatures
     }
 
     public init(from decoder: Decoder) throws {
@@ -428,6 +432,7 @@ public struct FontSettings: Codable, Equatable, Sendable {
             ?? FontSettings.inheritFamily
         self.fileBrowserSize =
             try container.decodeIfPresent(Double.self, forKey: .fileBrowserSize) ?? 0
+        self.ligatures = try container.decodeIfPresent(Bool.self, forKey: .ligatures) ?? true
     }
 
     fileprivate func validated() -> FontSettings {
@@ -441,7 +446,8 @@ public struct FontSettings: Codable, Equatable, Sendable {
             fileBrowserFamily: fileBrowserFamily.nonBlankOr(FontSettings.inheritFamily),
             fileBrowserSize: fileBrowserSize > 0
                 ? fileBrowserSize.clampedFontSize(defaultValue: 13, minimum: 9, maximum: 28)
-                : 0
+                : 0,
+            ligatures: ligatures
         )
     }
 }
@@ -1267,6 +1273,9 @@ public final class YAMLConfigurationStore {
               fileBrowserFamily: \(yamlScalar(configuration.fonts.fileBrowserFamily))
               # default: 0, which inherits interfaceSize. Set a value (9-28) to override.
               fileBrowserSize: \(configuration.fonts.fileBrowserSize.formattedFontSize)
+              # default: true
+              # active now: shapes editor and terminal ligatures when the font provides them.
+              ligatures: \(configuration.fonts.ligatures)
 
             keyboardShortcuts:
             \(renderShortcuts(configuration.keyboardShortcuts))

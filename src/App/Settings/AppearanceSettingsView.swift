@@ -78,6 +78,18 @@ struct AppearanceSettingsView: View {
                     .accessibilityIdentifier("settings-terminal-size-stepper")
                 }
 
+                SettingsGridRow(title: "Ligatures") {
+                    Toggle(
+                        "Enable font ligatures in the editor and terminals",
+                        isOn: model.fontLigaturesSelection
+                    )
+                    .font(fonts.interfaceFont(sizeOffset: -1))
+                    .foregroundStyle(themeUI(.controlForeground))
+                    .tint(themeUI(.focusAccent))
+                    .accessibilityLabel("Enable font ligatures")
+                    .accessibilityIdentifier("settings-font-ligatures-toggle")
+                }
+
                 SettingsGridRow(title: "File browser font") {
                     fontFamilyPicker(
                         label: "File browser font family",

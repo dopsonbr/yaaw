@@ -1142,6 +1142,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(seeded.fonts.terminalSize, 15)
         XCTAssertEqual(seeded.fonts.fileBrowserFamily, "inherit")
         XCTAssertEqual(seeded.fonts.fileBrowserSize, 0)
+        XCTAssertTrue(seeded.fonts.ligatures)
         XCTAssertEqual(seeded.fileBrowser.markdownAndHTMLDefault, .browserPreview)
         XCTAssertEqual(seeded.agent.launchDefaults.codex, AgentLaunchDefaultSettings())
         XCTAssertTrue(seeded.ignoreRules.contains(".git"))
@@ -1160,6 +1161,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(template.contains("terminalSize: 15"))
         XCTAssertTrue(template.contains("fileBrowserFamily: inherit"))
         XCTAssertTrue(template.contains("fileBrowserSize: 0"))
+        XCTAssertTrue(template.contains("ligatures: true"))
         XCTAssertTrue(template.contains("markdownAndHTMLDefault: browserPreview"))
         XCTAssertTrue(
             template.contains(
@@ -1226,6 +1228,27 @@ final class PersistenceTests: XCTestCase {
         // Omitted file browser font keys inherit the interface font.
         XCTAssertEqual(configuration.fonts.fileBrowserFamily, "inherit")
         XCTAssertEqual(configuration.fonts.fileBrowserSize, 0)
+        // Omitted ligatures key defaults to enabled.
+        XCTAssertTrue(configuration.fonts.ligatures)
+    }
+
+    func testYAMLConfigurationFontLigaturesRoundTrip() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        let disabled = try store.validate(
+            text: """
+                version: 1
+                fonts:
+                  ligatures: false
+                """
+        )
+        XCTAssertFalse(disabled.fonts.ligatures)
+
+        try store.save(disabled)
+        let saved = try String(contentsOf: path, encoding: .utf8)
+        XCTAssertTrue(saved.contains("ligatures: false"))
+        XCTAssertFalse(store.load().fonts.ligatures)
     }
 
     func testYAMLConfigurationFileBrowserFontOverrideAndValidation() throws {
