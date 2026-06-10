@@ -74,8 +74,15 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         theme.active
     }
 
+    public func resolvedTheme(systemAppearanceIsDark: Bool) -> ThemeDefinition {
+        theme.resolvedTheme(systemAppearanceIsDark: systemAppearanceIsDark)
+    }
+
+    /// Interim appearance-blind resolution (system mode resolves to the dark
+    /// pairing). Superseded by `AppModel.resolvedTheme`, which supplies the
+    /// live system appearance.
     public var resolvedTheme: ThemeDefinition {
-        ThemeCatalog.theme(id: theme.active) ?? ThemeCatalog.defaultTheme
+        resolvedTheme(systemAppearanceIsDark: true)
     }
 
     public var ignoreRules: [String] {
@@ -300,24 +307,80 @@ public struct ProjectSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// How the active theme is chosen: follow the macOS appearance with a
+/// light/dark pairing, or pin one fixed theme.
+public enum ThemeSelectionMode: Equatable, Sendable {
+    case system
+    case fixed(String)
+}
+
 public struct ThemeSettings: Codable, Equatable, Sendable {
+    /// Sentinel `active` value meaning "follow the macOS appearance".
+    public static let systemActiveID = "system"
+
     public var active: String
+    /// Theme used by system mode in the light appearance.
+    public var light: String
+    /// Theme used by system mode in the dark appearance.
+    public var dark: String
     public var custom: [String: String]
 
-    public init(active: String = ThemeCatalog.defaultID, custom: [String: String] = [:]) {
+    public init(
+        active: String = ThemeSettings.systemActiveID,
+        light: String = ThemeCatalog.defaultLightID,
+        dark: String = ThemeCatalog.defaultDarkID,
+        custom: [String: String] = [:]
+    ) {
         self.active = active
+        self.light = light
+        self.dark = dark
         self.custom = custom
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.active =
-            try container.decodeIfPresent(String.self, forKey: .active) ?? ThemeCatalog.defaultID
+            try container.decodeIfPresent(String.self, forKey: .active)
+            ?? ThemeSettings.systemActiveID
+        self.light =
+            try container.decodeIfPresent(String.self, forKey: .light)
+            ?? ThemeCatalog.defaultLightID
+        self.dark =
+            try container.decodeIfPresent(String.self, forKey: .dark)
+            ?? ThemeCatalog.defaultDarkID
         self.custom = try container.decodeIfPresent([String: String].self, forKey: .custom) ?? [:]
     }
 
+    public var mode: ThemeSelectionMode {
+        active.trimmed.lowercased() == Self.systemActiveID ? .system : .fixed(active)
+    }
+
+    public func resolvedTheme(systemAppearanceIsDark: Bool) -> ThemeDefinition {
+        switch mode {
+        case .system:
+            let pairedID = systemAppearanceIsDark ? dark : light
+            let fallbackID =
+                systemAppearanceIsDark ? ThemeCatalog.defaultDarkID : ThemeCatalog.defaultLightID
+            return ThemeCatalog.theme(id: pairedID) ?? ThemeCatalog.theme(id: fallbackID)!
+        case .fixed(let id):
+            return ThemeCatalog.theme(id: id) ?? ThemeCatalog.defaultTheme
+        }
+    }
+
     fileprivate func validated(diagnosticRecorder: DiagnosticEventRecording?) -> ThemeSettings {
+        let validatedLight = validatedSlot(
+            light, slot: "light", fallback: ThemeCatalog.defaultLightID,
+            diagnosticRecorder: diagnosticRecorder)
+        let validatedDark = validatedSlot(
+            dark, slot: "dark", fallback: ThemeCatalog.defaultDarkID,
+            diagnosticRecorder: diagnosticRecorder)
+
         let trimmedThemeID = active.trimmed.lowercased()
+        if trimmedThemeID == Self.systemActiveID {
+            return ThemeSettings(
+                active: Self.systemActiveID, light: validatedLight, dark: validatedDark,
+                custom: custom)
+        }
         guard let theme = ThemeCatalog.theme(id: trimmedThemeID) else {
             if !trimmedThemeID.isEmpty {
                 diagnosticRecorder?.record(
@@ -326,14 +389,43 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
                         name: "unsupported_theme",
                         metadata: [
                             "requested": trimmedThemeID,
-                            "fallback": ThemeCatalog.defaultID,
+                            "fallback": Self.systemActiveID,
                         ]
                     )
                 )
             }
-            return ThemeSettings(active: ThemeCatalog.defaultID, custom: custom)
+            return ThemeSettings(
+                active: Self.systemActiveID, light: validatedLight, dark: validatedDark,
+                custom: custom)
         }
-        return ThemeSettings(active: theme.id, custom: custom)
+        return ThemeSettings(
+            active: theme.id, light: validatedLight, dark: validatedDark, custom: custom)
+    }
+
+    private func validatedSlot(
+        _ id: String,
+        slot: String,
+        fallback: String,
+        diagnosticRecorder: DiagnosticEventRecording?
+    ) -> String {
+        let trimmedID = id.trimmed.lowercased()
+        if let theme = ThemeCatalog.theme(id: trimmedID) {
+            return theme.id
+        }
+        if !trimmedID.isEmpty {
+            diagnosticRecorder?.record(
+                DiagnosticEvent(
+                    category: "Configuration",
+                    name: "unsupported_theme",
+                    metadata: [
+                        "requested": trimmedID,
+                        "fallback": fallback,
+                        "slot": slot,
+                    ]
+                )
+            )
+        }
+        return fallback
     }
 }
 
@@ -1236,10 +1328,14 @@ public final class YAMLConfigurationStore {
               globalChatsDirectory: \(yamlScalar(configuration.projects.globalChatsDirectory))
 
             theme:
-              # default: ghostty-default
+              # default: system
               # active now: controls app chrome, file browser colors, settings, panels, and terminals.
-              # supported: \(ThemeCatalog.supportedIDs.joined(separator: ", "))
+              # system follows the macOS appearance using the light/dark pairing below.
+              # supported: system, \(ThemeCatalog.supportedIDs.joined(separator: ", "))
               active: \(configuration.theme.active)
+              # active now: themes used by system mode in the light / dark appearance.
+              light: \(configuration.theme.light)
+              dark: \(configuration.theme.dark)
               # not changeable yet: custom palettes are reserved for future expansion.
               custom: {}
 

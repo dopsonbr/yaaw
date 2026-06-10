@@ -1130,7 +1130,9 @@ final class PersistenceTests: XCTestCase {
         let seeded = store.load()
         let template = try String(contentsOf: path, encoding: .utf8)
 
-        XCTAssertEqual(seeded.themeName, "ghostty-default")
+        XCTAssertEqual(seeded.themeName, "system")
+        XCTAssertEqual(seeded.theme.light, "macos-light")
+        XCTAssertEqual(seeded.theme.dark, "macos-dark")
         XCTAssertEqual(seeded.defaultAgentCLI, .codex)
         XCTAssertEqual(seeded.projects.globalChatsDirectory, "~/yaaw")
         XCTAssertEqual(seeded.fileIconPack, .material)
@@ -1153,7 +1155,10 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(template.contains("# default: [nvim, vim, vi]"))
         XCTAssertTrue(template.contains("globalChatsDirectory: \"~/yaaw\""))
         XCTAssertTrue(template.contains("fileBrowserPack: material-file-icons"))
-        XCTAssertTrue(template.contains("# supported: macos-light, light-2026, light-modern"))
+        XCTAssertTrue(template.contains("# supported: system, macos-light, light-2026"))
+        XCTAssertTrue(template.contains("active: system"))
+        XCTAssertTrue(template.contains("light: macos-light"))
+        XCTAssertTrue(template.contains("dark: macos-dark"))
         XCTAssertFalse(template.contains("only dracula is implemented"))
         XCTAssertTrue(template.contains("interfaceFamily: system"))
         XCTAssertTrue(template.contains("editorFamily: \"JetBrains Mono\""))
@@ -1391,6 +1396,98 @@ final class PersistenceTests: XCTestCase {
 
         XCTAssertEqual(configuration.themeName, "dark-plus")
         XCTAssertEqual(configuration.resolvedTheme.displayName, "Dark+")
+    }
+
+    func testYAMLConfigurationLegacyFixedThemeKeepsWorkingWithoutPairingKeys() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        let configuration = try store.validate(
+            text: """
+                version: 1
+                theme:
+                  active: dracula
+                """
+        )
+
+        XCTAssertEqual(configuration.theme.mode, .fixed("dracula"))
+        // A fixed theme ignores the system appearance entirely.
+        XCTAssertEqual(
+            configuration.resolvedTheme(systemAppearanceIsDark: true).id, "dracula")
+        XCTAssertEqual(
+            configuration.resolvedTheme(systemAppearanceIsDark: false).id, "dracula")
+        // Absent pairing keys decode to the defaults.
+        XCTAssertEqual(configuration.theme.light, "macos-light")
+        XCTAssertEqual(configuration.theme.dark, "macos-dark")
+    }
+
+    func testYAMLConfigurationSystemThemeFollowsAppearance() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        let defaulted = try store.validate(text: "version: 1")
+        XCTAssertEqual(defaulted.theme.mode, .system)
+        XCTAssertEqual(defaulted.resolvedTheme(systemAppearanceIsDark: false).id, "macos-light")
+        XCTAssertEqual(defaulted.resolvedTheme(systemAppearanceIsDark: true).id, "macos-dark")
+
+        let paired = try store.validate(
+            text: """
+                version: 1
+                theme:
+                  active: system
+                  light: solarized-light
+                  dark: dracula
+                """
+        )
+        XCTAssertEqual(paired.resolvedTheme(systemAppearanceIsDark: false).id, "solarized-light")
+        XCTAssertEqual(paired.resolvedTheme(systemAppearanceIsDark: true).id, "dracula")
+    }
+
+    func testYAMLConfigurationSystemThemeRoundTripsThroughSave() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let store = YAMLConfigurationStore(path: path)
+
+        try store.save(
+            YAAWConfiguration(
+                theme: ThemeSettings(active: "system", light: "quiet-light", dark: "monokai")))
+        let saved = try String(contentsOf: path, encoding: .utf8)
+        XCTAssertTrue(saved.contains("active: system"))
+        XCTAssertTrue(saved.contains("light: quiet-light"))
+        XCTAssertTrue(saved.contains("dark: monokai"))
+
+        let reloaded = store.load()
+        XCTAssertEqual(reloaded.theme.mode, .system)
+        XCTAssertEqual(reloaded.theme.light, "quiet-light")
+        XCTAssertEqual(reloaded.theme.dark, "monokai")
+    }
+
+    func testYAMLConfigurationFallsBackForUnknownPairingSlotAndRecordsDiagnostic() throws {
+        let path = try temporaryDirectory().appendingPathComponent("settings.yaml")
+        let recorder = RecordingDiagnosticEventRecorder()
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(
+            """
+            theme:
+              active: system
+              light: not-a-theme
+              dark: dracula
+            """.utf8
+        ).write(to: path)
+
+        let reloaded = YAMLConfigurationStore(path: path, diagnosticRecorder: recorder).load()
+
+        XCTAssertEqual(reloaded.theme.light, "macos-light")
+        XCTAssertEqual(reloaded.theme.dark, "dracula")
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.category == "Configuration"
+                    && $0.name == "unsupported_theme"
+                    && $0.metadata["requested"] == "not-a-theme"
+                    && $0.metadata["fallback"] == "macos-light"
+                    && $0.metadata["slot"] == "light"
+            }
+        )
     }
 
     func testYAMLConfigurationSaveTextPreservesRawFormattingAndComments() throws {
@@ -1714,14 +1811,14 @@ final class PersistenceTests: XCTestCase {
 
         let reloaded = YAMLConfigurationStore(path: path, diagnosticRecorder: recorder).load()
 
-        XCTAssertEqual(reloaded.themeName, ThemeCatalog.defaultID)
-        XCTAssertEqual(reloaded.resolvedTheme.id, ThemeCatalog.defaultID)
+        XCTAssertEqual(reloaded.themeName, ThemeSettings.systemActiveID)
+        XCTAssertEqual(reloaded.theme.mode, .system)
         XCTAssertTrue(
             recorder.events.contains {
                 $0.category == "Configuration"
                     && $0.name == "unsupported_theme"
                     && $0.metadata["requested"] == "unknown-theme"
-                    && $0.metadata["fallback"] == ThemeCatalog.defaultID
+                    && $0.metadata["fallback"] == ThemeSettings.systemActiveID
             }
         )
     }

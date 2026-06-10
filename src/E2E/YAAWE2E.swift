@@ -45,7 +45,10 @@ private final class E2ERunner {
         try resetArtifacts()
         try writeFixtureProject()
         try writeCommandDoubles()
-        try YAMLConfigurationStore(path: paths.configPath).save(YAAWConfiguration())
+        // Pin a fixed theme: the default is System mode, which would make the
+        // visual-state screenshots depend on the host machine's appearance.
+        try YAMLConfigurationStore(path: paths.configPath).save(
+            YAAWConfiguration(theme: ThemeSettings(active: ThemeCatalog.defaultID)))
 
         let focusedBehavior = try runFocusedBehaviorAssertions()
         try writeVisualStateDatabases(selectedThreadID: focusedBehavior.codexThreadID)
