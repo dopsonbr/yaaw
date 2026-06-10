@@ -146,6 +146,7 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
                 && window.isVisible
                 && isApplicationVisibleForToolHost
                 && !isBlockedByAttachedWindow(over: screenRect)
+                && !isCoveredBySiblingWindow(over: screenRect)
                 && screenRect.width > 1
                 && screenRect.height > 1
             onViewportChanged?(screenRect, visible, isApplicationClusterFrontmost)
@@ -160,6 +161,24 @@ struct IsolatedToolViewportReporter: NSViewRepresentable {
             if window?.attachedSheet != nil { return true }
             guard let modalWindow = NSApp.modalWindow else { return false }
             return modalWindow.frame.intersects(screenRect)
+        }
+
+        /// The helpers render in floating-level windows above every normal
+        /// window, so a sibling window of this app (e.g. the Settings window)
+        /// ordered in front of the pane's window would otherwise show the
+        /// helper tearing through it. Windows above the normal level (menus,
+        /// tooltips) already draw over the helpers and must not blank panes.
+        private func isCoveredBySiblingWindow(over screenRect: CGRect) -> Bool {
+            guard let window else { return false }
+            for other in NSApp.orderedWindows {
+                if other == window { return false }
+                if other.level == .normal, other.isVisible,
+                    other.frame.intersects(screenRect)
+                {
+                    return true
+                }
+            }
+            return false
         }
 
         private var isApplicationVisibleForToolHost: Bool {
