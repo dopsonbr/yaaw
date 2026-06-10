@@ -1162,6 +1162,10 @@ tell application "System Events"
 
     set returnedButton to my findInWindows("$APP_NAME", "open-settings-button")
     if returnedButton is missing value then error "workspace window not reachable after closing settings"
+
+    -- Native-toolbar smoke check: panel toggles must stay AX-discoverable.
+    if my findInWindows("$APP_NAME", "toggle-sidebar-button") is missing value then error "sidebar toggle not found in toolbar"
+    if my findInWindows("$APP_NAME", "toggle-right-panel-button") is missing value then error "right panel toggle not found in toolbar"
   end tell
 end tell
 APPLESCRIPT
