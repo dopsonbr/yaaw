@@ -173,8 +173,10 @@ final class DraculaThemeTests: XCTestCase {
         let dark = try XCTUnwrap(ThemeCatalog.theme(id: "macos-dark"))
         XCTAssertTrue(light.prefersSystemMaterials)
         XCTAssertTrue(dark.prefersSystemMaterials)
-        XCTAssertEqual(light.materialTintOpacity, 0.0)
-        XCTAssertEqual(dark.materialTintOpacity, 0.0)
+        // System-palette themes keep the tint too: bare material washes out
+        // the theme-token selection pills.
+        XCTAssertEqual(light.materialTintOpacity, 0.7)
+        XCTAssertEqual(dark.materialTintOpacity, 0.7)
 
         let dracula = try XCTUnwrap(ThemeCatalog.theme(id: "dracula"))
         XCTAssertFalse(dracula.prefersSystemMaterials)

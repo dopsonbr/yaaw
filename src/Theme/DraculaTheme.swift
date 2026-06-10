@@ -130,10 +130,11 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
         hex(for: .background)
     }
 
-    /// Opacity of the theme tint layered over chrome materials. System-palette
-    /// themes use the bare material; high-contrast themes stay fully opaque.
+    /// Opacity of the theme tint layered over chrome materials. High-contrast
+    /// themes stay fully opaque. Every other theme keeps a strong tint: the
+    /// bare sidebar material washes out the theme-token row fills and
+    /// selection pills, which are designed against the theme background.
     public var materialTintOpacity: Double {
-        if prefersSystemMaterials { return 0.0 }
         if group == .highContrast { return 1.0 }
         return 0.7
     }
