@@ -111,18 +111,27 @@ assert_terminal_helper_running() {
 
 helper_window_count_with_prefix() {
   local prefix="$1"
+  # Scope to helpers launched from THIS suite's app bundle: a live YAAW.app on
+  # the same machine also runs YAAWToolHost processes, and counting its
+  # windows makes these assertions fail spuriously.
+  local allowed_pids
+  allowed_pids=",$(all_helper_pids | tr '\n' ',')"
   osascript <<APPLESCRIPT 2>/dev/null || true
 tell application "System Events"
   set matchCount to 0
+  set allowedPids to "$allowed_pids"
   repeat with candidateProcess in (processes whose name is "YAAWToolHost")
     tell candidateProcess
-      repeat with candidateWindow in windows
-        set windowTitle to ""
-        try
-          set windowTitle to value of attribute "AXTitle" of candidateWindow as text
-        end try
-        if windowTitle starts with "$prefix" then set matchCount to matchCount + 1
-      end repeat
+      set processPid to (unix id as text)
+      if allowedPids contains ("," & processPid & ",") then
+        repeat with candidateWindow in windows
+          set windowTitle to ""
+          try
+            set windowTitle to value of attribute "AXTitle" of candidateWindow as text
+          end try
+          if windowTitle starts with "$prefix" then set matchCount to matchCount + 1
+        end repeat
+      end if
     end tell
   end repeat
   return matchCount
