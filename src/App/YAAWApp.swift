@@ -159,7 +159,6 @@ struct YAAWApp: App {
             // Drives NSWindow.appearance so the native titlebar and other
             // window chrome render in the active theme's light/dark style.
             .preferredColorScheme(model.resolvedTheme.swiftUIColorScheme)
-            .toolbar(removing: .title)
             .onAppear {
                 if startupError == nil {
                     appDelegate.updateShortcutPreflightModel(model)
@@ -169,6 +168,7 @@ struct YAAWApp: App {
         }
         .defaultSize(width: 1400, height: 900)
         .restorationBehavior(.disabled)
+        .windowToolbarStyle(.unifiedCompact)
         .commands {
             if startupError == nil {
                 CommandMenu("App") {

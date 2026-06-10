@@ -20,75 +20,154 @@ struct RootView: View {
     @StateObject private var terminalRuntime = IsolatedToolRuntime()
 
     var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    AppChromeHeader(
-                        title: model.windowTitle,
-                        isSidebarCollapsed: model.layoutState.isSidebarCollapsed,
-                        isRightPanelCollapsed: model.layoutState.isRightPanelCollapsed,
-                        isWorkspaceSwapped: model.layoutState.isWorkspaceSwapped,
-                        onToggleSidebar: model.toggleSidebarCollapsed,
-                        onToggleRightPanel: model.toggleRightPanelCollapsed,
-                        onToggleWorkspaceSwap: model.toggleWorkspaceSwap,
-                        onNavigateBack: model.navigateBack,
-                        onNavigateForward: model.navigateForward,
-                        fonts: model.configuration.fonts,
-                        externalOpenTools: availableExternalOpenTools,
-                        defaultExternalOpenTool: defaultExternalOpenTool,
-                        externalOpenIcon: externalOpenWorkspace.icon(for:),
-                        onOpenDefaultExternal: openSelectedDirectoryWithDefaultExternalTool,
-                        onOpenExternalTool: openSelectedDirectoryExternally,
-                        onInstallLatestRelease: { isShowingUpdateConfirmation = true },
-                        onOpenSettings: { openWindow(id: YAAWApp.settingsWindowID) }
-                    )
+        workspaceContent()
+            .toolbar { chromeToolbar }
+            .background(dracula(.background))
+            .foregroundStyle(dracula(.foreground))
+            .font(model.configuration.fonts.interfaceFont())
+            .environment(\.fontSettings, model.configuration.fonts)
+            .environment(\.appTheme, model.resolvedTheme)
+            .environment(\.colorScheme, model.resolvedTheme.swiftUIColorScheme)
+            .environmentObject(terminalRuntime)
+            .onAppear {
+                // Tearing down a terminal kills only its isolated helper — never the
+                // app or sibling terminals (the user's "kill one thread" capability).
+                model.onTerminalTerminated = { [terminalRuntime] role in
+                    terminalRuntime.terminalShutdown(instanceID: role.isolatedInstanceID)
                 }
-                .frame(height: 44)
-                .background(dracula(.background))
+                terminalRuntime.onKeyboardShortcut = { key, modifiers in
+                    handleForwardedTerminalShortcut(key: key, modifierRawValues: modifiers)
+                }
+            }
+            .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
+            .confirmationDialog(
+                "Install the latest release?",
+                isPresented: $isShowingUpdateConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Install Latest Release", role: .destructive) {
+                    onInstallLatestRelease()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(
+                    "The app will open Terminal to run the release installer, then quit so the installed app can be replaced."
+                )
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+            ) { _ in
+                terminalRuntime.shutdownAllHosts()
+            }
+    }
 
-                Divider()
-                    .overlay(dracula(.currentLine))
+    // Native titlebar toolbar: standard items pick up Liquid Glass automatically,
+    // so labels stay plain SF Symbols with no custom backgrounds or fonts.
+    @ToolbarContentBuilder
+    private var chromeToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button(action: model.toggleSidebarCollapsed) {
+                Image(systemName: IconRole.sidebar.icon.systemSymbolName)
+            }
+            .help(model.layoutState.isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
+            .accessibilityIdentifier("toggle-sidebar-button")
 
-                workspaceContent()
+            Button(action: model.navigateBack) {
+                Image(systemName: IconRole.navigateBack.icon.systemSymbolName)
             }
+            .help("Back")
+            .accessibilityIdentifier("navigate-back-button")
+
+            Button(action: model.navigateForward) {
+                Image(systemName: IconRole.navigateForward.icon.systemSymbolName)
+            }
+            .help("Forward")
+            .accessibilityIdentifier("navigate-forward-button")
         }
-        .background(dracula(.background))
-        .foregroundStyle(dracula(.foreground))
-        .font(model.configuration.fonts.interfaceFont())
-        .environment(\.fontSettings, model.configuration.fonts)
-        .environment(\.appTheme, model.resolvedTheme)
-        .environment(\.colorScheme, model.resolvedTheme.swiftUIColorScheme)
-        .environmentObject(terminalRuntime)
-        .onAppear {
-            // Tearing down a terminal kills only its isolated helper — never the
-            // app or sibling terminals (the user's "kill one thread" capability).
-            model.onTerminalTerminated = { [terminalRuntime] role in
-                terminalRuntime.terminalShutdown(instanceID: role.isolatedInstanceID)
-            }
-            terminalRuntime.onKeyboardShortcut = { key, modifiers in
-                handleForwardedTerminalShortcut(key: key, modifierRawValues: modifiers)
-            }
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            externalOpenToolbarButton
         }
-        .background(WindowTitleUpdater(title: model.windowTitle).frame(width: 0, height: 0))
-        .confirmationDialog(
-            "Install the latest release?",
-            isPresented: $isShowingUpdateConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Install Latest Release", role: .destructive) {
-                onInstallLatestRelease()
+
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                isShowingUpdateConfirmation = true
+            } label: {
+                Image(systemName: IconRole.installUpdate.icon.systemSymbolName)
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "The app will open Terminal to run the release installer, then quit so the installed app can be replaced."
+            .help("Install latest release")
+            .accessibilityIdentifier("install-latest-release-button")
+
+            Button(action: model.toggleWorkspaceSwap) {
+                if model.layoutState.isWorkspaceSwapped {
+                    Image(systemName: IconRole.workspaceSwap.icon.systemSymbolName)
+                        .foregroundStyle(dracula(.pink))
+                } else {
+                    Image(systemName: IconRole.workspaceSwap.icon.systemSymbolName)
+                }
+            }
+            .help("Swap main and right panels")
+            .accessibilityIdentifier("swap-main-and-right-panels-button")
+        }
+
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button(action: model.toggleRightPanelCollapsed) {
+                Image(systemName: IconRole.rightSidebar.icon.systemSymbolName)
+            }
+            .help(
+                model.layoutState.isRightPanelCollapsed
+                    ? "Expand right-side area" : "Collapse right-side area"
             )
+            .accessibilityIdentifier("toggle-right-panel-button")
+
+            Button {
+                openWindow(id: YAAWApp.settingsWindowID)
+            } label: {
+                Image(systemName: IconRole.settings.icon.systemSymbolName)
+            }
+            .help("Settings")
+            .accessibilityIdentifier("open-settings-button")
         }
-        .onReceive(
-            NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
-        ) { _ in
-            terminalRuntime.shutdownAllHosts()
+    }
+
+    /// Native split button: the label is the primary action, the chevron opens
+    /// the per-tool menu.
+    private var externalOpenToolbarButton: some View {
+        Menu {
+            ForEach(availableExternalOpenTools) { tool in
+                Button {
+                    openSelectedDirectoryExternally(tool)
+                } label: {
+                    Label {
+                        Text(tool.displayName)
+                    } icon: {
+                        ExternalOpenToolIcon(
+                            tool: tool, icon: externalOpenWorkspace.icon(for: tool))
+                    }
+                }
+            }
+        } label: {
+            ExternalOpenToolIcon(
+                tool: defaultExternalOpenTool,
+                icon: defaultExternalOpenTool.flatMap(externalOpenWorkspace.icon(for:))
+            )
+        } primaryAction: {
+            openSelectedDirectoryWithDefaultExternalTool()
         }
+        .disabled(availableExternalOpenTools.isEmpty)
+        .help(
+            defaultExternalOpenTool.map { "Open in \($0.displayName)" }
+                ?? "No external open destination available"
+        )
+        .accessibilityLabel(
+            defaultExternalOpenTool.map { "Open in \($0.displayName)" }
+                ?? "No external open destination available"
+        )
+        .accessibilityIdentifier("external-open-menu-button")
     }
 
     private var selectedBottomTerminalRequest: TerminalLaunchRequest? {
@@ -350,165 +429,6 @@ struct RootView: View {
             .revertSettings, .openSettingsExternal:
             break
         }
-    }
-}
-
-private struct AppChromeHeader: View {
-    let title: String
-    let isSidebarCollapsed: Bool
-    let isRightPanelCollapsed: Bool
-    let isWorkspaceSwapped: Bool
-    let onToggleSidebar: () -> Void
-    let onToggleRightPanel: () -> Void
-    let onToggleWorkspaceSwap: () -> Void
-    let onNavigateBack: () -> Void
-    let onNavigateForward: () -> Void
-    let fonts: FontSettings
-    let externalOpenTools: [ExternalOpenToolID]
-    let defaultExternalOpenTool: ExternalOpenToolID?
-    let externalOpenIcon: (ExternalOpenToolID) -> NSImage?
-    let onOpenDefaultExternal: () -> Void
-    let onOpenExternalTool: (ExternalOpenToolID) -> Void
-    let onInstallLatestRelease: () -> Void
-    let onOpenSettings: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            // Leading group: sidebar toggle + navigation.
-            HStack(spacing: 2) {
-                ChromeIconButton(
-                    systemImage: IconRole.sidebar.icon.systemSymbolName,
-                    help: isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar",
-                    action: onToggleSidebar
-                )
-
-                ChromeIconButton(
-                    systemImage: IconRole.navigateBack.icon.systemSymbolName,
-                    tint: dracula(.comment),
-                    help: "Back",
-                    action: onNavigateBack
-                )
-
-                ChromeIconButton(
-                    systemImage: IconRole.navigateForward.icon.systemSymbolName,
-                    tint: dracula(.comment),
-                    help: "Forward",
-                    action: onNavigateForward
-                )
-            }
-
-            Divider()
-                .overlay(dracula(.currentLine))
-                .frame(height: 24)
-
-            Text(title)
-                .font(fonts.interfaceFont(sizeOffset: 2, weight: .semibold))
-                .foregroundStyle(dracula(.foreground))
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            Spacer()
-
-            // Trailing group: tools + window controls.
-            HStack(spacing: 2) {
-                ExternalOpenSplitButton(
-                    tools: externalOpenTools,
-                    defaultTool: defaultExternalOpenTool,
-                    icon: externalOpenIcon,
-                    onOpenDefault: onOpenDefaultExternal,
-                    onOpenTool: onOpenExternalTool
-                )
-
-                ChromeIconButton(
-                    systemImage: IconRole.installUpdate.icon.systemSymbolName,
-                    help: "Install latest release",
-                    action: onInstallLatestRelease
-                )
-                .accessibilityIdentifier("install-latest-release-button")
-
-                ChromeIconButton(
-                    systemImage: IconRole.settings.icon.systemSymbolName,
-                    help: "Settings",
-                    action: onOpenSettings
-                )
-                .accessibilityIdentifier("open-settings-button")
-
-                ChromeIconButton(
-                    systemImage: IconRole.workspaceSwap.icon.systemSymbolName,
-                    tint: isWorkspaceSwapped ? dracula(.pink) : dracula(.foreground),
-                    help: "Swap main and right panels",
-                    action: onToggleWorkspaceSwap
-                )
-                .accessibilityIdentifier("swap-main-and-right-panels-button")
-
-                ChromeIconButton(
-                    systemImage: IconRole.rightSidebar.icon.systemSymbolName,
-                    help: isRightPanelCollapsed
-                        ? "Expand right-side area" : "Collapse right-side area",
-                    action: onToggleRightPanel
-                )
-            }
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 10)
-    }
-}
-
-private struct ExternalOpenSplitButton: View {
-    let tools: [ExternalOpenToolID]
-    let defaultTool: ExternalOpenToolID?
-    let icon: (ExternalOpenToolID) -> NSImage?
-    let onOpenDefault: () -> Void
-    let onOpenTool: (ExternalOpenToolID) -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button(action: onOpenDefault) {
-                ExternalOpenToolIcon(tool: defaultTool, icon: defaultTool.flatMap(icon))
-                    .frame(width: 30, height: 28)
-            }
-            .buttonStyle(.plain)
-            .disabled(defaultTool == nil)
-            .help(
-                defaultTool.map { "Open in \($0.displayName)" }
-                    ?? "No external open destination available"
-            )
-            .accessibilityLabel(
-                defaultTool.map { "Open in \($0.displayName)" }
-                    ?? "No external open destination available"
-            )
-            .accessibilityIdentifier("external-open-default-button")
-
-            Menu {
-                ForEach(tools) { tool in
-                    Button {
-                        onOpenTool(tool)
-                    } label: {
-                        Label {
-                            Text(tool.displayName)
-                        } icon: {
-                            ExternalOpenToolIcon(tool: tool, icon: icon(tool))
-                        }
-                    }
-                }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: ChromeMetrics.glyphWeight))
-                    .frame(width: 26, height: 28)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .disabled(tools.isEmpty)
-            .help("Choose external open destination")
-            .accessibilityLabel("Choose external open destination")
-            .accessibilityIdentifier("external-open-menu-button")
-        }
-        .background(dracula(.currentLine).opacity(0.45))
-        .clipShape(RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: ChromeMetrics.selectionCornerRadius)
-                .stroke(dracula(.comment).opacity(0.22), lineWidth: 1)
-        )
     }
 }
 
