@@ -1129,7 +1129,9 @@ tell application "System Events"
     set existingText to value of editorArea as text
     if existingText does not contain "# YAAW settings." then error "settings YAML text did not load"
 
-    set replacementText to "version: 1" & linefeed & "agent:" & linefeed & "  default: claude" & linefeed
+    -- Keep a fixed theme pinned: the app defaults to System mode, which would
+    -- make the later visual-state screenshots depend on the host appearance.
+    set replacementText to "version: 1" & linefeed & "agent:" & linefeed & "  default: claude" & linefeed & "theme:" & linefeed & "  active: ghostty-default" & linefeed
     set focused of editorArea to true
     delay 0.2
     set value of editorArea to replacementText
