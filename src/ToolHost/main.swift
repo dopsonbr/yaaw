@@ -92,6 +92,7 @@ final class ToolHostApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func handle(_ envelope: IsolatedToolEnvelope) {
         switch envelope.type {
         case "launchTool":
