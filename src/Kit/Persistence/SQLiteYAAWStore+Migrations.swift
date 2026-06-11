@@ -66,7 +66,29 @@ extension SQLiteYAAWStore {
             MigrationStep(version: 15) { try migrateToVersionFifteen($0) },
             MigrationStep(version: 16) { try migrateToVersionSixteen($0) },
             MigrationStep(version: 17) { try migrateToVersionSeventeen($0) },
+            MigrationStep(version: 18) { try migrateToVersionEighteen($0) },
         ]
+    }
+
+    /// v17 → v18: add the now-persisted per-thread file-browser UI state columns
+    /// to `right_panel_tab_state` (Chunk E). These were in-memory-only dictionaries
+    /// in the pre-rewrite AppModel (`expandedFoldersByThreadID`,
+    /// `selectedFileByThreadID`, `nvimRelativePathsByThreadID`), lost on relaunch;
+    /// they now survive. `expanded_folders` stores a newline-joined relative-path
+    /// list. Additive columns only, so no data rewrite is needed.
+    nonisolated static func migrateToVersionEighteen(_ database: OpaquePointer?) throws {
+        let columns = try tableColumns(database, "right_panel_tab_state")
+        if !columns.contains("expanded_folders") {
+            try execute(
+                database, "ALTER TABLE right_panel_tab_state ADD COLUMN expanded_folders TEXT")
+        }
+        if !columns.contains("selected_file_path") {
+            try execute(
+                database, "ALTER TABLE right_panel_tab_state ADD COLUMN selected_file_path TEXT")
+        }
+        if !columns.contains("nvim_path") {
+            try execute(database, "ALTER TABLE right_panel_tab_state ADD COLUMN nvim_path TEXT")
+        }
     }
 
     /// v16 → v17: index `right_panel_tabs(thread_id, tab_order)` so reload-time

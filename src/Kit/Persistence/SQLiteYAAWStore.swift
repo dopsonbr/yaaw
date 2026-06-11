@@ -27,7 +27,7 @@ struct SidebarProjectStateRow {
 /// actor's isolated synchronous method legally witnesses the `async` protocol
 /// requirement, so external callers simply `await`.
 public actor SQLiteYAAWStore: YAAWStore {
-    public static let schemaVersion = 17
+    public static let schemaVersion = 18
 
     let databasePath: URL
     let diagnosticRecorder: DiagnosticEventRecording

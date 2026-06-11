@@ -142,14 +142,39 @@ extension SQLiteYAAWStore {
 
         let stateStatement = try cachedPrepare(
             """
-            INSERT INTO right_panel_tab_state (thread_id, selected_tab_id) VALUES (?, ?)
-            ON CONFLICT(thread_id) DO UPDATE SET selected_tab_id = excluded.selected_tab_id
+            INSERT INTO right_panel_tab_state (
+                thread_id, selected_tab_id, expanded_folders, selected_file_path, nvim_path
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(thread_id) DO UPDATE SET
+                selected_tab_id = excluded.selected_tab_id,
+                expanded_folders = excluded.expanded_folders,
+                selected_file_path = excluded.selected_file_path,
+                nvim_path = excluded.nvim_path
             """
         )
         defer { try? resetStatement(stateStatement) }
         bind(threadID.uuidString, at: 1, in: stateStatement)
         bind(persistedState.selectedTabID, at: 2, in: stateStatement)
+        bindOptional(
+            Self.encodeExpandedFolders(persistedState.expandedFolders), at: 3, in: stateStatement)
+        bindOptional(persistedState.selectedFilePath, at: 4, in: stateStatement)
+        bindOptional(persistedState.nvimPath, at: 5, in: stateStatement)
         try stepDone(stateStatement)
+    }
+
+    /// Encodes the expanded-folder relative paths for storage as a single
+    /// newline-joined column value (`nil` when empty). Relative paths never
+    /// contain newlines, so the join is lossless.
+    nonisolated static func encodeExpandedFolders(_ folders: Set<String>) -> String? {
+        guard !folders.isEmpty else { return nil }
+        return folders.sorted().joined(separator: "\n")
+    }
+
+    /// Decodes the newline-joined expanded-folder column back into a set.
+    nonisolated static func decodeExpandedFolders(_ value: String?) -> Set<String> {
+        guard let value, !value.isEmpty else { return [] }
+        return Set(value.split(separator: "\n").map(String.init))
     }
 
     func setBottomTerminalExpandedStatement(threadID: UUID, isExpanded: Bool) throws {
@@ -435,6 +460,9 @@ extension SQLiteYAAWStore {
             try stepDone(database, statement)
         }
 
+        // Migration-time seed (runs at v8, before the v18 columns exist), so it
+        // writes only the columns present then. Legacy data has no UI state to
+        // backfill; the v18 columns default to NULL.
         let stateStatement = try prepare(
             database, "INSERT INTO right_panel_tab_state (thread_id, selected_tab_id) VALUES (?, ?)"
         )

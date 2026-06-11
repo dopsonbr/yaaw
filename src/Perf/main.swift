@@ -96,6 +96,43 @@ func runPersistenceGates() async throws -> [Gate] {
     return gates
 }
 
+/// WorkspaceStore gates (Chunk E): the O(1) keyed lookup for the selected
+/// project's active threads must read ≤ 0.1 ms @ 10k threads, and `selectThread`
+/// (which patches the caches, not a full re-sort) must stay fast.
+@MainActor
+func runWorkspaceGates() async throws -> [Gate] {
+    var gates: [Gate] = []
+
+    let store = InMemoryYAAWStore(snapshot: makeSnapshot(threadCount: 10_000))
+    let environment = AppEnvironment(
+        persistenceStore: store,
+        fileIndexActor: FileIndexActor(store: store)
+    )
+    let stores = await AppStores.make(environment: environment)
+    let workspace = stores.workspace
+
+    let readMs = medianSync(iterations: 1_000) {
+        _ = workspace.activeThreadsForSelectedProject
+    }
+    gates.append(Gate(label: "activeThreads @10k", value: readMs, target: 0.1))
+
+    let candidates = workspace.activeThreadsForSelectedProject
+    guard candidates.count >= 2 else { throw PerfFailure(message: "expected active threads @10k") }
+    let threadIDs = candidates.prefix(200).map(\.id)
+    var cursor = 0
+    let selectMs = medianSync(iterations: 200) {
+        workspace.selectThread(id: threadIDs[cursor % threadIDs.count])
+        cursor += 1
+    }
+    // selectThread patches the per-project sorted cache in place (sorted
+    // insertion after an O(n) locate). The 10k fixture is a single project, so
+    // this is the worst case; the spec's hard gate is the O(1) read above.
+    gates.append(Gate(label: "selectThread @10k", value: selectMs, target: 20.0))
+    await workspace.flushPersistence()
+
+    return gates
+}
+
 /// Median wall-clock milliseconds of a synchronous `body` across `iterations`.
 func medianSync(iterations: Int, _ body: () -> Void) -> Double {
     let clock = ContinuousClock()
@@ -188,6 +225,7 @@ struct PerfMain {
         do {
             var gates = try await runPersistenceGates()
             gates.append(contentsOf: try runFileIndexGates())
+            gates.append(contentsOf: try await runWorkspaceGates())
             var failures: [String] = []
             print("=== YAAW perf gates (\(perfConfigurationName)) ===")
             for gate in gates {

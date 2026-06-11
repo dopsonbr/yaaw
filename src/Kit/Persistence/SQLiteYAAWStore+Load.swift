@@ -297,14 +297,49 @@ extension SQLiteYAAWStore {
         }
 
         let stateStatement = try prepare(
-            database, "SELECT thread_id, selected_tab_id FROM right_panel_tab_state")
+            database,
+            """
+            SELECT thread_id, selected_tab_id, expanded_folders, selected_file_path, nvim_path
+            FROM right_panel_tab_state
+            """
+        )
         defer { sqlite3_finalize(stateStatement) }
         var selectedTabIDsByThreadID: [UUID: String] = [:]
+        var uiStateByThreadID: [UUID: PersistedRightPanelUIState] = [:]
         while sqlite3_step(stateStatement) == SQLITE_ROW {
             guard let threadID = UUID(uuidString: text(at: 0, in: stateStatement)) else { continue }
             selectedTabIDsByThreadID[threadID] = text(at: 1, in: stateStatement)
+            uiStateByThreadID[threadID] = PersistedRightPanelUIState(
+                expandedFolders: decodeExpandedFolders(optionalText(at: 2, in: stateStatement)),
+                selectedFilePath: optionalText(at: 3, in: stateStatement),
+                nvimPath: optionalText(at: 4, in: stateStatement)
+            )
         }
 
+        return restoredRightPanelStates(
+            threads: threads,
+            tabsByThreadID: tabsByThreadID,
+            selectedTabIDsByThreadID: selectedTabIDsByThreadID,
+            uiStateByThreadID: uiStateByThreadID,
+            fallbackModes: fallbackModes
+        )
+    }
+
+    /// The per-thread file-browser UI state read from `right_panel_tab_state`
+    /// (schema v18 columns).
+    private struct PersistedRightPanelUIState {
+        var expandedFolders: Set<String>
+        var selectedFilePath: String?
+        var nvimPath: String?
+    }
+
+    private nonisolated static func restoredRightPanelStates(
+        threads: [AgentThread],
+        tabsByThreadID: [UUID: [RightPanelTab]],
+        selectedTabIDsByThreadID: [UUID: String],
+        uiStateByThreadID: [UUID: PersistedRightPanelUIState],
+        fallbackModes: [UUID: RightPanelMode]
+    ) -> [UUID: RightPanelState] {
         var states: [UUID: RightPanelState] = [:]
         for thread in threads {
             let tabs = tabsByThreadID[thread.id] ?? RightPanelState.defaultTabs
@@ -312,8 +347,14 @@ extension SQLiteYAAWStore {
                 selectedTabIDsByThreadID[thread.id]
                 ?? fallbackModes[thread.id]?.defaultTabID
                 ?? RightPanelTab.filesID
+            let uiState = uiStateByThreadID[thread.id]
             states[thread.id] = RightPanelState.restoredState(
-                tabs: tabs, selectedTabID: selectedTabID)
+                tabs: tabs,
+                selectedTabID: selectedTabID,
+                expandedFolders: uiState?.expandedFolders ?? [],
+                selectedFilePath: uiState?.selectedFilePath,
+                nvimPath: uiState?.nvimPath
+            )
         }
         return states
     }

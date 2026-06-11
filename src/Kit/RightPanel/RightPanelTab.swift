@@ -120,16 +120,31 @@ public struct RightPanelTab: Identifiable, Equatable, Sendable {
 public struct RightPanelState: Equatable, Sendable {
     public var tabs: [RightPanelTab]
     public var selectedTabID: String
+    /// Folders the user has expanded in the file browser, by relative path.
+    /// Persisted per thread (schema v18) so expansion survives relaunch.
+    public var expandedFolders: Set<String>
+    /// The last file the user selected in the file browser, by relative path.
+    /// Persisted per thread (schema v18).
+    public var selectedFilePath: String?
+    /// The last file opened in nvim, by relative path. Persisted per thread
+    /// (schema v18).
+    public var nvimPath: String?
 
     public init(
         tabs: [RightPanelTab] = RightPanelState.defaultTabs,
-        selectedTabID: String = RightPanelTab.filesID
+        selectedTabID: String = RightPanelTab.filesID,
+        expandedFolders: Set<String> = [],
+        selectedFilePath: String? = nil,
+        nvimPath: String? = nil
     ) {
         self.tabs = Self.normalizedTabs(tabs)
         self.selectedTabID =
             self.tabs.contains { $0.id == selectedTabID }
             ? selectedTabID
             : RightPanelTab.filesID
+        self.expandedFolders = expandedFolders
+        self.selectedFilePath = selectedFilePath
+        self.nvimPath = nvimPath
     }
 
     public static let defaultTabs: [RightPanelTab] = [
@@ -146,13 +161,39 @@ public struct RightPanelState: Equatable, Sendable {
     public static func restoredState(tabs: [RightPanelTab], selectedTabID: String)
         -> RightPanelState
     {
+        restoredState(
+            tabs: tabs,
+            selectedTabID: selectedTabID,
+            expandedFolders: [],
+            selectedFilePath: nil,
+            nvimPath: nil
+        )
+    }
+
+    /// Rebuilds a state on load, restoring the now-persisted per-thread UI state
+    /// (schema v18: expanded folders, selected file, nvim path).
+    public static func restoredState(
+        tabs: [RightPanelTab],
+        selectedTabID: String,
+        expandedFolders: Set<String>,
+        selectedFilePath: String?,
+        nvimPath: String?
+    ) -> RightPanelState {
         let selectedKind = tabs.first { $0.id == selectedTabID }?.kind
         let selectedMode = selectedKind?.mode ?? .files
-        return RightPanelState.defaultState(selectedMode: selectedMode)
+        var state = RightPanelState.defaultState(selectedMode: selectedMode)
+        state.expandedFolders = expandedFolders
+        state.selectedFilePath = selectedFilePath
+        state.nvimPath = nvimPath
+        return state
     }
 
     public var persistenceSnapshot: RightPanelState {
-        RightPanelState.defaultState(selectedMode: selectedMode)
+        var snapshot = RightPanelState.defaultState(selectedMode: selectedMode)
+        snapshot.expandedFolders = expandedFolders
+        snapshot.selectedFilePath = selectedFilePath
+        snapshot.nvimPath = nvimPath
+        return snapshot
     }
 
     public var selectedTab: RightPanelTab {
