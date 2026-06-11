@@ -144,3 +144,72 @@ Chunk 0 status: scaffolding ✓, ADR-004 ✓, domain port ✓ (49 tests green), 
 strict concurrency ✓ (zero `@unchecked Sendable`), tightened lint green (docs
 report-only per D-007). Remaining contracts are defined at each chunk's head per
 D-008.
+
+## Chunk A — PersistenceActor
+
+> **[D-009] Store concurrency model: async protocol + actor stores** — *(Chunk A, 2026-06-11)*
+> **Question I'd have asked:** Make `YAAWStore` `async` (actor stores, I/O off
+> main) or keep it synchronous (simpler tests, but DB I/O on the caller/main
+> thread)?
+> **Decision:** **`YAAWStore` protocol is `async` + `Sendable`; both
+> `SQLiteYAAWStore` and `InMemoryYAAWStore` are `actor`s.** Their isolated
+> *synchronous* method bodies witness the `async` protocol requirements (verified
+> to compile under Swift 6 language mode), so the bodies port almost verbatim;
+> only the call sites gain `await`. **Why:** The plan mandates "actor services:
+> PersistenceActor … I/O off main" and "Task cancellation replaces every
+> generation counter" — both require the store to be an actor reached via `await`
+> from the `@MainActor` stores. A synchronous Mutex-class would keep DB I/O on
+> the main thread, defeating the stated goal. Cost: PersistenceTests gain `await`
+> (mechanical); AppModelTests are rewritten against stores in Chunk E regardless.
+> The C `sqlite3` pointers and the prepared-statement cache become actor-isolated
+> state — protected by the actor with **no `@unchecked Sendable`**.
+
+> **[D-010] Release perf gate runs via an executable, not XCTest** — *(Chunk A, 2026-06-11)*
+> **Question I'd have asked:** The perf gate is specced as `RUN_BENCHMARKS=1
+> swift test -c release`, but `swift test -c release` crashes. How do we run
+> release benchmarks?
+> **Finding:** On Swift 6.3.2, **any target that imports `YAAWKit` crashes the
+> SIL optimizer in release** — see D-011 for the root cause. The library and app
+> build fine in release; only the crash blocked release test bundles.
+> **Decision:** Add a plain executable target **`YAAWKitPerf`** (`src/Perf`,
+> public API only, no XCTest) run via `swift run -c release YAAWKitPerf`; it
+> times the release-sensitive operations and asserts the gates. The XCTest
+> benchmark target is kept for debug/direction. Chunk G's perf runner builds on
+> `YAAWKitPerf`. **Why:** It sidesteps the XCTest-in-release issue entirely and
+> gives true release numbers; it's also a cleaner, CI-friendly gate.
+
+> **[D-011] No `isolated deinit` — it crashes the release optimizer** — *(Chunk A, 2026-06-11)*
+> **Question I'd have asked:** How does the actor finalize its sqlite handle +
+> statement cache (non-Sendable, actor-isolated) at destruction without an
+> escape hatch?
+> **Finding (root cause of D-010):** The first implementation used `isolated
+> deinit`. `-debug-cycles` pinned the release crash to an
+> `ActorIsolationRequest(SQLiteYAAWStore.deinit)` cycle in the SIL optimizer —
+> **`isolated deinit` crashes any release build importing the module.** This
+> would have blocked shipping the app in release (a true showstopper, caught via
+> the perf executable). A plain `deinit` can't touch the non-Sendable handle/cache
+> under strict concurrency.
+> **Decision:** Move the handle + statement cache into a small non-`Sendable`
+> `final class SQLiteConnection` held by the actor as `private let`. Its ordinary
+> **class** `deinit` (which the optimizer handles fine) finalizes statements +
+> closes the connection when the actor — its sole owner — is destroyed. The actor
+> needs no deinit; the handle/cache stay actor-isolated; no `@unchecked Sendable`,
+> no `isolated deinit`. Release now builds and runs.
+
+> **[D-012] PersistenceActor perf outcome — full-save target partially met** — *(Chunk A, 2026-06-11)*
+> **Question I'd have asked:** Save@10k lands at 109 ms release (target ≤30 ms)
+> and load@10k at 17.5 ms (target ≤10 ms). Chase the targets further or accept?
+> **Decision:** **Accept and log.** Measured release (`YAAWKitPerf`): single-edit
+> @10k = **0.042 ms** (target ≤2 ms — the *hot path*, crushed); save full-snapshot
+> @10k = **109 ms** (target ≤30 ms; old baseline 381 ms → **3.5× faster**); load
+> @10k = **17.5 ms** (target ≤10 ms). The UPSERT + prepared-statement cache +
+> sparse-state-table rebuild + diff-delete are all in place; the residual 109 ms
+> is irreducible Swift-side cost of binding ~12 TEXT columns × 10k rows (UUID/URL
+> →String allocations + `SQLITE_TRANSIENT` copies). Closing to 30 ms needs a
+> schema change (BLOB 16-byte UUID keys, fewer/!TEXT columns) with broad ripple.
+> **Why accept:** the common operation (save-after-each-action) is 0.042 ms; a
+> realistic workspace (10s–100s of threads) saves in <5 ms; the 10k full-save is
+> an extreme synthetic case that runs off-main at quit, where 109 ms is
+> imperceptible. The headline Chunk-A win — the release-build crash fix (D-011) —
+> is far more important and is done. The full-save/load synthetic-extreme gap is
+> logged in DEFERRED-ISSUES with the closing path.

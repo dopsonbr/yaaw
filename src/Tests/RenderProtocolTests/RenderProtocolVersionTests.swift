@@ -1,6 +1,5 @@
 import XCTest
-
-@testable import YAAWRenderProtocol
+import YAAWRenderProtocol
 
 final class RenderProtocolVersionTests: XCTestCase {
     func testCurrentVersionIsPositive() {

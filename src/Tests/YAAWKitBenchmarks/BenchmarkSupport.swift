@@ -23,11 +23,12 @@ enum BenchmarkSupport {
     }
 }
 
+// NOTE: this base class deliberately does NOT override `defaultMetrics` with
+// `XCTClockMetric`. Benchmarks time work with `ContinuousClock` directly, and
+// referencing `XCTMetric` here crashes the Swift 6.3 release optimizer when the
+// benchmark module also imports YAAWKit (DECISIONS-LOG D-010), which would break
+// the `swift test -c release` perf gate.
 class BenchmarkCase: XCTestCase {
-    override class var defaultMetrics: [XCTMetric] {
-        [XCTClockMetric()]
-    }
-
     override func setUp() async throws {
         try await super.setUp()
         try BenchmarkSupport.skipUnlessEnabled()

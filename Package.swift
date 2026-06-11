@@ -49,6 +49,16 @@ let package = Package(
                 .linkedLibrary("sqlite3")
             ]
         ),
+        // Release-buildable perf gate. XCTest benchmark targets crash the Swift
+        // 6.3 optimizer when importing YAAWKit (DECISIONS-LOG D-010), so the
+        // authoritative release perf numbers come from this plain executable:
+        //   swift run -c release YAAWKitPerf
+        .executableTarget(
+            name: "YAAWKitPerf",
+            dependencies: ["YAAWKit"],
+            path: "src/Perf",
+            swiftSettings: swift6
+        ),
         .testTarget(
             name: "YAAWRenderProtocolTests",
             dependencies: ["YAAWRenderProtocol"],
