@@ -119,3 +119,28 @@ Format:
 > value and risk actually live. The rule stays wired and enforced; only its
 > *timing* is sequenced. **This is the one DoD item explicitly deferred to the
 > cutover gate rather than done inline; it is tracked, not dropped.**
+
+> **[D-008] Execution model: sequential chunks, contracts inline** — *(Chunk 0.4, 2026-06-11)*
+> **Question I'd have asked:** Run chunks A–E as parallel background workflows
+> (ultracode-style), or implement them sequentially?
+> **Decision:** **Sequential**, each chunk building green and committed as a
+> milestone, with each chunk's interface contract defined at its own head (rather
+> than all frozen up-front in 0.4). I still use parallel sub-agents *within* a
+> phase for read-heavy work (the analysis pass already done; later for batch test
+> ports). **Why:** The plan places PersistenceActor, FileIndexActor,
+> SessionBindingActor, and the Stores all inside the single `YAAWKit` target. A
+> Swift module is an atomic compilation unit — parallel agents writing into one
+> module cannot independently `swift build`-verify their slice (the module only
+> compiles once *all* slices are consistent), so background parallelism would
+> trade continuously-green milestones for one big non-building reconciliation at
+> the end. Sequential implementation keeps every commit a good reference point
+> (an explicit owner ask) and lets each chunk's behavior tests gate it. The
+> contract-freeze step (0.4) exists to enable parallelism that this single-module
+> layout doesn't actually permit, so defining contracts inline is equivalent work
+> without the premature-freeze churn. `YAAWRenderProtocol` is the exception: it is
+> its own target, so it is defined in full at the head of Chunk D.
+
+Chunk 0 status: scaffolding ✓, ADR-004 ✓, domain port ✓ (49 tests green), Swift-6
+strict concurrency ✓ (zero `@unchecked Sendable`), tightened lint green (docs
+report-only per D-007). Remaining contracts are defined at each chunk's head per
+D-008.
