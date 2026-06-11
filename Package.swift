@@ -16,6 +16,7 @@ let package = Package(
         .macOS(.v26)
     ],
     products: [
+        .executable(name: "YAAW", targets: ["YAAW"]),
         .library(name: "YAAWRenderProtocol", targets: ["YAAWRenderProtocol"]),
         .library(name: "YAAWKit", targets: ["YAAWKit"]),
     ],
@@ -24,6 +25,22 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
     ],
     targets: [
+        // The SwiftUI app shell: thin feature views consuming the @MainActor
+        // @Observable stores (Chunk E/F), the chrome toolbar, settings window,
+        // and the main-side render integration (RenderHostClient over XPC +
+        // TerminalSurfaceHostView compositing the helper's remote layer).
+        .executableTarget(
+            name: "YAAW",
+            dependencies: [
+                "YAAWKit",
+                "YAAWRenderProtocol",
+            ],
+            path: "src/App",
+            resources: [
+                .process("Resources")
+            ],
+            swiftSettings: swift6
+        ),
         // Pure-Swift seam shared by the app and the render helper: Codable XPC
         // message envelopes, the @objc XPC service/client protocols, and the
         // rendering-config DTOs. No Ghostty types, no AppKit-heavy deps.
