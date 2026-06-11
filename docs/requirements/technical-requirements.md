@@ -71,12 +71,13 @@ YAML configuration MUST include comments that show defaults and identify setting
 
 YAML configuration SHOULD include:
 
-- Theme selection, defaulting to Dracula with built-in light, dark, and high-contrast options.
+- Theme selection, defaulting to System mode with built-in `macos-light` and `macos-dark` pairing plus Dracula and other light, dark, and high-contrast options.
 - File indexing ignore rules.
 - Keyboard shortcuts.
 - Default agent CLI.
-- Interface, editor, and embedded terminal font families and sizes.
-- Editor, Git, diff, and agent command overrides.
+- Per-agent launch defaults, including permission mode and additional launch arguments.
+- Interface, editor, embedded terminal, and file-browser font families and sizes, plus ligature preference.
+- Editor, Git, diff, and per-agent command overrides.
 - User-level app preferences.
 
 The app MUST expose a settings action in the window title bar that navigates to an in-app YAML editor for the app-owned settings file.
@@ -92,10 +93,13 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - Startup and implicit new-thread actions MUST NOT open or create a global chat by default; the user MUST select a project or explicitly create a chat from the global project row.
 - Each project MUST have a stable id, display name, root directory, created timestamp, and last opened timestamp.
 - Each project MUST have durable pin state and manual sort order.
+- Each project MUST have archive state.
 - A project MAY have multiple threads.
 - A project MAY have threads that point at different worktrees.
 - Pinned projects MUST sort before unpinned projects.
 - Users MUST be able to drag and drop projects to manually reorder them within pinned and unpinned groups.
+- Archived projects MUST move out of the active project list and remain reachable from the combined Archived section at the bottom of the sidebar.
+- The built-in `global` project MUST NOT be archivable.
 
 ## Threads
 
@@ -123,7 +127,7 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - Live thread terminal sessions MUST NOT be required to persist after app restart.
 - Thread terminal/session state MUST be preserved while the app process is running.
 - Archived threads MUST move out of the primary active thread list.
-- Archived threads MUST remain reachable from one global sidebar archive entry at the bottom of the sidebar.
+- Archived threads MUST remain reachable from the combined Archived section at the bottom of the sidebar.
 - Archived threads MUST retain the agent CLI selection and CLI session identity required for later resume.
 - Thread lists MUST sort pinned threads before unpinned threads, then sort by most recently opened.
 - Each active thread SHOULD show whether the bound CLI is working, needs input, complete, or inactive.
@@ -138,6 +142,7 @@ The settings editor MUST validate YAML before saving and MUST NOT overwrite the 
 - The app MUST provide a right-tool-panel terminal for `lazygit`, falling back to `git diff`.
 - Agent CLI session terminals MUST launch in the selected thread's working directory.
 - Agent CLI session terminals MUST invoke the selected local CLI according to the selected thread's stored `agent_cli`.
+- Agent CLI session terminals MUST apply the thread's captured per-agent launch defaults, including executable command override, permission mode, and additional launch arguments.
 - Agent CLI session terminals MUST resume the selected thread's stored CLI session identity when reopening an existing thread.
 - Agent CLI session terminals MUST NOT silently start a fresh agent session for a loaded thread whose stored CLI session identity is missing unless the user explicitly chooses start-new recovery.
 - The bottom terminal MUST launch in the selected thread's working directory.
@@ -274,10 +279,22 @@ Right-panel tab cycling MUST use `Cmd+Shift+[` and `Cmd+Shift+]` so it does not 
 
 ## Theme
 
-- The app MUST default to the Dracula theme across all app surfaces.
+- The app MUST default to System mode across all app surfaces.
+- System mode MUST follow the current macOS appearance and resolve to the configured `theme.light` / `theme.dark` pairing, defaulting to `macos-light` and `macos-dark`.
+- Dracula MUST remain a built-in dark theme.
 - The app MUST support built-in theme switching from Settings.
 - Terminals, sidebar, right tool panel, modal sheets, split-view handles, icons, file tree, browser chrome, `nvim`, and `lazygit` surfaces MUST use the selected built-in visual system.
 - The implementation SHOULD use shared theme tokens rather than hardcoding colors throughout the app.
+
+## Settings
+
+- Settings MUST expose General, Agents, Appearance, Keyboard Shortcuts, and Config File sections.
+- General Settings MUST expose default agent selection, Markdown/HTML primary-open behavior, CLI option refresh, build information, and global chats directory.
+- Agents Settings MUST expose command override, permission default, and additional launch arguments for each supported CLI family.
+- Permission presets SHOULD be discovered from each CLI's `--help` output when possible.
+- Permission preset discovery SHOULD use cached or fallback presets when a CLI is unavailable or help parsing fails.
+- Appearance Settings MUST expose theme group selection, System light/dark pairing, interface/editor/terminal/file-browser fonts, font sizes, and ligatures.
+- Config File Settings MUST expose the app-owned YAML, validate before saving, and avoid overwriting the last saved file when validation fails.
 
 ## Agent CLI Scope
 

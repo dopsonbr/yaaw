@@ -29,23 +29,27 @@ The release installer downloads the latest `YAAW-*-macos-arm64.zip` asset, insta
 - Treat `codex`, `claude`, `opencode`, and `copilot` as supported CLI families.
 - Provide a selected-thread bottom terminal that starts collapsed and can be toggled with `Cmd+J`.
 - Use `libghostty` for embedded terminal rendering and terminal behavior.
-- Use Dracula by default and keep built-in theme switching consistent across every app surface.
+- Follow the macOS system appearance by default, using the built-in `macos-light` / `macos-dark` pairing while keeping Dracula as a built-in dark theme and historical visual baseline.
 - Show files for the selected thread's working directory in a collapsible right tool panel.
 - Preview supported local files and typed URLs in an isolated right-panel Browser mode, including Markdown with Mermaid diagram rendering.
 - Open selected files in `nvim` inside the right panel, falling back to `vim` and then `vi`.
 - Open `lazygit` in a terminal inside the right panel, falling back to `git diff` when `lazygit` is unavailable.
 - Switch the right panel between Files, Browser, Git, and `nvim` by cycling tabs or clicking mode icons.
 - Support fuzzy matching and durable shared file-index caching in the file browser.
-- Provide a title-bar settings gear for app-owned Appearance, Key Bindings, and YAML settings.
-- Let users configure built-in theme, icon pack, fonts, key bindings, external-open destinations, agent commands, editor fallbacks, Git command, and file indexing ignore rules through YAML-backed settings.
+- Provide native Settings surfaces for General, Agents, Appearance, Keyboard Shortcuts, and the Config File.
+- Let users configure local CLI commands, permission defaults, additional launch arguments, built-in themes, system light/dark pairing, icon pack, fonts, key bindings, external-open destinations, editor fallbacks, Git command, file-open behavior, and file indexing ignore rules through YAML-backed settings.
 - Surface thread activity states and sanitized notification previews without storing terminal scrollback.
 - Open selected projects and files in installed external editors, Finder, Terminal, Ghostty, Xcode, or WebStorm.
 - Make every major panel resizeable and persist layout state.
-- Allow old or completed threads to be archived.
+- Allow old or completed projects and threads to be archived.
 
-## Visual Theme
+## Visual Theme And Chrome
 
-The app uses Dracula as the default theme and supports built-in light, dark, and high-contrast themes. Primary surfaces, including sidebars, terminals, file browser, `nvim` editor panel, `lazygit` panel, modal sheets, dividers, and selection states, use the selected theme palette.
+The app defaults to `theme.active: system`, which follows the macOS appearance and pairs `macos-light` with `macos-dark`. Users can pin any built-in theme, including Dracula, or keep system mode and choose a custom light/dark pairing. Primary surfaces, including sidebars, terminals, file browser, Browser chrome, `nvim` editor panel, Git panel, settings, dividers, and selection states, use the selected theme roles.
+
+YAAW prefers native macOS window structures, toolbars, sidebars, split views, symbols, and material-backed surfaces. On current macOS releases those standard controls pick up the modern Liquid Glass-style look where the system provides it; YAAW does not replace the app shell with custom chrome.
+
+Dracula remains a built-in dark theme and the historical palette reference for the project:
 
 | Role | Color |
 | --- | --- |
@@ -72,7 +76,7 @@ The app has three primary regions:
    - Resizeable.
    - Shows projects and their threads.
    - Includes a global workspace scoped to the user's home directory.
-   - Provides access to archived threads.
+   - Provides one combined Archived section for archived projects and archived threads.
 
 2. **Main workspace**
    - Resizeable against the sidebar, right tool panel, and selected-thread bottom terminal.
@@ -129,7 +133,7 @@ When the Git mode is opened, the right panel launches `lazygit` in the selected 
 
 When an agent terminal has focus, `Cmd+V` can paste text through the normal terminal path or attach an image from the pasteboard. Image paste sends the terminal's native attachment shortcut without inserting a visible filesystem path. `Ctrl+V` uses the same native image attach path when the terminal has focus.
 
-User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml` by default. The title-bar gear opens Settings with Appearance controls, a searchable key binding editor, the raw YAML editor, and Save, Reload, Revert, and Open External actions.
+User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml` by default. The title-bar gear opens native Settings with General, Agents, Appearance, Keyboard Shortcuts, and Config File sections. The Config File section provides the raw YAML editor plus Save, Reload, Revert, and Open External actions.
 
 Users can switch right-panel modes by cycling tabs or clicking mode icons:
 
@@ -156,20 +160,24 @@ Panel sizes, collapsed states, and the main/right swap state are persisted in ap
 | Projects | Create a project from a local directory, name it, and list it in the sidebar. |
 | Threads | Create, select, rename when supported, pin, resume, and archive CLI agent sessions under a project. |
 | Terminals | One `libghostty` agent CLI session terminal per thread. One collapsed selected-thread bottom terminal. |
-| Theme | Dracula by default, with built-in light, dark, and high-contrast themes. |
-| Sidebar | Collapsible and resizeable nested project/thread navigation with pinning, reordering, expansion state, and a global archive. |
+| Theme | System mode by default, pairing `macos-light` and `macos-dark`, with Dracula and other built-in light, dark, and high-contrast themes. |
+| Sidebar | Collapsible and resizeable nested project/thread navigation with pinning, reordering, expansion state, and one combined Archived section for projects and threads. |
 | Right tool panel | Collapsible, resizeable, and swappable Files, Browser, `nvim`, and Git modes with fuzzy file matching. |
-| Files | Background indexing, hidden files by default, heavy-directory ignores, shared SQLite cache by directory and Git identity, and path copy actions. |
+| Files | Background indexing, heavy-directory ignores, shared SQLite cache by directory and Git identity, configurable Markdown/HTML primary-open behavior, and path copy actions. |
 | Browser | Isolated WebKit previews for typed URLs and supported local files, including Markdown and Mermaid diagrams. |
 | External open | Open projects or files in configured editors, Finder, Terminal, Ghostty, Xcode, or WebStorm. |
-| Settings | App-owned YAML plus in-app Appearance and Key Bindings editors. |
+| Settings | General, Agents, Appearance, Keyboard Shortcuts, and Config File surfaces backed by app-owned YAML. |
 | Activity | Thread activity indicators, sanitized previews, helper-driven notifications, unread state, and local persistence. |
 
-## Current Screenshot
+## Current Screenshots
 
-This screenshot comes from the local E2E harness and shows the current native app shell with a Codex-backed thread, `libghostty` terminal input, the file browser, agent icon labels, panel rails, and the collapsed selected-thread bottom terminal.
+These screenshots show the current native app shell, Settings surfaces, system theme pairing, agent launch defaults, and collapsed selected-thread bottom terminal.
 
-![Current YAAW workspace](docs/examples/screenshots/current/main-workspace-files-terminal.png)
+![Current YAAW workspace with Browser preview](docs/examples/screenshots/current/main-workspace-browser-preview.png)
+
+![Agents Settings with command, permissions, and arguments](docs/examples/screenshots/current/agents-settings-launch-defaults.png)
+
+![Appearance Settings with system theme and font controls](docs/examples/screenshots/current/appearance-settings-theme-fonts.png)
 
 ## Example Pages
 
@@ -190,6 +198,7 @@ Additional Dracula-themed example pages are available under `docs/examples/scree
 - SwiftUI owns high-level layout and controls; AppKit is used where terminal embedding, focus, split-view behavior, or window control needs it.
 - Embedded terminals use `libghostty`.
 - Agent CLIs and CLI harnesses are user-owned executables resolved from settings or `PATH`; YAAW launches and resumes them instead of reimplementing them.
+- Agent command overrides, permission presets, and additional launch arguments are app settings. Permission presets are discovered from each CLI's `--help` when possible and backed by cached or fallback presets.
 - File editing launches `nvim`, `vim`, or `vi` in the right panel.
 - Git mode launches `lazygit`, with `git diff` fallback, in the right panel.
 - Project, thread, selected agent CLI, CLI session identity, layout, activity, and index metadata are persisted locally.

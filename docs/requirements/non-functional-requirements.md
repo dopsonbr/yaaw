@@ -16,6 +16,9 @@ Requirements use:
 - File indexing MUST NOT block the main UI thread.
 - File search SHOULD return useful results interactively as the user types.
 - The app SHOULD defer expensive indexing work until after the main window is usable.
+- File index caches SHOULD be shared for matching working directories and Git identities so thread switches do not repeat the same indexing work.
+- CLI option probes used for permission presets SHOULD be cached and refreshed explicitly so Settings and thread creation stay responsive.
+- Polling for agent activity and CLI metadata SHOULD be coalesced to avoid unnecessary UI churn while terminal input is active.
 - The app SHOULD avoid deep semantic indexing in the first version.
 
 ## Responsiveness
@@ -33,6 +36,9 @@ Requirements use:
 - External tool errors MUST be visible without crashing the app.
 - Agent CLI sessions and terminal sessions MUST remain isolated by thread while the app is running.
 - The app SHOULD recover cleanly from terminal process exits.
+- Browser rendering MUST run in an isolated helper so a renderer crash can be recovered with a reload or restart state instead of terminating the main app.
+- Right-panel tool fallbacks such as `vim` / `vi` and `git diff` SHOULD remain available when preferred tools are missing.
+- Settings validation MUST reject malformed YAML, invalid launch arguments, and unsupported values before replacing the saved configuration.
 
 ## Data Integrity
 
@@ -50,6 +56,7 @@ Requirements use:
 - The app MUST keep thread activity status and notification previews local.
 - The app MUST NOT collect telemetry or analytics.
 - The app MUST NOT upload crash reports, diagnostics, logs, settings, indexes, activity previews, or usage events.
+- Diagnostic events, CLI option probe results, file indexes, and browser crash counters MUST remain local.
 - The app MUST NOT send project paths, file names, terminal output, agent CLI session metadata, or repository content to a remote service outside of the user's chosen local CLI process.
 - The app MUST sanitize notification previews before storing or displaying them and MUST NOT treat notification support as permission to persist full terminal scrollback.
 - The app itself MUST NOT require network access for core first-version workflows outside of any network behavior performed by the user's chosen local CLI process.

@@ -8,7 +8,10 @@
 - Expose every configurable keyboard action under `keyboardShortcuts` with a stable action id.
 - Treat `key: ""` with `modifiers: []` as an intentionally unbound keyboard shortcut.
 - Fall back invalid keyboard shortcuts to their action defaults and report duplicate active bindings within the same scope.
-- Theme settings should use stable built-in ids, default to `dracula`, and fall back to `dracula` with a local diagnostic event when unsupported.
+- Theme settings should use stable built-in ids, default to `system`, and fall back to `system` with a local diagnostic event when unsupported.
+- System theme mode should follow the macOS appearance and use configurable light/dark pairings, defaulting to `macos-light` and `macos-dark`.
 - Font settings should use `system` / `system-monospace` for native macOS fonts, installed font family names for custom fonts, and bounded point sizes.
+- Agent settings should keep command overrides, permission defaults, and additional launch arguments per CLI family.
+- Permission preset discovery should use CLI `--help` output when available and cached or fallback presets when probing is not available.
 - Do not rewrite a user-edited settings file during normal load.
 - Keep SQLite responsible for project, thread, layout, index, and session metadata.

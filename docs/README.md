@@ -25,16 +25,21 @@ Implementation plans should reference the relevant requirements and standards.
 - Keep project metadata, settings, file indexes, diagnostics, and activity previews in app-owned local storage.
 - Use `libghostty` for terminal-backed work surfaces: agent sessions, bottom terminal, `nvim`, and Git.
 - Keep the right tool panel focused on four local tools: Files with shared indexing, Browser previews, `nvim`, and Git.
-- Preserve Dracula as the default visual system while supporting built-in theme, icon, font, keyboard, tool, and indexing settings.
-- Expose Settings as app-owned Appearance, Key Bindings, and YAML editing surfaces.
+- Follow the macOS system appearance by default while preserving Dracula as a built-in dark theme and historical visual baseline.
+- Expose Settings as app-owned General, Agents, Appearance, Keyboard Shortcuts, and Config File surfaces.
+- Give users control over local CLI commands, permission presets, additional launch arguments, themes, fonts, key bindings, external-open targets, and tool fallbacks.
 - Surface thread activity indicators and sanitized notification previews without persisting terminal scrollback.
 - Prefer E2E behavior tests and screenshot artifacts over internals-heavy tests.
 
 ## Current Screenshot
 
-The latest checked-in current-state screenshot is:
+The latest checked-in current-state screenshots are:
 
-![Current YAAW workspace](examples/screenshots/current/main-workspace-files-terminal.png)
+![Current YAAW workspace](examples/screenshots/current/main-workspace-browser-preview.png)
+
+![Agents Settings](examples/screenshots/current/agents-settings-launch-defaults.png)
+
+![Appearance Settings](examples/screenshots/current/appearance-settings-theme-fonts.png)
 
 ## GitHub Pages Site
 

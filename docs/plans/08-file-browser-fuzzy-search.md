@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replace sample file entries with a read-only file browser for the selected thread working directory, including hidden files, ignore rules, and fuzzy search.
+Replace sample file entries with a read-only file browser for the selected thread working directory, including hidden file visibility, ignore rules, and fuzzy search.
 
 ## Requirements
 
@@ -13,7 +13,7 @@ Replace sample file entries with a read-only file browser for the selected threa
 ## Implementation
 
 - Index files from the selected thread working directory without blocking the main UI thread.
-- Show hidden files by default.
+- Use the current file-browser hidden-file setting when deciding whether hidden files are visible.
 - Ignore heavy directories by default, including `.git`, `node_modules`, `dist`, `.build`, and derived-data folders. The default ignore list lives in the YAML settings file seeded by [Plan 02](02-sqlite-persistence.md).
 - Add deterministic ranking: exact filename matches, prefix matches, then fuzzy path matches.
 - Keep indexing read-only and never modify repository files.
@@ -30,7 +30,7 @@ Replace sample file entries with a read-only file browser for the selected threa
 ## Acceptance Criteria
 
 - Files mode shows the selected thread working directory.
-- Hidden files are visible by default.
+- Hidden file visibility follows the current file-browser setting.
 - Heavy ignored directories are skipped per the JSON-config default list.
 - File search returns exact filename matches before prefix matches and fuzzy path matches.
 - File indexing does not block primary UI state changes.

@@ -9,7 +9,9 @@ title: YAAW
     <p class="hero-copy">
       Yet Another Agent Wrapper gives user-owned agent CLIs a native desktop
       workspace: projects, threads, libghostty terminal surfaces, shared local
-      file indexing, Browser previews, nvim, lazygit, and configurable settings.
+      file indexing, Browser previews, nvim, lazygit, archive flows, and
+      Settings for local CLI commands, permissions, arguments, themes, fonts,
+      key bindings, and tool fallbacks.
     </p>
     <div class="actions">
       <a class="button primary" href="{{ '/docs/user-guide/' | relative_url }}">Open the user guide</a>
@@ -17,7 +19,7 @@ title: YAAW
     </div>
   </div>
   <div class="hero-visual">
-    <img src="{{ '/docs/examples/screenshots/current/main-workspace-files-terminal.png' | relative_url }}" alt="YAAW main workspace screenshot with Dracula theme">
+    <img src="{{ '/docs/examples/screenshots/current/main-workspace-browser-preview.png' | relative_url }}" alt="YAAW main workspace screenshot with Browser preview">
     <div class="visual-caption">
       <span>Project and thread sidebar</span>
       <span>Agent terminal plus right-panel tools</span>
@@ -53,7 +55,11 @@ title: YAAW
     </div>
     <div class="feature">
       <strong>Configurable surfaces</strong>
-      <p>Appearance, fonts, key bindings, external-open targets, agents, tools, and ignore rules live in app-owned YAML.</p>
+      <p>General, Agents, Appearance, Keyboard Shortcuts, and Config File surfaces validate app-owned YAML before saving.</p>
+    </div>
+    <div class="feature">
+      <strong>System-native shell</strong>
+      <p>The app follows the macOS appearance by default and uses standard toolbar, sidebar, material, and split-view behavior.</p>
     </div>
   </div>
 </section>
@@ -98,16 +104,22 @@ title: YAAW
   </div>
   <div class="gallery">
     <figure>
-      <a href="{{ '/docs/examples/screenshots/current/main-workspace-files-terminal.png' | relative_url }}">
-        <img src="{{ '/docs/examples/screenshots/current/main-workspace-files-terminal.png' | relative_url }}" alt="YAAW file browser right panel">
+      <a href="{{ '/docs/examples/screenshots/current/main-workspace-browser-preview.png' | relative_url }}">
+        <img src="{{ '/docs/examples/screenshots/current/main-workspace-browser-preview.png' | relative_url }}" alt="YAAW workspace with browser preview">
       </a>
       <figcaption>Current workspace</figcaption>
     </figure>
     <figure>
-      <a href="{{ '/docs/examples/screenshots/right-panel-lazygit-mode-dracula.png' | relative_url }}">
-        <img src="{{ '/docs/examples/screenshots/right-panel-lazygit-mode-dracula.png' | relative_url }}" alt="YAAW lazygit right panel">
+      <a href="{{ '/docs/examples/screenshots/current/agents-settings-launch-defaults.png' | relative_url }}">
+        <img src="{{ '/docs/examples/screenshots/current/agents-settings-launch-defaults.png' | relative_url }}" alt="YAAW Agents Settings with command permissions and arguments">
       </a>
-      <figcaption>lazygit mode</figcaption>
+      <figcaption>Agents Settings</figcaption>
+    </figure>
+    <figure>
+      <a href="{{ '/docs/examples/screenshots/current/appearance-settings-theme-fonts.png' | relative_url }}">
+        <img src="{{ '/docs/examples/screenshots/current/appearance-settings-theme-fonts.png' | relative_url }}" alt="YAAW Appearance Settings with system theme and font controls">
+      </a>
+      <figcaption>Appearance Settings</figcaption>
     </figure>
   </div>
 </section>

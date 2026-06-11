@@ -10,9 +10,9 @@ YAAW expects you to bring the agent tools you already use, including their authe
 
 YAAW has no telemetry. Projects, threads, settings, indexes, activity previews, logs, and diagnostics stay on your device. If network traffic happens, it is between you and the agent CLI or CLI harness you chose to run.
 
-The app uses Dracula by default and supports built-in light, dark, and high-contrast themes across panels, terminals, file browsing, and editing surfaces.
+The app follows the macOS system appearance by default, pairing `macos-light` with `macos-dark`. Dracula remains a built-in dark theme and historical visual baseline, alongside other built-in light, dark, and high-contrast themes.
 
-Settings are stored in an app-owned YAML file. Use the title-bar gear to open Settings, change Appearance values, edit key bindings, inspect or edit the YAML file, save changes, reload from disk, revert unsaved edits, or open the YAML file externally.
+Settings are stored in an app-owned YAML file. Use the title-bar gear to open Settings for General, Agents, Appearance, Keyboard Shortcuts, and Config File sections. Settings validates changes before saving and does not write app metadata into project directories.
 
 ## Main Screen
 
@@ -24,7 +24,7 @@ The main screen has three areas:
 
 The **right tool panel** is the thread-scoped tools surface: project files, isolated WebKit browser previews, opened files in `nvim`/`vim`/`vi`, and Git workflows in `lazygit` or `git diff`. The swap control can move the right tool panel into the main area and move the agent CLI session terminal into the right-side area.
 
-![YAAW workspace showing a Codex thread, terminal, file browser, and collapsed bottom terminal](../examples/screenshots/current/main-workspace-files-terminal.png)
+![YAAW workspace showing a thread sidebar, agent terminal, Browser preview, and collapsed bottom terminal](../examples/screenshots/current/main-workspace-browser-preview.png)
 
 The sidebar nests thread history under each project. Project rows can be expanded or collapsed, pinned, reordered, and used to start a new thread directly in that project. The sidebar and right-side area can both be collapsed to keep the terminal-focused view clean. Every major panel can also be resized.
 
@@ -53,7 +53,7 @@ For CLIs with native start-name support, YAAW passes the requested name at launc
 
 ## Switch Threads
 
-Use the left sidebar to select a different thread. Expand a project row to see its active thread history, or use the Archived section at the bottom of the sidebar to inspect archived threads.
+Use the left sidebar to select a different thread. Expand a project row to see its active thread history, or use the combined Archived section at the bottom of the sidebar to inspect archived projects and archived threads.
 
 When a thread is selected:
 
@@ -69,6 +69,8 @@ Pinned threads appear above unpinned threads inside their project. Unpinned thre
 ## Organize Projects
 
 Pin important projects to keep them above unpinned projects. Drag project rows to move projects within the pinned or unpinned group. Project order, pin state, and expanded/collapsed state are app-owned metadata and do not write files into project directories.
+
+Archive a project when it should leave the active project list. Archived projects move to the combined Archived section with archived threads. The Global project cannot be archived.
 
 ## Use The Agent CLI Session Terminal
 
@@ -158,7 +160,9 @@ YAAW detects supported destinations from installed macOS apps and shows them in 
 
 Use the right-tool-panel new-tab menu and choose Web Browser to open a browser tab. Enter a URL in the address field to navigate inside the right tool panel. Browser rendering runs in a helper process so a renderer crash should show a recovery state without taking down YAAW.
 
-From Files mode, right-click a supported preview file and choose Open in Browser. Supported preview types include HTML, Markdown, SVG, PDF, common images, text, JSON, and XML. Markdown previews render as a GitHub-like HTML page with Mermaid fenced diagrams and relative images or links resolved from the Markdown file's directory. The default file-open action still opens `nvim`; Browser preview is an explicit context-menu action.
+From Files mode, right-click a supported preview file and choose Open in Browser. Supported preview types include HTML, Markdown, SVG, PDF, common images, text, JSON, and XML. Markdown previews render as a GitHub-like HTML page with Mermaid fenced diagrams and relative images or links resolved from the Markdown file's directory.
+
+The General Settings section controls whether Markdown and HTML row opens use Browser preview or the editor by default. The context menu still exposes explicit Browser and editor choices.
 
 ## Open A File In nvim
 
@@ -187,6 +191,10 @@ When a CLI terminal has focus, use `Cmd+V` to paste. Text follows the normal ter
 
 Current and historical screenshots live under `docs/examples/screenshots/`. Prefer `docs/examples/screenshots/current/` for screenshots that are meant to describe the current app, and treat older plan-specific screenshots as implementation evidence for that plan rather than as the canonical UI.
 
+- [Main workspace with Browser preview](../examples/screenshots/current/main-workspace-browser-preview.png)
+- [Agents Settings](../examples/screenshots/current/agents-settings-launch-defaults.png)
+- [Appearance Settings](../examples/screenshots/current/appearance-settings-theme-fonts.png)
+
 ## Resize Panels
 
 Drag panel dividers to resize the workspace.
@@ -204,7 +212,7 @@ Drag the right divider left to make the right-side area larger. It can grow acro
 
 Archive a thread when it is no longer part of the active project list.
 
-Archived threads move out of each project's active list but remain available from the single Archived section at the bottom of the sidebar. Archiving keeps the selected agent CLI and session identity so the thread can be resumed later.
+Archived threads move out of each project's active list but remain available from the combined Archived section at the bottom of the sidebar. Archiving keeps the selected agent CLI and session identity so the thread can be resumed later.
 
 Archived thread rows also expose `Rename Thread...` when the underlying CLI supports confirmable rename.
 
@@ -232,21 +240,25 @@ The generated YAML exposes the same complete action list under `keyboardShortcut
 
 ## Configure Settings
 
-Open the title-bar gear to navigate to the in-app YAML settings editor. By default, settings live at:
+Open the title-bar gear to use native Settings. By default, settings live at:
 
 ```text
 ~/Library/Application Support/YAAW/settings.yaml
 ```
 
-The generated YAML file includes comments showing current defaults and which fields are active now. Current active settings include theme selection, the complete key binding catalog, the default agent CLI, editor fallback order, external-open destination order, Git and diff commands, agent command names, fonts, and file indexing ignore rules.
+The generated YAML file includes comments showing current defaults and which fields are active now. Current active settings include theme selection, system light/dark pairing, the complete key binding catalog, the default agent CLI, per-agent command names, permission defaults, additional launch arguments, editor fallback order, external-open destination order, Git and diff commands, fonts, Markdown/HTML row-open behavior, and file indexing ignore rules.
+
+General Settings covers the default agent, Markdown/HTML row-open behavior, CLI option cache refresh, build information, and the global chats directory.
+
+Agents Settings lets each supported CLI family use a custom executable command, permission default, and additional launch arguments. Permission options are discovered from the CLI's `--help` output when available; YAAW keeps cached and fallback presets so Settings and thread creation can still work when a CLI is temporarily unavailable.
 
 Global chat settings are represented under `projects.globalChatsDirectory` and are also editable from Settings General. The default is `~/yaaw`; YAAW creates that directory when needed. Global chats stay available from the Global project row, but YAAW does not open or create one by default.
 
-Theme settings are represented under `theme.active`. Use the Settings Appearance picker or set one of the supported theme ids in YAML: `dracula`, `dark-2026`, `dark-plus`, `dark-modern`, `monokai`, `solarized-dark`, `light-2026`, `light-modern`, `light-plus`, `quiet-light`, `solarized-light`, `dark-high-contrast`, or `light-high-contrast`. Unknown values fall back to `dracula` and record a local diagnostic event. Custom theme palettes are placeholders for future expansion.
+Theme settings are represented under `theme.active`, `theme.light`, and `theme.dark`. The default `theme.active: system` follows the macOS appearance and uses the light/dark pairing. Use the Settings Appearance picker or set one of the supported theme ids in YAML: `system`, `macos-light`, `macos-dark`, `dracula`, `ghostty-default`, `dark-2026`, `dark-plus`, `dark-modern`, `monokai`, `solarized-dark`, `light-2026`, `light-modern`, `light-plus`, `quiet-light`, `solarized-light`, `dark-high-contrast`, or `light-high-contrast`. Unknown values fall back to `system` and record a local diagnostic event. Custom theme palettes are placeholders for future expansion.
 
 Icon settings are represented under `icons.fileBrowserPack`. Supported values are `material-file-icons` and `catppuccin-file-icons`; unknown values fall back to `material-file-icons` and record a local diagnostic event.
 
-Font settings are represented under `fonts`. Use `interfaceFamily` / `interfaceSize` for app chrome and navigation text, `editorFamily` / `editorSize` for the in-app YAML/editor-style text, and `terminalFamily` / `terminalSize` for embedded Ghostty terminal surfaces. `system` and `system-monospace` select native macOS fonts; other family values should match installed font family names. Leave `terminalFamily` empty to keep Ghostty's default terminal font family.
+Font settings are represented under `fonts`. Use `interfaceFamily` / `interfaceSize` for app chrome and navigation text, `editorFamily` / `editorSize` for the in-app YAML/editor-style text, `terminalFamily` / `terminalSize` for embedded Ghostty terminal surfaces, `fileBrowserFamily` / `fileBrowserSize` for file rows, and `ligatures` for editor and terminal text shaping. `system` and `system-monospace` select native macOS fonts; other family values should match installed font family names. Leave `terminalFamily` empty to keep Ghostty's default terminal font family.
 
 External-open settings are represented under `tools.externalOpen`. Set `default` to the preferred destination id and use `preferred` to control menu order. Supported ids are `vscode`, `vscode-insiders`, `sublime-text`, `zed`, `finder`, `terminal`, `ghostty`, `xcode`, and `webstorm`.
 

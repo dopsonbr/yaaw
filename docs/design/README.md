@@ -43,7 +43,7 @@ Reference for the default palette: [dracula/dracula-theme](https://github.com/dr
 
 ## App Shell
 
-The app shell is a native macOS window with split-view layout.
+The app shell is a native macOS window with split-view layout. Prefer standard macOS toolbar, sidebar, material, split-view, menu, symbol, and focus behavior over custom chrome. On current macOS releases, those standard controls provide the modern Liquid Glass-style surfaces where the system supports them; YAAW should not claim or implement a separate custom Liquid Glass skin.
 
 ```text
 +--------------------------------------------------------------------------------+
@@ -67,7 +67,7 @@ The shell has four resizeable regions:
 
 Each region should use native split-view handles. Collapsed regions become narrow icon rails instead of disappearing from the user's mental model.
 
-The title bar includes a settings gear. The gear navigates to a full content-route settings view with the app-owned YAML settings path, current effective defaults, an embedded YAML editor, Save/Reload/Revert actions, optional external opening, and a top-right Back button.
+The title bar includes a settings gear. The gear opens a native Settings window with General, Agents, Appearance, Keyboard Shortcuts, and Config File sections. The Config File section shows the app-owned YAML settings path, current effective defaults, an embedded YAML editor, Save/Reload/Revert actions, and optional external opening.
 
 ## Navigation Model
 
@@ -84,7 +84,7 @@ Project metadata should include:
 - Last opened timestamp.
 - Pin state.
 - Manual sort order.
-- Archived flag, if project archiving is later added.
+- Archived flag.
 
 ### Thread
 
@@ -106,7 +106,7 @@ Thread metadata should include:
 
 The thread display name should mirror the bound CLI session's reported name, title, or id. Closing and reopening a thread should resume the same stored CLI session identity.
 
-The left sidebar is the only required thread switcher for the MVP. It should use nested project rows: each project can expand to show active threads and an archived-thread disclosure, and each project row owns the new-thread action for that project. Pinned projects sort above unpinned projects, manual project reorder is scoped within pinned/unpinned groups, and pinned threads sort above recently opened unpinned threads.
+The left sidebar is the only required thread switcher for the MVP. It should use nested project rows: each project can expand to show active threads, each project row owns the new-thread action for that project, and the bottom of the sidebar has one combined Archived section for archived projects and archived threads. Pinned projects sort above unpinned projects, manual project reorder is scoped within pinned/unpinned groups, and pinned threads sort above recently opened unpinned threads.
 
 Thread rows also carry lightweight activity state. A thread can be `working`, `needsInput`, `complete`, or `inactive`, with the latest sanitized preview and unread flag stored separately from `AgentThread` so session identity and activity UI stay decoupled. Persist only the latest activity state per thread; on launch, downgrade `working` to `inactive` because live process progress cannot survive restart.
 
@@ -221,9 +221,10 @@ User-editable settings live in `~/Library/Application Support/YAAW/settings.yaml
 The YAML file is the source of truth for:
 
 - Keyboard shortcuts.
-- Built-in theme selection.
+- Built-in theme selection and system light/dark pairing.
 - Default agent CLI.
-- Interface, editor, and embedded terminal font families and sizes.
+- Per-agent command names, permission defaults, and additional launch arguments.
+- Interface, editor, embedded terminal, and file-browser font families and sizes.
 - Editor fallback order.
 - Git and diff tool commands.
 - Agent executable command names.
