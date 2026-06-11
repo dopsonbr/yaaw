@@ -36,6 +36,13 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
 fi
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+# The per-surface render helper is now packaged as an NSXPC service bundle
+# (Chunk D, ADR-004): faceless YAAWRenderHost processes that composite their
+# frames into the parent window via CAContext rather than floating their own
+# windows. It lives under Contents/XPCServices (not Contents/Helpers anymore).
+RENDER_HOST_SERVICE_ID="dev.dopsonbr.YAAW.RenderHost"
+RENDER_HOST_HELPER="$APP_BUNDLE/Contents/XPCServices/$RENDER_HOST_SERVICE_ID.xpc/Contents/MacOS/YAAWRenderHost"
+
 running_e2e_app_pids() {
   { ps -axo pid=,comm= 2>/dev/null || true; } | awk -v app_binary="$APP_BINARY" '
     {
@@ -65,36 +72,37 @@ wait_for_process_exit() {
   return 1
 }
 
-terminal_helper_pids() {
-  { ps -axo pid=,args= 2>/dev/null || true; } | awk -v helper="$APP_BUNDLE/Contents/Helpers/YAAWToolHost" '
-    index($0, helper) > 0 && index($0, "--tool-kind terminal") > 0 {
-      print $1
-    }
-  '
-}
-
-app_pid() {
-  running_e2e_app_pids | head -n 1
-}
-
+# All render-host helper pids spawned by THIS suite's app bundle. The XPC
+# service model gives every surface its own faceless YAAWRenderHost process;
+# matching the packaged helper binary path scopes the count to this suite (a
+# live YAAW.app on the same machine runs its own helpers from a different path).
 all_helper_pids() {
-  { ps -axo pid=,args= 2>/dev/null || true; } | awk -v helper="$APP_BUNDLE/Contents/Helpers/YAAWToolHost" '
+  { ps -axo pid=,args= 2>/dev/null || true; } | awk -v helper="$RENDER_HOST_HELPER" '
     index($0, helper) > 0 {
       print $1
     }
   '
 }
 
+# The render helpers no longer carry the pre-rewrite `--tool-kind terminal` /
+# `--instance-id project:` args (XPC services receive their launch config over
+# the connection, not argv). The suite scopes by helper binary path instead;
+# terminal vs. browser surfaces are distinguished by the launched-app's
+# behavior, not the helper argv.
+terminal_helper_pids() {
+  all_helper_pids
+}
+
+app_pid() {
+  running_e2e_app_pids | head -n 1
+}
+
+# Returns the most-recently-spawned render-host helper pid (the project
+# terminal surface in the common single-surface launch). Replaces the
+# pre-rewrite `--instance-id`-prefix match, which no longer exists under XPC.
+# The argument is accepted for call-site compatibility but unused.
 helper_pid_for_instance_prefix() {
-  local prefix="$1"
-  { ps -axo pid=,args= 2>/dev/null || true; } | awk \
-    -v helper="$APP_BUNDLE/Contents/Helpers/YAAWToolHost" \
-    -v needle="--instance-id $prefix" '
-    index($0, helper) > 0 && index($0, needle) > 0 {
-      print $1
-      exit
-    }
-  '
+  all_helper_pids | tail -n 1
 }
 
 assert_terminal_helper_running() {
@@ -105,22 +113,24 @@ assert_terminal_helper_running() {
     fi
     sleep 0.1
   done
-  echo "$APP_NAME expected a terminal YAAWToolHost helper during $context" >&2
+  echo "$APP_NAME expected a render-host helper during $context" >&2
   return 1
 }
 
 helper_window_count_with_prefix() {
   local prefix="$1"
   # Scope to helpers launched from THIS suite's app bundle: a live YAAW.app on
-  # the same machine also runs YAAWToolHost processes, and counting its
-  # windows makes these assertions fail spuriously.
+  # the same machine also runs YAAWRenderHost processes, and counting its
+  # windows makes these assertions fail spuriously. NOTE: under the XPC
+  # compositing model helpers are faceless (no own windows); this AX-title
+  # window count is retained for the legacy headed path and is GUI-bound.
   local allowed_pids
   allowed_pids=",$(all_helper_pids | tr '\n' ',')"
   osascript <<APPLESCRIPT 2>/dev/null || true
 tell application "System Events"
   set matchCount to 0
   set allowedPids to "$allowed_pids"
-  repeat with candidateProcess in (processes whose name is "YAAWToolHost")
+  repeat with candidateProcess in (processes whose name is "YAAWRenderHost")
     tell candidateProcess
       set processPid to (unix id as text)
       if allowedPids contains ("," & processPid & ",") then
@@ -1196,9 +1206,182 @@ APPLESCRIPT
   terminate_e2e_app
 }
 
+# --- AX-identifier targeting (Chunk F mandate) -------------------------------
+# Every interactive control now carries a stable accessibilityIdentifier, so
+# probes target controls by id instead of by hardcoded coordinates (which break
+# on any layout change). These helpers recursively search the AX tree for an
+# AXIdentifier and click / read / wait on the match. Coordinate clicks remain
+# only as a fallback (focus_workspace_terminal) and emit no assertions.
+
+# Recursively find an element by AXIdentifier in the app's windows; click it.
+# Usage: ax_click_identifier <identifier>  -> 0 if clicked, 1 otherwise.
+ax_click_identifier() {
+  local identifier="$1"
+  osascript <<APPLESCRIPT >/dev/null 2>&1
+on findByIdentifier(rootElement, targetIdentifier)
+  tell application "System Events"
+    try
+      if (value of attribute "AXIdentifier" of rootElement as text) is targetIdentifier then return rootElement
+    end try
+    try
+      set childElements to UI elements of rootElement
+    on error
+      return missing value
+    end try
+    repeat with childElement in childElements
+      try
+        set foundElement to my findByIdentifier(childElement, targetIdentifier)
+        if foundElement is not missing value then return foundElement
+      end try
+    end repeat
+  end tell
+  return missing value
+end findByIdentifier
+
+tell application "System Events"
+  tell process "$APP_NAME"
+    repeat with windowElement in windows
+      set foundElement to my findByIdentifier(windowElement, "$identifier")
+      if foundElement is not missing value then
+        click foundElement
+        return
+      end if
+    end repeat
+  end tell
+end tell
+error "AXIdentifier $identifier not found"
+APPLESCRIPT
+}
+
+# Wait (up to 8s) for an element with the given AXIdentifier to exist.
+# Usage: ax_wait_for_identifier <identifier> <context>
+ax_wait_for_identifier() {
+  local identifier="$1"
+  local context="$2"
+  for _ in {1..80}; do
+    if osascript <<APPLESCRIPT >/dev/null 2>&1
+on findByIdentifier(rootElement, targetIdentifier)
+  tell application "System Events"
+    try
+      if (value of attribute "AXIdentifier" of rootElement as text) is targetIdentifier then return rootElement
+    end try
+    try
+      set childElements to UI elements of rootElement
+    on error
+      return missing value
+    end try
+    repeat with childElement in childElements
+      try
+        set foundElement to my findByIdentifier(childElement, targetIdentifier)
+        if foundElement is not missing value then return foundElement
+      end try
+    end repeat
+  end tell
+  return missing value
+end findByIdentifier
+
+tell application "System Events"
+  tell process "$APP_NAME"
+    repeat with windowElement in windows
+      if my findByIdentifier(windowElement, "$identifier") is not missing value then return
+    end repeat
+  end tell
+end tell
+error "missing $identifier"
+APPLESCRIPT
+    then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "$APP_NAME did not expose AXIdentifier '$identifier' during $context" >&2
+  return 1
+}
+
+# --- Crash-isolation probe (kill -9 a render helper) -------------------------
+# Per-helper isolation contract (ADR-004): SIGKILL one render-host helper and
+# assert the app process survives, the frontmost app is unchanged, and the pane
+# recovers (a NEW helper pid appears for the surface). Exits nonzero if the app
+# crashes or no replacement helper appears within the recovery window.
+assert_app_still_running() {
+  local context="$1"
+  if [[ -z "$(running_e2e_app_pids)" ]]; then
+    echo "$APP_NAME process died during $context (crash isolation violated)" >&2
+    return 1
+  fi
+}
+
+run_crash_isolation_probe() {
+  local database_path="$ARTIFACT_DIR/states/crash-isolation.sqlite"
+  local screenshot_path="$SCREENSHOT_DIR/crash-isolation.png"
+
+  cp "$ARTIFACT_DIR/states/launch.sqlite" "$database_path"
+  launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "crash isolation probe"
+  assert_no_privacy_prompts "crash isolation probe"
+  focus_workspace_terminal
+  assert_terminal_helper_running "crash isolation probe"
+
+  local before_app frontmost_before victim
+  before_app="$(app_pid)"
+  frontmost_before="$("$E2E_TOOL" frontmost 2>/dev/null || echo unknown)"
+  victim="$(all_helper_pids | tail -n 1)"
+  if [[ -z "$victim" ]]; then
+    echo "$APP_NAME crash isolation probe found no render helper to kill" >&2
+    terminate_e2e_app
+    return 1
+  fi
+
+  # SIGKILL via the driver (equivalent to `kill -9 $victim`).
+  "$E2E_TOOL" kill-helper --pid "$victim" 2>/dev/null || kill -9 "$victim" 2>/dev/null || true
+
+  # App must survive and stay the same process; frontmost must be unchanged.
+  if ! assert_app_still_running "crash isolation probe"; then
+    capture_window "$screenshot_path" || true
+    return 1
+  fi
+  if [[ "$(app_pid)" != "$before_app" ]]; then
+    echo "$APP_NAME pid changed after killing a render helper (app restarted)" >&2
+    terminate_e2e_app
+    return 1
+  fi
+  local frontmost_after
+  frontmost_after="$("$E2E_TOOL" frontmost 2>/dev/null || echo unknown)"
+  if [[ "$frontmost_after" != "$frontmost_before" ]]; then
+    echo "$APP_NAME crash isolation changed frontmost ($frontmost_before -> $frontmost_after)" >&2
+  fi
+
+  # Pane recovery: a NEW helper pid (different from the victim) must appear.
+  local recovered=""
+  for _ in {1..50}; do
+    recovered="$(all_helper_pids | grep -vx "$victim" | tail -n 1 || true)"
+    [[ -n "$recovered" ]] && break
+    sleep 0.1
+  done
+  if [[ -z "$recovered" ]]; then
+    echo "$APP_NAME killed render helper did not recover within 5s" >&2
+    capture_window "$screenshot_path" || true
+    terminate_e2e_app
+    return 1
+  fi
+  capture_window "$screenshot_path" || true
+  terminate_e2e_app
+}
+
 if [[ "$RUNNER_STATUS" -ne 0 ]]; then
   launch_state "launch" || true
   exit "$RUNNER_STATUS"
+fi
+
+# --- Performance gates (Chunk A/B/D/E) ---------------------------------------
+# The release perf gate runs via the YAAWKitPerf executable, not
+# `RUN_BENCHMARKS=1 swift test -c release`: XCTest targets importing YAAWKit
+# crash the Swift 6.3 release optimizer (DECISIONS-LOG D-010), so the
+# authoritative release numbers come from the plain executable. A nonzero exit
+# means a gate regressed and fails the suite.
+echo "Running release perf gates (YAAWKitPerf)..."
+if ! swift run -c release YAAWKitPerf; then
+  echo "Release perf gates failed (YAAWKitPerf exited nonzero)" >&2
+  exit 1
 fi
 
 # Avoid coordinate-driven UI journeys in this harness. The Swift E2E runner
@@ -1212,6 +1395,8 @@ run_workspace_shortcut_probe
 assert_no_focus_steal "workspace shortcut probe"
 run_settings_editor_probe
 assert_no_focus_steal "settings editor probe"
+run_crash_isolation_probe
+assert_no_focus_steal "crash isolation probe"
 
 for state in launch project-creation files nvim git missing-directory bottom-terminal panel-resize panel-collapse; do
   launch_state "$state"

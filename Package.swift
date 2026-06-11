@@ -91,6 +91,17 @@ let package = Package(
             path: "src/RenderHost",
             swiftSettings: swift6
         ),
+        // The headless E2E driver/runner. Drives the five stores through the full
+        // no-mock journey + writes the visual-state databases the launched app
+        // screenshots (headless durable-state assertions, verified in Chunk G),
+        // and provides the PID-targeted CGEvent / ScreenCaptureKit / crash-isolation
+        // driver subcommands scripts/test-e2e.sh runs against the signed app.
+        .executableTarget(
+            name: "YAAWE2E",
+            dependencies: ["YAAWKit", "YAAWRenderProtocol"],
+            path: "src/E2E",
+            swiftSettings: swift6
+        ),
         .testTarget(
             name: "YAAWRenderProtocolTests",
             dependencies: ["YAAWRenderProtocol"],
