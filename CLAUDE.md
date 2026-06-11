@@ -44,55 +44,75 @@ YAAW_BUILD_CONFIGURATION=release script/build_and_run.sh
 ```
 
 This script stamps the bundle with the current git short SHA (`YAAWBuildCommit`
-in Info.plist, surfaced in About/Settings), copies the vendored Ghostty
-framework from `Vendor/`, and ad-hoc codesigns. It SIGTERMs any already-running
-instance from *any* install path first — see "Single-instance" below.
+in Info.plist, surfaced in About/Settings), packages `YAAWRenderHost` as an XPC
+service bundle (`Contents/XPCServices/dev.dopsonbr.YAAW.RenderHost.xpc`), and
+ad-hoc codesigns. libghostty is **statically linked** (`libghostty.a` from
+`GhosttyKit.xcframework`), so the helper is self-contained and no Ghostty
+framework is bundled. It SIGTERMs any already-running instance from *any* install
+path first — see "Single-instance" below.
 
 ## Architecture
 
-SwiftUI owns layout; AppKit is used for terminal embedding, focus, split views,
-and window control. Four SwiftPM products (see `Package.swift`):
+> **This branch (`rewrite/option-b`) is the first-principles rewrite.** It is
+> complete and verified headlessly (builds debug+release, 327 tests, tightened
+> lint, the app launches); the live-GUI compositing/appearance/E2E run is the
+> remaining owner finish-line. See `docs/plans/rewrite/STATUS.md` for the full
+> picture and `docs/plans/rewrite/DECISIONS-LOG.md` / `DEFERRED-ISSUES.md`.
 
-- **`YAAWKit`** (`src/`, minus the app/host/test/e2e dirs) — the library holding
-  nearly all logic: `Core`, `Projects`, `Threads`, `AgentCLI`, `Terminal`,
-  `FileBrowser`, `Persistence`, `Theme`, `Layout`, `RightPanel`, `IsolatedTools`,
-  `Diagnostics`, `MarkdownPreview`, `Icons`, `Fonts`. Links `sqlite3`.
-- **`YAAW`** (`src/App/`) — thin SwiftUI entrypoint and root composition
-  (`YAAWApp.swift`, `RootView.swift`, `Settings/`).
-- **`YAAWToolHost`** (`src/ToolHost/`, `src/ToolHostSupport/`) — the isolated
-  tool helper executable (see below).
-- **`YAAWE2E`** (`src/E2E/`) — the headless E2E driver/runner.
+SwiftUI owns layout; AppKit is used for terminal embedding, focus, split views,
+and window control. Five SwiftPM targets (see `Package.swift`):
+
+- **`YAAWRenderProtocol`** (`src/RenderProtocol/`) — the pure-Swift XPC seam:
+  typed Codable message envelopes (`RenderMessage`/`RenderEvent`), the `@objc`
+  XPC service/client protocols, version negotiation, and the
+  `IsolatedTerminalLaunch`/`Rendering`/`Transition` value types. **No Ghostty.**
+- **`YAAWKit`** (`src/Kit/`) — the library holding nearly all logic: domain
+  model (`Projects`/`Threads`/`Layout`/`RightPanel`/`Theme`/`Icons`/`Fonts`/
+  `MarkdownPreview`/`Diagnostics`/`Core`), actor services (`Persistence`
+  SQLiteYAAWStore, `FileBrowser` FileIndexActor, `AgentCLI` SessionBindingActor),
+  the proven `Terminal` stack, and the five `@MainActor @Observable` stores +
+  `AppEnvironment` (`Stores/`). Links `sqlite3`. **No Ghostty.**
+- **`YAAW`** (`src/App/`) — thin SwiftUI feature views (one store each),
+  `RenderHostClient` (the XPC client + `RenderSurfaceManaging` impl),
+  `TerminalSurfaceHostView` (CALayerHost compositing), `YAAWApp`, `Settings/`.
+- **`YAAWRenderHost`** (`src/RenderHost/`) — the headless per-surface render
+  helper (the only Ghostty-linking target; see below).
+- **`YAAWE2E`** (`src/E2E/`) — the headless E2E driver/runner. (`YAAWKitPerf`,
+  `src/Perf/`, is the release perf-gate executable.)
 
 ### Central model
 
-`AppModel` (`src/Core/AppModel.swift`) is the single large `ObservableObject`
-(`@unchecked Sendable`) holding all `@Published` app state: projects, threads,
-selection, per-thread right-panel modes/states, layout, file-browser state,
-configuration. A **project** is a named local directory; a **thread** is one
-agent CLI session bound permanently to one CLI family. Closing/reopening a thread
-resumes the same bound session via stored session identity (`AgentCLI/`,
-`Threads/`).
+`AppModel` is **gone**, decomposed into five `@MainActor @Observable` stores
+(`src/Kit/Stores/`): **WorkspaceStore** (projects/threads/selection/nav/
+session-linking), **LayoutStore**, **ActivityStore** (status/unread/notifications/
+file-browser), **SettingsStore** (config/appearance/theme), **RightPanelStore**
+(modes/tabs/per-thread UI state). They are wired by `AppEnvironment` +
+`AppStores.make()` (constructor injection) and talk to actor services over
+`async`/`AsyncStream`; **Task cancellation replaces the old generation counters**.
+A **project** is a named local directory; a **thread** is one agent CLI session
+bound permanently to one CLI family, resumed from stored session identity.
 
-### Isolated tool helper (the key non-obvious piece)
+### Render helper (the key non-obvious piece)
 
-Each Browser preview and each `nvim`/`lazygit`/terminal surface runs in a
-**separate `YAAWToolHost` child process**, not in-process. The parent
-(`src/App/IsolatedToolRuntime.swift`) and helper communicate over stdin/stdout
-using JSON `IsolatedToolEnvelope` messages (`src/IsolatedTools/`,
-**protocol version 2**; parent and child are always built in lockstep). The
-helper runs with `NSApp.setActivationPolicy(.accessory)` and **floats its window
-over the parent window** rather than rendering into a shared view — this is why
-overlapping/stale instances cause visual garble, and why the app is strict about
-single-instance behavior. Keep terminal, persistence, indexing, theme, and UI
-layout concerns separated.
+Each terminal/browser surface runs in a **separate `YAAWRenderHost` process** (per
+surface), not in-process — this is the **per-panel crash-isolation hard
+requirement**: a libghostty crash kills one helper, not the app. The app
+(`src/App/RenderHostClient.swift`) and helper communicate over **`NSXPCConnection`
+with typed Codable envelopes** (`YAAWRenderProtocol`) — no NDJSON, no base64. The
+helper renders into a `CAMetalLayer` wrapped in a **`CAContext`** and publishes its
+`contextID`; the app composites it natively in-pane via **`CALayerHost`** (ADR-004),
+so there are **no overlay windows, no viewport polling, no z-order repair**. Helper
+death is recoverable (relaunch + viewport replay + CLI session resume). Ghostty
+types are confined to `YAAWRenderHost`.
 
 ### Persistence & config
 
-Durable state is SQLite (`Persistence/SQLiteYAAWStore.swift`, in-memory variant
-for tests). User settings are YAML (Yams) at
-`~/Library/Application Support/YAAW/settings.yaml`, edited via the in-app Config
-File settings pane. File-browser index uses a shared SQLite cache keyed by
-directory + git identity (`FileBrowser/FileIndexCache.swift`).
+Durable state is SQLite behind the **`SQLiteYAAWStore` actor** (`src/Kit/Persistence/`,
+`InMemoryYAAWStore` actor for tests) — UPSERT save + prepared-statement cache,
+migration ladder at **v18**, WAL. User settings are YAML (Yams) at
+`~/Library/Application Support/YAAW/settings.yaml` (now with a `schemaVersion` +
+migration hook). File-browser index uses a shared SQLite cache keyed by directory
++ git identity, behind the **`FileIndexActor`**.
 
 ### Single-instance behavior (subtle)
 
@@ -121,8 +141,12 @@ callbacks — **put startup work in `YAAWApp.init`, not delegate callbacks.**
   reconciled configs (`.swift-format`, `.swiftlint.yml`). Force-unwrap/try/cast
   and `trailing_comma`/`opening_brace`/`line_length` are disabled in swiftlint
   because swift-format owns them. Always run `scripts/format.sh` before
-  committing. `file_length` hard error is 3000 lines; `cyclomatic_complexity`
-  error 20; `function_body_length` error 350.
+  committing. **Tightened in the rewrite:** `file_length` error 800;
+  `cyclomatic_complexity` error 12; `function_body_length` error 120;
+  `type_body_length` error 400. `.swift-format-public` enforces public-API docs
+  on `YAAWKit`/`YAAWRenderProtocol` (run via `YAAW_LINT_DOCS=1 scripts/lint.sh`).
+  Swift 6 strict concurrency `complete` on every target; zero `@unchecked
+  Sendable` except documented proven primitives.
 - **Tests are behavior-first.** Prefer E2E over internals tests; do not assert
   private functions or framework internals (`docs/requirements/testing-requirements.md`,
   `docs/standards/testing/e2e.md`).
