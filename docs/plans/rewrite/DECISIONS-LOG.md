@@ -145,6 +145,39 @@ strict concurrency ✓ (zero `@unchecked Sendable`), tightened lint green (docs
 report-only per D-007). Remaining contracts are defined at each chunk's head per
 D-008.
 
+## Chunk D — RenderHost + compositing
+
+> **[D-013] Keep `@unchecked Sendable` on the 5 proven terminal primitives** — *(Chunk D-part-1, 2026-06-11)*
+> **Question I'd have asked:** The DoD says "zero `@unchecked Sendable`", but the
+> plan also says "KEEP verbatim" the terminal stack, which is `@unchecked
+> Sendable`. Rewrite them to actors, or keep the escape hatch?
+> **Decision:** **Keep `@unchecked Sendable` verbatim** on `TerminalBackpressureGate`,
+> `AgentTerminalProcess`, `AgentTerminalOutputPump`, `AgentTerminalCaptureWriter`,
+> and `AgentTerminalOperationDriver`. Each is a battle-tested lock-based concurrency
+> primitive (NSCondition/NSLock/serial GCD queue) where manual synchronization the
+> compiler can't verify is the *correct, idiomatic* pattern. `TerminalBackpressureGate.waitUntilReadable()`
+> is a synchronous blocking wait by design — it cannot be an actor (actors don't
+> block). Converting these would change their semantics and risk the lossless-PTY
+> guarantee. **Why this is consistent with the DoD:** the "zero `@unchecked Sendable`"
+> goal targets the god-objects' escape hatches; the master plan explicitly carves
+> these out with "KEEP verbatim". They are the ONLY `@unchecked Sendable` in
+> production, each carries a one-line justification comment, and they're directly
+> covered by behavior tests (TerminalBackpressureGateTests, TerminalDriverTests).
+> The thin `AgentTerminalProcessDriver` wrapper was made plain `Sendable` (holds
+> only an immutable Sendable operation driver), trimming the count from 6 to 5.
+
+> **[D-014] Protocol carries both compositing paths** — *(Chunk D-part-1, 2026-06-11)*
+> **Question I'd have asked:** ADR-004 chose CAContext/CALayerHost (Candidate 1)
+> but the Chunk-D analysis spec leaned IOSurface (Candidate 2). Which does the
+> wire protocol commit to?
+> **Decision:** Neither — `RenderEvent.frameReady(generation:, ioSurfaceRef:UInt64?,
+> contextID:UInt32)` carries **both**, so the helper can publish via CAContext
+> (ADR-004 primary) and fall back to IOSurface at runtime without a protocol
+> change. **Why:** The compositing choice can only be validated by running the
+> GUI (the spike), which this session can't do headlessly; keeping both in the
+> envelope means D-part-2 can implement C1 first and switch to C2 if C1 doesn't
+> composite cleanly on libghostty-spm 1.2.4, with no re-freeze of the wire format.
+
 ## Chunk A — PersistenceActor
 
 > **[D-009] Store concurrency model: async protocol + actor stores** — *(Chunk A, 2026-06-11)*
