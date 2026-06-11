@@ -18,9 +18,7 @@ disabled_rules:
   - closure_parameter_position
   # swift-format enforces 100-char lines on real code; long lines in embedded string literals are intentional
   - line_length
-  # file_length covers size concerns; project has intentionally large types (AppModel, RootView, test classes)
-  - type_body_length
-  # Intentional design: DraculaTheme factory (14 params), GhosttyTerminalSurfaceView init (9 params)
+  # Intentional design: DraculaTheme factory (14 params, ported verbatim for appearance parity)
   - function_parameter_count
   - trailing_whitespace
 
@@ -35,17 +33,24 @@ opt_in_rules:
   - explicit_init
   - closure_spacing
 
+# Tightened thresholds for the rewrite (master plan "Tightened standards"). The
+# god-objects that needed `swiftlint:disable file_length/cyclomatic/function_body`
+# are gone; new code must hold these without suppressions.
 file_length:
-  warning: 500    # informational; large files will warn but not block CI
-  error: 3000     # hard ceiling — largest current file is RootView.swift at 2,864 lines
+  warning: 400
+  error: 800
 
 cyclomatic_complexity:
-  warning: 10
-  error: 20
+  warning: 8
+  error: 12
 
 function_body_length:
-  warning: 60
-  error: 350      # above YAAWE2E.swift's 310-line E2E orchestrator function
+  warning: 50
+  error: 120
+
+type_body_length:
+  warning: 250
+  error: 400
 
 identifier_name:
   excluded:

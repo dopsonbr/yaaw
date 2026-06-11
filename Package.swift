@@ -2,15 +2,21 @@
 
 import PackageDescription
 
+// Every target builds in Swift 6 language mode, which makes strict concurrency
+// checking `complete` and turns data races + unsafe `Sendable` use into compile
+// errors. Warnings-as-errors is applied as a CI gate (see scripts/check.sh),
+// not baked in here (rewrite DECISIONS-LOG D-006).
+let swift6: [SwiftSetting] = [
+    .swiftLanguageMode(.v6)
+]
+
 let package = Package(
     name: "YAAW",
     platforms: [
         .macOS(.v26)
     ],
     products: [
-        .executable(name: "YAAW", targets: ["YAAW"]),
-        .executable(name: "YAAWToolHost", targets: ["YAAWToolHost"]),
-        .executable(name: "YAAWE2E", targets: ["YAAWE2E"]),
+        .library(name: "YAAWRenderProtocol", targets: ["YAAWRenderProtocol"]),
         .library(name: "YAAWKit", targets: ["YAAWKit"]),
     ],
     dependencies: [
@@ -18,94 +24,48 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
     ],
     targets: [
-        .executableTarget(
-            name: "YAAW",
-            dependencies: [
-                "YAAWKit"
-            ],
-            path: "src/App",
-            resources: [
-                .process("Resources")
-            ]
-        ),
-        .executableTarget(
-            name: "YAAWToolHost",
-            dependencies: [
-                "YAAWKit",
-                "YAAWToolHostSupport",
-                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
-            ],
-            path: "src/ToolHost",
-            sources: ["main.swift"]
-        ),
+        // Pure-Swift seam shared by the app and the render helper: Codable XPC
+        // message envelopes, the @objc XPC service/client protocols, and the
+        // rendering-config DTOs. No Ghostty types, no AppKit-heavy deps.
         .target(
-            name: "YAAWToolHostSupport",
-            dependencies: [
-                "YAAWKit",
-                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
-            ],
-            path: "src/ToolHostSupport"
+            name: "YAAWRenderProtocol",
+            path: "src/RenderProtocol",
+            swiftSettings: swift6
         ),
+        // The library: domain model, actor services (Persistence / FileIndex /
+        // SessionBinding), config, theme tokens, RenderHostClient. No Ghostty.
         .target(
             name: "YAAWKit",
             dependencies: [
-                .product(name: "Yams", package: "Yams")
+                "YAAWRenderProtocol",
+                .product(name: "Yams", package: "Yams"),
             ],
-            path: "src",
-            exclude: [
-                "AGENTS.md",
-                "App",
-                "E2E",
-                "Tests",
-                "ToolHost",
-                "ToolHostSupport",
-            ],
-            sources: [
-                "AgentCLI",
-                "Core",
-                "Diagnostics",
-                "FileBrowser",
-                "Fonts/BundledFontCatalog.swift",
-                "Icons",
-                "IsolatedTools",
-                "Layout",
-                "MarkdownPreview",
-                "Persistence",
-                "Projects",
-                "RightPanel",
-                "Terminal",
-                "Theme",
-                "Threads",
-            ],
+            path: "src/Kit",
             resources: [
                 .copy("Fonts/Resources/JetBrainsMono")
             ],
+            swiftSettings: swift6,
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
         ),
         .testTarget(
-            name: "YAAWKitTests",
-            dependencies: ["YAAWKit"],
-            path: "src/Tests/YAAWKitTests"
+            name: "YAAWRenderProtocolTests",
+            dependencies: ["YAAWRenderProtocol"],
+            path: "src/Tests/RenderProtocolTests",
+            swiftSettings: swift6
         ),
         .testTarget(
-            name: "YAAWToolHostSupportTests",
-            dependencies: [
-                "YAAWToolHostSupport",
-                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
-            ],
-            path: "src/Tests/YAAWToolHostSupportTests"
+            name: "YAAWKitTests",
+            dependencies: ["YAAWKit", "YAAWRenderProtocol"],
+            path: "src/Tests/YAAWKitTests",
+            swiftSettings: swift6
         ),
         .testTarget(
             name: "YAAWKitBenchmarks",
             dependencies: ["YAAWKit"],
-            path: "src/Tests/YAAWKitBenchmarks"
-        ),
-        .executableTarget(
-            name: "YAAWE2E",
-            dependencies: ["YAAWKit"],
-            path: "src/E2E"
+            path: "src/Tests/YAAWKitBenchmarks",
+            swiftSettings: swift6
         ),
     ]
 )
