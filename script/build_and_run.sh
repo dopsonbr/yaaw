@@ -17,7 +17,12 @@ set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 MODE="${1:-run}"
 BUILD_PRODUCT="YAAW"
-HELPER_PRODUCT="YAAWToolHost"
+HELPER_PRODUCT="YAAWRenderHost"
+# The render helper is packaged as an XPC service bundle so the app reaches it
+# via NSXPCConnection(serviceName:). NOTE (DEFERRED-ISSUES #15): the helper hosts
+# AppKit/Ghostty, so the GUI-capable launchd XPC-service model vs. a child-process
+# + anonymous NSXPCListener endpoint still needs runtime verification on the GUI.
+RENDER_HOST_SERVICE_ID="dev.dopsonbr.YAAW.RenderHost"
 case "$VARIANT" in
   production)
     APP_NAME="YAAW"
@@ -51,10 +56,12 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
-APP_HELPERS="$APP_CONTENTS/Helpers"
+APP_XPC_SERVICES="$APP_CONTENTS/XPCServices"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
-HELPER_BINARY="$APP_HELPERS/$HELPER_PRODUCT"
+RENDER_HOST_XPC="$APP_XPC_SERVICES/$RENDER_HOST_SERVICE_ID.xpc"
+RENDER_HOST_XPC_CONTENTS="$RENDER_HOST_XPC/Contents"
+HELPER_BINARY="$RENDER_HOST_XPC_CONTENTS/MacOS/$HELPER_PRODUCT"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON="$ROOT_DIR/resources/YAAW.icns"
 
@@ -93,11 +100,45 @@ else
 fi
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_HELPERS" "$APP_RESOURCES"
+mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES" \
+  "$RENDER_HOST_XPC_CONTENTS/MacOS" "$RENDER_HOST_XPC_CONTENTS/Frameworks"
 cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$BUILD_HELPER" "$HELPER_BINARY"
 chmod +x "$APP_BINARY"
 chmod +x "$HELPER_BINARY"
+
+# Info.plist for the render-host XPC service. CFBundleIdentifier MUST equal the
+# serviceName RenderHostClient connects with. The helper hosts AppKit/Ghostty, so
+# the service runs an NSApplication run loop (_NSApplicationMain).
+cat >"$RENDER_HOST_XPC_CONTENTS/Info.plist" <<XPCPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>$HELPER_PRODUCT</string>
+  <key>CFBundleIdentifier</key>
+  <string>$RENDER_HOST_SERVICE_ID</string>
+  <key>CFBundleName</key>
+  <string>$HELPER_PRODUCT</string>
+  <key>CFBundlePackageType</key>
+  <string>XPC!</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$APP_VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>$BUILD_NUMBER</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>$MIN_SYSTEM_VERSION</string>
+  <key>XPCService</key>
+  <dict>
+    <key>ServiceType</key>
+    <string>Application</string>
+    <key>RunLoopType</key>
+    <string>_NSApplicationMain</string>
+  </dict>
+</dict>
+</plist>
+XPCPLIST
 
 while IFS= read -r RESOURCE_BUNDLE; do
   [[ -n "$RESOURCE_BUNDLE" ]] || continue
@@ -108,17 +149,29 @@ if [[ -f "$APP_ICON" ]]; then
   cp "$APP_ICON" "$APP_RESOURCES/YAAW.icns"
 fi
 
+# Ghostty is linked ONLY by the render helper, so it lives in the XPC service's
+# own Frameworks; the helper binary resolves it via an @executable_path/../Frameworks
+# rpath. (A copy is also placed in the app Frameworks as a belt-and-suspenders for
+# any dyld fallback.) Confining Ghostty to YAAWRenderHost matches the dependency
+# boundary: Ghostty types never enter YAAWKit/YAAWRenderProtocol/the app.
+RENDER_HOST_XPC_FRAMEWORKS="$RENDER_HOST_XPC_CONTENTS/Frameworks"
 VENDORED_GHOSTTY="$ROOT_DIR/Vendor/Ghostty"
 if [[ -d "$VENDORED_GHOSTTY" ]]; then
   GHOSTTY_FRAMEWORK="$(find "$VENDORED_GHOSTTY" -path '*/Ghostty.framework' -type d | head -1 || true)"
   if [[ -n "$GHOSTTY_FRAMEWORK" ]]; then
+    cp -R "$GHOSTTY_FRAMEWORK" "$RENDER_HOST_XPC_FRAMEWORKS/"
     cp -R "$GHOSTTY_FRAMEWORK" "$APP_FRAMEWORKS/"
   fi
 
   GHOSTTY_DYLIB="$(find "$VENDORED_GHOSTTY" -name 'libghostty.dylib' -type f | head -1 || true)"
   if [[ -n "$GHOSTTY_DYLIB" ]]; then
+    cp "$GHOSTTY_DYLIB" "$RENDER_HOST_XPC_FRAMEWORKS/"
     cp "$GHOSTTY_DYLIB" "$APP_FRAMEWORKS/"
   fi
+
+  # Ensure the helper can locate its bundled Ghostty at runtime.
+  /usr/bin/install_name_tool -add_rpath "@executable_path/../Frameworks" \
+    "$HELPER_BINARY" >/dev/null 2>&1 || true
 fi
 
 cat >"$INFO_PLIST" <<PLIST
@@ -162,7 +215,7 @@ open_app() {
   # (mixed/stale terminal content and window slivers after panel changes).
   # The trailing anchor keeps YAAW from matching YAAW-E2E and vice versa.
   # SIGTERM gives the old app a clean shutdown, which also tears down its
-  # YAAWToolHost helpers.
+  # YAAWRenderHost helpers.
   /usr/bin/pkill -f "/Contents/MacOS/$APP_NAME\$" 2>/dev/null || true
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     /usr/bin/pgrep -f "/Contents/MacOS/$APP_NAME\$" >/dev/null 2>&1 || break

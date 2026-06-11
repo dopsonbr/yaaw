@@ -178,6 +178,21 @@ D-008.
 > envelope means D-part-2 can implement C1 first and switch to C2 if C1 doesn't
 > composite cleanly on libghostty-spm 1.2.4, with no re-freeze of the wire format.
 
+> **[D-015] App launch verified; libghostty is static** — *(Integration, 2026-06-11)*
+> **Finding:** `script/build_and_run.sh --build-only` stages a self-contained,
+> codesign-valid `YAAW.app` (XPC service bundle for the helper + fonts bundle).
+> `otool -L` shows the helper has **zero non-system dynamic deps** — `libghostty`
+> is statically linked (`libghostty.a` from `GhosttyKit.xcframework`), so no
+> Ghostty framework needs bundling (the empty `Vendor/Ghostty` framework-copy is a
+> harmless no-op; this also means the old build's framework-copy was vestigial).
+> A bounded liveness probe (`open -n`, 5 s, then SIGTERM) confirmed **the app
+> launches and survives startup with no crash** — validating AppEnvironment
+> construction, store loading, the SQLite open + migrate-to-v18 on first run, font
+> registration, and SwiftUI scene setup at runtime. The render helper is not
+> spawned until a terminal surface activates (needs project→thread→CLI), so the
+> XPC connection + CAContext compositing remain GUI-verification-bound
+> (DEFERRED-ISSUES #12/#15).
+
 ## Chunk A — PersistenceActor
 
 > **[D-009] Store concurrency model: async protocol + actor stores** — *(Chunk A, 2026-06-11)*
