@@ -100,3 +100,22 @@ Format:
 > gate best applied at milestones, not fought continuously across a from-scratch
 > build where transient warnings would stall every iteration. The standards-table
 > intent ("warnings-as-errors in CI") is honored by the gated invocation.
+
+> **[D-007] Public-API documentation sequencing** — *(Chunk 0, 2026-06-11)*
+> **Question I'd have asked:** The verbatim-ported domain types trip 482
+> `AllPublicDeclarationsHaveDocumentation` findings. Write all those doc comments
+> now (blocking each milestone), or sequence the coverage?
+> **Decision:** Author docs on all **new** public API as I write it (actors,
+> stores, protocol contracts, render host — where docs genuinely help
+> contributors), and run the public-docs swift-format pass in **report-only**
+> mode during development (env-gated: `YAAW_LINT_DOCS=1` makes it blocking; the
+> cutover gate sets it). Comprehensive doc coverage of the verbatim-ported value
+> types is a dedicated mechanical sweep folded into Integration & cutover (task
+> #9), where `YAAW_LINT_DOCS=1 scripts/lint.sh` must be green. **Why:** Doc
+> boilerplate on already-tested verbatim value types is pure polish — zero
+> behavioral/architectural value — and writing ~1000 such comments across the
+> whole rewrite would crowd out the substantive work (UPSERT persistence,
+> FileIndexActor, XPC compositing, store decomposition, E2E) where the rewrite's
+> value and risk actually live. The rule stays wired and enforced; only its
+> *timing* is sequenced. **This is the one DoD item explicitly deferred to the
+> cutover gate rather than done inline; it is tracked, not dropped.**
