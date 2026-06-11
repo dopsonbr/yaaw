@@ -59,6 +59,21 @@ let package = Package(
             path: "src/Perf",
             swiftSettings: swift6
         ),
+        // The headless per-surface render helper. Hosts the libghostty emulator
+        // + PTY (terminal) or a WKWebView (browser) in a faceless XPC service,
+        // composites natively via CAContext/CALayerHost (ADR-004), and publishes
+        // typed RenderEvents back to the app. The only target that links Ghostty;
+        // those types never leak into YAAWKit or the protocol seam.
+        .executableTarget(
+            name: "YAAWRenderHost",
+            dependencies: [
+                "YAAWRenderProtocol",
+                "YAAWKit",
+                .product(name: "GhosttyTerminal", package: "libghostty-spm"),
+            ],
+            path: "src/RenderHost",
+            swiftSettings: swift6
+        ),
         .testTarget(
             name: "YAAWRenderProtocolTests",
             dependencies: ["YAAWRenderProtocol"],
