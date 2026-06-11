@@ -21,6 +21,27 @@ enum BenchmarkSupport {
     static func removeDirectory(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
     }
+
+    /// Median wall-clock time of a synchronous `body` across `iterations` runs.
+    static func median(iterations: Int, _ body: () -> Void) -> Duration {
+        let clock = ContinuousClock()
+        var samples: [Duration] = []
+        for _ in 0..<iterations {
+            let start = clock.now
+            body()
+            samples.append(clock.now - start)
+        }
+        samples.sort()
+        return samples[samples.count / 2]
+    }
+
+    /// Prints a `BENCH …` line in milliseconds for a measured `duration`.
+    static func report(_ label: String, _ duration: Duration) {
+        let millis =
+            Double(duration.components.attoseconds) / 1e15
+            + Double(duration.components.seconds) * 1_000
+        print("BENCH \(label): \(String(format: "%.3f", millis)) ms (median)")
+    }
 }
 
 // NOTE: this base class deliberately does NOT override `defaultMetrics` with

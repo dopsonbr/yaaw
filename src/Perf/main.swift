@@ -96,11 +96,98 @@ func runPersistenceGates() async throws -> [Gate] {
     return gates
 }
 
+/// Median wall-clock milliseconds of a synchronous `body` across `iterations`.
+func medianSync(iterations: Int, _ body: () -> Void) -> Double {
+    let clock = ContinuousClock()
+    var samples: [Duration] = []
+    for _ in 0..<iterations {
+        let start = clock.now
+        body()
+        samples.append(clock.now - start)
+    }
+    samples.sort()
+    let sample = samples[samples.count / 2]
+    return Double(sample.components.seconds) * 1_000
+        + Double(sample.components.attoseconds) / 1e15
+}
+
+func synthesizeFileIndexEntries(count: Int) -> [FileBrowserEntry] {
+    let suffixes = ["swift", "ts", "go", "py", "md", "json", "yaml", "rs", "c", "h"]
+    let topDirs = ["src", "tests", "docs", "scripts", "vendor", "scenarios", "internal", "pkg"]
+    let midDirs = ["core", "view", "model", "render", "store", "util", "feature", "api"]
+    var entries: [FileBrowserEntry] = []
+    entries.reserveCapacity(count + topDirs.count + topDirs.count * midDirs.count)
+    for top in topDirs {
+        entries.append(FileBrowserEntry(relativePath: top, isDirectory: true))
+        for mid in midDirs {
+            entries.append(FileBrowserEntry(relativePath: "\(top)/\(mid)", isDirectory: true))
+        }
+    }
+    for index in 0..<count {
+        let top = topDirs[index % topDirs.count]
+        let mid = midDirs[(index / topDirs.count) % midDirs.count]
+        let leaf = "module_\(index)_scenario.\(suffixes[index % suffixes.count])"
+        entries.append(
+            FileBrowserEntry(relativePath: "\(top)/\(mid)/\(leaf)", isDirectory: false))
+    }
+    return entries
+}
+
+func makeFileIndexFixture(files: Int, directories: Int) throws -> URL {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("YAAWPerfIndex-\(UUID().uuidString)", isDirectory: true)
+    let fileManager = FileManager.default
+    let directoryURLs: [URL] = try (0..<directories).map { idx in
+        let dir = root.appendingPathComponent("dir_\(idx)/sub_\(idx % 50)", isDirectory: true)
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+    for index in 0..<files {
+        let dir = directoryURLs[index % max(directoryURLs.count, 1)]
+        try Data().write(to: dir.appendingPathComponent("file_\(index).txt"))
+    }
+    let nodeModules = root.appendingPathComponent("node_modules/pkg", isDirectory: true)
+    try fileManager.createDirectory(at: nodeModules, withIntermediateDirectories: true)
+    for index in 0..<1_000 {
+        try Data().write(to: nodeModules.appendingPathComponent("m_\(index).js"))
+    }
+    return root
+}
+
+/// Release-sensitive file-index perf gates (Chunk B). Pure-algorithm gates use a
+/// synchronous median; the cold-index gate enumerates a real 50k-file fixture.
+func runFileIndexGates() throws -> [Gate] {
+    var gates: [Gate] = []
+
+    let entries50k = synthesizeFileIndexEntries(count: 50_000)
+    let fuzzyCappedMs = medianSync(iterations: 10) {
+        _ = FuzzyFileMatcher.rankedResult(entries50k, query: "swi", limit: 1_000)
+    }
+    gates.append(Gate(label: "fuzzy 50k 3-char cap", value: fuzzyCappedMs, target: 400))
+
+    let treeMs = medianSync(iterations: 10) {
+        _ = FileBrowserTreeBuilder.roots(from: entries50k)
+    }
+    gates.append(Gate(label: "tree builder 50k", value: treeMs, target: 61))
+
+    let fixtureRoot = try makeFileIndexFixture(files: 50_000, directories: 2_000)
+    defer { try? FileManager.default.removeItem(at: fixtureRoot) }
+    let coldIndexMs = medianSync(iterations: 3) {
+        _ = try? BackgroundFileIndexer.buildIndex(
+            threadID: UUID(), root: fixtureRoot,
+            ignoreRules: YAAWConfiguration.defaultIgnoreRules)
+    }
+    gates.append(Gate(label: "cold index 50k", value: coldIndexMs, target: 1_500))
+
+    return gates
+}
+
 @main
 struct PerfMain {
     static func main() async {
         do {
-            let gates = try await runPersistenceGates()
+            var gates = try await runPersistenceGates()
+            gates.append(contentsOf: try runFileIndexGates())
             var failures: [String] = []
             print("=== YAAW perf gates (\(perfConfigurationName)) ===")
             for gate in gates {
