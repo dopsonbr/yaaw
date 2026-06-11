@@ -51,7 +51,8 @@ struct ConfigFileSettingsView: View {
                     Label("Save", systemImage: "square.and.arrow.down")
                 }
                 .configuredKeyboardShortcut(
-                    model.currentConfiguration.shortcut(for: .saveSettings))
+                    model.currentConfiguration.shortcut(for: .saveSettings)
+                )
                 .disabled(!model.hasUnsavedChanges)
                 .accessibilityIdentifier("settings-save-button")
 
@@ -61,7 +62,8 @@ struct ConfigFileSettingsView: View {
                     Label("Reload", systemImage: IconRole.reload.icon.systemSymbolName)
                 }
                 .configuredKeyboardShortcut(
-                    model.currentConfiguration.shortcut(for: .reloadSettings))
+                    model.currentConfiguration.shortcut(for: .reloadSettings)
+                )
                 .accessibilityIdentifier("settings-reload-button")
 
                 Button {
@@ -70,7 +72,8 @@ struct ConfigFileSettingsView: View {
                     Label("Revert", systemImage: "arrow.uturn.backward")
                 }
                 .configuredKeyboardShortcut(
-                    model.currentConfiguration.shortcut(for: .revertSettings))
+                    model.currentConfiguration.shortcut(for: .revertSettings)
+                )
                 .disabled(!model.hasUnsavedChanges)
                 .accessibilityIdentifier("settings-revert-button")
 

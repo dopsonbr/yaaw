@@ -46,8 +46,10 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .general:
             ["default agent", "markdown", "html", "cli options", "global chats", "directory"]
         case .agents:
-            ["command", "permissions", "arguments", "launch", "codex", "claude", "opencode",
-                "copilot"]
+            [
+                "command", "permissions", "arguments", "launch", "codex", "claude", "opencode",
+                "copilot",
+            ]
         case .appearance:
             ["theme", "font", "interface", "editor", "terminal", "file browser", "size", "color"]
         case .keyboardShortcuts:
