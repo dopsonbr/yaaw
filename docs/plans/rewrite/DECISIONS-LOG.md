@@ -411,3 +411,51 @@ real GUI (the `YAAWE2E` `screenshot`/`send-key`/`send-click`/`frontmost`/
 > checked between yields and overshoots (a 5 s budget measured 15 s on order-up) —
 > the entry cap is the dependable lever. Breadth-first / depth-limited indexing is
 > a possible future refinement (DEFERRED).
+
+> **[D-024] Reconcile the E2E suite to the IOSurface model; keyboard probe is headed-only** — *(GUI run, 2026-06-12)*
+> **Question I'd have asked:** The full headless E2E suite assumed the overlay-window
+> model (visible per-surface helper windows, keystrokes posted to the helper). How
+> should it verify the IOSurface architecture, and can typed-input be tested headless?
+> **Findings (running the suite end-to-end):** (1) Helper windows are faceless now,
+> so the visible/hidden helper-window assertions are meaningless — replaced by
+> helper-*process* + durable-SQL-state + composited-pixel (region) checks. (2) The
+> launched E2E app ignored the suite's sandbox env (`*_CAPTURE_DIRECTORY` / `*_PATH`),
+> so capture logs + fake-CLI resolution went to the wrong place — fixed in
+> AppBootstrap. (3) Synthetic `postToPid` mouse events hit-test against the real
+> cursor position, so `send-click` now warps the cursor. (4) **Typed input** routes
+> through the app's focused pane (the faceless helper has no key window, unlike the
+> old overlay helper), so it needs the app frontmost — which the headless
+> no-focus-steal contract forbids. **Decision:** the typed-text keyboard probe runs
+> in **`--headed` mode only** (the suite's documented OS-key-routing path); the
+> headless default verifies everything else (rendering, durable state, command
+> shortcuts — which are menu key-equivalents that route to a backgrounded app —
+> crash isolation, 15 visual states, no-focus-steal). **Result:** the full headless
+> suite passes (exit 0). **Why headed-only is correct, not a cop-out:** typing into
+> a terminal is inherently a focused interaction; the plan already carved out
+> `--headed` for exactly this fidelity.
+
+> **[D-025] Auto-focus the agent terminal; verified keyboard input works** — *(2026-06-12)*
+> **Finding:** typed input never reached the terminal because the pane only became
+> first responder on a pointer click (and synthetic clicks were unreliable). The
+> faceless helper can't receive keys directly (it's the old model). **Decision:**
+> the agent (project) terminal pane auto-focuses on appear (claiming first responder
+> only when nothing else holds it, so it never steals the file-search field's
+> focus) + overrides `acceptsFirstMouse`. **Verified end-to-end** (with the app
+> frontmost): pasted text + Enter reach the PTY (the keyboard capture log records
+> `YAAW_ENTER_RECEIVED`). This is also a real UX win — type into a thread's terminal
+> immediately, no click required.
+
+> **[D-026] GUI verification scope & two surfaced issues** — *(2026-06-12)*
+> With screen + accessibility, verified on real runs: terminal/nvim/lazygit/bottom
+> surfaces composite via shared IOSurface (crisp, in-pane, helper invisible, no
+> focus steal); idle CPU ~0.3% (was 99%/15% before the session-catalog + frame-
+> decoupling fixes); order-up (38 GB / ~1.58M files) loads immediately and its
+> ~157k-entry index completes bounded; the full headless E2E suite passes incl. the
+> crash-isolation probe; appearance matches the committed baselines
+> (`docs/examples/screenshots/current/*` — same titlebar/sidebar/materials/layout).
+> **Two issues surfaced and deferred (not regressions from this work):** an
+> intermittent empty Files tree (DEFERRED #25 — entries are cached/in-state but the
+> SwiftUI tree doesn't render them on some launches; a pre-existing Chunk-F view bug
+> the first GUI run exposed) and the browser-pane *visual* render unconfirmed
+> (DEFERRED #26 — implemented + wire-verified, but driving the preview was blocked by
+> #25 + this environment's multi-display/active-meeting focus contention).
