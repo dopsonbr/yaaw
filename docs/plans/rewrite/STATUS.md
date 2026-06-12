@@ -24,7 +24,7 @@ and is **complete and verified as far as a headless (no-GUI) environment allows*
   sign-off; see DECISIONS-LOG D-016/D-018 and ADR-004.)
 
 Everything that can be verified without a screen **is green**: the full package
-builds (debug **and** release), **327 headless tests pass (0 failures)**, both
+builds (debug **and** release), **329 headless tests pass (0 failures)**, both
 linters pass at the tightened thresholds (0 serious), the release perf gate runs,
 and **the signed `.app` launches and survives startup**.
 
@@ -34,7 +34,7 @@ and **the signed `.app` launches and survives startup**.
 |---|---|
 | `swift build` (full package: YAAW app, YAAWRenderHost helper, YAAWKit, YAAWRenderProtocol, YAAWKitPerf) | ✓ Build complete |
 | `swift build -c release --target YAAWKit` / `YAAWRenderProtocol` | ✓ complete (the `isolated deinit` release-optimizer crash was found and fixed — D-011) |
-| `swift test` | ✓ **327 passed, 0 failures**, 24 benchmark-skips |
+| `swift test` | ✓ **329 passed, 0 failures**, 24 benchmark-skips |
 | `swiftlint` (warn 400/err 800 file_length, 8/12 cyclomatic, 50/120 function, 250/400 type) | ✓ 0 serious |
 | `swift-format --strict` | ✓ clean |
 | `swift run -c release YAAWKitPerf` | ✓ runs (numbers below) |
@@ -114,6 +114,19 @@ The GUI-bound acceptance that was previously blocked is now done:
   native unified-compact titlebar, liquid-glass sidebar, theme/fonts, layout.
 - **Warnings-as-errors (D-006):** the whole package builds warnings-clean under
   `-warnings-as-errors` (`SWIFT_STRICT=1 scripts/build.sh`). Gate satisfied.
+- **Files tree (#25) — FIXED + verified (D-028):** the intermittent empty tree was
+  the file-index `Task` gated on `!Task.isCancelled` (an FSEvents burst cancelled it
+  after setting `isIndexing`, never publishing) — re-gated on the thread still being
+  selected. The `files` E2E screenshot now renders the full tree. The fix exposed
+  and fixed a latent use-after-free (`ActivityStore.workspace` `unowned` → strong;
+  cycle-free, the back-ref is `weak`); the full suite now passes deterministically
+  across repeated runs.
+- **Browser pane (#22/#26) — WIRED + verified (D-029):** the app side was never wired
+  to launch a browser surface; completed end-to-end (`.browser` role + `["load", url]`
+  launch + `toolKind=.browser` payload + pane embeds the role-generic surface host).
+  Verified on a real run: index.html composites in-pane. Verification caught + fixed a
+  vertical-flip bug (the page rendered upside down — a CPU flip on top of the already
+  geometry-flipped `isFlipped` pane).
 
 ## What remains (the owner's finish-line)
 
@@ -122,20 +135,25 @@ the package builds warnings-clean under `SWIFT_STRICT=1`) and the public-API doc
 sweep (D-007 — `YAAW_LINT_DOCS=1 scripts/lint.sh` passes, 0
 `AllPublicDeclarationsHaveDocumentation` findings across the 43 ported files).
 
-What's left:
+The two GUI bugs surfaced by the first full GUI run are now **both resolved**:
+**#25** (empty Files tree — fixed at the file-index task layer, D-028, verified) and
+**#26/#22** (browser-pane — app-side wiring completed + vertical-flip fixed, D-029,
+verified rendering in-pane). **#27** (launch reconcile starving the index) is
+addressed (`.background` priority).
 
-1. **Two GUI bugs surfaced by the first full GUI run** (not regressions from the
-   rewrite-tuning work, both tracked):
-   - **DEFERRED #25 — intermittent empty Files tree** (SwiftUI view-lifecycle:
-     entries are cached + in `state`, but the tree doesn't render them on some
-     launches; rendered fine in other captures). Likely a pre-existing Chunk-F
-     view bug. Highest-priority follow-up.
-   - **DEFERRED #26 — browser-pane visual unconfirmed** (#22 implemented +
-     IOSurface wire verified; driving the preview was blocked by #25 + this
-     environment's multi-display/active-meeting focus contention).
-3. **Minor deferreds:** lint splits (#1–#3, warnings only), the lazy/lower-priority
-   reconcile to avoid the launch CPU burst (#27), session-capture-as-XPC-event (#8),
-   AppModel→store test re-homing (#10/#19), breadth-first indexing (#24).
+What's left — **minor tracked deferreds only**, none blocking a cutover:
+
+- **Lint splits (#1–#3):** swiftlint *warnings* only (type/file/function length on
+  verbatim-ported types), all under the error thresholds; cosmetic.
+- **Test re-homing (#10/#19):** ~16 AppModel-era assertions to re-express against the
+  stores / `RenderHostClient`; the underlying behaviors are already covered
+  (FileIndexActor tests, the `RenderSurfaceManaging` fake, the crash-isolation probe).
+- **Session-capture-as-XPC-event (#8):** today's polled capture works; pushing it as a
+  `RenderEvent` is a Chunk-D/E refinement.
+- **Indexing (#24):** accepted by design — order-up is under the 200k cap (never
+  truncates); the bounded walk + SQLite cache make it correct and fast on reopen.
+- **Persistence perf (#4/#6):** hardware-relative misses on synthetic 10k/50k extremes;
+  the hot single-edit / O(1) paths crush target. Informational (monitored) gates.
 
 ### Reproducing the working terminal locally
 
@@ -150,7 +168,7 @@ YAAW_DATABASE_PATH=<a state .sqlite with a selected thread + bottom terminal> \
 
 ```sh
 cd /Users/BXD5017/github/dopsonbr/yaaw-rewrite
-scripts/check.sh                 # build + 327 tests
+scripts/check.sh                 # build + 329 tests
 scripts/lint.sh                  # tightened, 0 serious
 swift run -c release YAAWKitPerf # perf gate
 script/build_and_run.sh          # launch the real app, then exercise a terminal pane
@@ -158,7 +176,9 @@ scripts/test-e2e.sh              # full acceptance (needs GUI + accessibility)
 ```
 
 The architecture, all business logic, persistence, indexing, session binding,
-the store decomposition, the typed XPC seam, and the render-helper structure are
-done, tested, and committed across 12 one-concern commits. The remaining work is
-exercising and tuning the live GUI — which is exactly the part a headless agent
-cannot see.
+the store decomposition, the typed XPC seam, the render-helper structure, and now
+the **terminal + browser pane compositing** are done, tested, and committed across a
+series of one-concern commits. The Files tree (#25) and browser pane (#26/#22) — the
+two GUI items the first full GUI run surfaced — are fixed and verified on real runs.
+What remains is the minor tracked deferreds above; the branch is at DoD parity for a
+clean cutover.

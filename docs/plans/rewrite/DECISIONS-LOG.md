@@ -471,3 +471,54 @@ real GUI (the `YAAWE2E` `screenshot`/`send-key`/`send-click`/`frontmost`/
 > clean. The remaining open items are the two GUI bugs surfaced by the first full GUI
 > run (DEFERRED #25 Files-tree, #26 browser-visual) plus minor tracked deferreds — the
 > branch is otherwise at DoD parity for a clean cutover.
+
+> **[D-028] Fixed the intermittent empty Files tree (#25) + a use-after-free it exposed** — *(2026-06-12)*
+> Root cause of #25 was not a SwiftUI view bug (the original guess) but the
+> file-index refresh `Task`: it was gated on `!Task.isCancelled`. An FSEvents burst
+> on the watched root rapidly re-triggers `refreshFileBrowser`, cancelling the prior
+> task — which had already set `isIndexing = true` and then bailed *before* calling
+> `finishFileBrowserRefresh`, leaving the panel stuck "Indexing…" with no rows
+> (entries were in the SQLite cache the whole time). Fix: gate publish/complete on
+> the thread still being **selected** (`workspace.selectedThreadID == threadID`), not
+> on cancellation — the `FileIndexActor` coalesces the walk so every awaiter gets the
+> same fresh result, and publishing it whenever the thread is still selected is
+> idempotent; real cancellation is caught as `CancellationError` and returns. Verified
+> on a real run (tree renders 316 items, spinner clears).
+> **Use-after-free it exposed:** making the task run to completion (instead of bailing
+> on cancellation) surfaced a latent lifetime bug — `ActivityStore` held `workspace`
+> `unowned`, but `[weak self]` promotes `self` (ActivityStore) to strong for the task
+> body, so a teardown mid-`await` (every test harness) could free `WorkspaceStore`
+> while the task pins ActivityStore alive, aborting on the post-`await`
+> `self.workspace` read (signal 6, "object already destroyed"). `WorkspaceStore`'s
+> back-reference to `ActivityStore` is `weak`, so holding `workspace` **strongly** is
+> cycle-free and guarantees it outlives `self`. Full suite now passes deterministically
+> across repeated runs. Also dropped #27's load-reconcile to `.background` priority so
+> the launch catalog parse never starves the first file-index refresh.
+
+> **[D-029] Wired the Browser pane end-to-end + fixed a snapshot vertical flip (#22/#26)** — *(2026-06-12)*
+> The helper-side `BrowserHostController` (WKWebView → `takeSnapshot` → shared
+> IOSurface) was built and the IOSurface wire was proven, but the **app side never
+> launched a browser surface**: `RenderSurfaceRole` had no `.browser` case,
+> `selectedRightPanelRole` returned `nil` for `.browser`, and the pane was a
+> placeholder shell (its own comment said the surface was "wired at integration").
+> Completed the wire: a `.browser(threadID:tabID:)` role; `WorkspaceStore.browserLaunch`
+> building `command: ["load", urlString]`; `LaunchPayload(browser:)` stamping
+> `toolKind=.browser` so the exporter routes to `BrowserHostController`;
+> `RenderHostClient` choosing the browser-vs-terminal payload by role; and the pane
+> embedding the role-generic `TerminalSurfaceHostView` (frame compositing already
+> flows through the shared `frameReady → frameSink → pane-layer` path). Two unit
+> tests lock in that the launch carries `["load", url]` (and is `nil` for an empty
+> tab); a seeded `browser-preview` E2E visual state guards the chrome.
+> **Verification surfaced and fixed a real bug:** the first real render showed the
+> page **upside down** (#22 had warned "vertically flipped"). `BrowserHostController`
+> applied a CPU flip (`translateBy` + `scaleBy(y: -1)`), but `TerminalPaneView` is
+> `isFlipped` so its hosting layer is already geometry-flipped (the terminal's
+> Ghostty surface relies on that) — the CPU flip was a *second* flip. Removed it; the
+> page now renders right-side up. **Verification method (non-obvious):** browser tabs
+> are spec-mandated transient (`persistenceSnapshot`/`restoredState` rebuild default
+> tabs — `testSQLiteDoesNotRestoreTransientRightPanel{Nvim,Browser}Tabs`), so a
+> seed→reload E2E *cannot* carry a URL into the loaded app; it always shows the empty
+> "Enter a URL" chrome (correct behavior). Compositing was therefore verified the
+> real-user way: launch the seeded `browser-preview` state headed, paste a file URL
+> into the auto-focused address bar + Return, screenshot — index.html composites
+> in-pane, upright. (The same run also re-confirmed terminal compositing.)
