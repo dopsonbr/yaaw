@@ -1,4 +1,5 @@
 import AppKit
+import CoreVideo
 import Darwin
 import Foundation
 import IOSurface
@@ -12,10 +13,16 @@ import YAAWRenderProtocol
 /// initial URL arrives in the launch `command` as `["load", urlString]`;
 /// subsequent navigation (back/forward/reload/stop/load) arrives as text
 /// commands over the `input` channel (the typed `RenderMessage` set has no
-/// browser-specific cases, so nav reuses the binary-safe input envelope). The
-/// web view renders into a headless, off-screen window whose layer is hosted
-/// remotely (ADR-004); title / loading / nav state are forwarded as
-/// ``RenderEvent``s.
+/// browser-specific cases, so nav reuses the binary-safe input envelope).
+///
+/// **Compositing (ADR-004 Candidate 2):** unlike Ghostty's `IOSurfaceLayer`, a
+/// `WKWebView` renders in WebKit's own process behind a remote layer, so its
+/// backing layer never exposes a plain `IOSurface` we can share. Instead the
+/// helper rasterizes the web view with `takeSnapshot` and draws each snapshot
+/// into a shared `IOSurface` it owns, which the app displays as its pane layer's
+/// `contents` — same wire path as the terminal. Snapshots are taken on
+/// navigation/load + resize and on a modest timer (so async content and scrolling
+/// reach the pane) and skipped when nothing changed.
 @MainActor
 final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate {
     private let webView: WKWebView
@@ -23,9 +30,19 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
     private let reply: RenderEventReply
 
     private var frameGeneration: UInt64 = 0
-    private var lastSurfaceSeed: UInt32 = .max
     private var currentURLString: String?
     private var isLoadingMarkdownPreview = false
+
+    /// The shared surface the app composites, plus its pixel size + scale.
+    private var surface: IOSurface?
+    private var surfaceWidth = 0
+    private var surfaceHeight = 0
+    private var contentsScale: CGFloat = 2.0
+    /// Coalesces overlapping `takeSnapshot` calls (the previous one is async).
+    private var snapshotInFlight = false
+    /// Drives periodic snapshots so async page rendering / scrolling reaches the
+    /// pane. WebKit owns the actual rendering; this just re-rasterizes.
+    private var snapshotTimer: DispatchSourceTimer?
 
     init(launch: LaunchPayload, reply: RenderEventReply) {
         self.reply = reply
@@ -48,9 +65,15 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         super.init()
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        window.orderOut(nil)
 
-        publishContextIfNeeded()
+        // The window must be ordered in for WebKit to render into a backing store
+        // (an ordered-out web view snapshots blank). It stays invisible by sitting
+        // below the desktop window level (the wallpaper occludes it) and is never
+        // key (no focus steal) — exactly like the terminal helper window.
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
+        window.orderFrontRegardless()
+
+        startSnapshotPump()
 
         // Initial URL: `["load", urlString]`.
         if launch.command.first == "load", launch.command.count > 1 {
@@ -58,18 +81,19 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         }
     }
 
-    /// Resizes the off-screen web view and re-asserts the frame handshake.
+    /// Resizes the off-screen web view, (re)allocates the shared surface at the new
+    /// pixel size, and re-rasterizes.
     func resize(_ payload: ResizePayload) {
         if payload.widthPixels > 0, payload.heightPixels > 0, payload.contentsScale > 0 {
-            let pointWidth = CGFloat(payload.widthPixels) / CGFloat(payload.contentsScale)
-            let pointHeight = CGFloat(payload.heightPixels) / CGFloat(payload.contentsScale)
+            contentsScale = CGFloat(payload.contentsScale)
+            let pointWidth = CGFloat(payload.widthPixels) / contentsScale
+            let pointHeight = CGFloat(payload.heightPixels) / contentsScale
             let frame = NSRect(x: 0, y: 0, width: max(1, pointWidth), height: max(1, pointHeight))
             window.setFrame(frame, display: false, animate: false)
             webView.frame = NSRect(origin: .zero, size: frame.size)
+            ensureSurface(width: Int(payload.widthPixels), height: Int(payload.heightPixels))
         }
-        applyContentsScale(payload.contentsScale)
-        publishContextIfNeeded()
-        publishFrame()
+        captureSnapshot()
     }
 
     /// Browser navigation arrives as a UTF-8 command over the input channel.
@@ -94,6 +118,8 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
     }
 
     func terminate() {
+        snapshotTimer?.cancel()
+        snapshotTimer = nil
         webView.stopLoading()
         window.orderOut(nil)
         window.contentView = nil
@@ -152,6 +178,7 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
 
     func webView(_: WKWebView, didStartProvisionalNavigation _: WKNavigation!) {
         publishState()
+        captureSnapshot()
     }
 
     func webView(
@@ -179,6 +206,9 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         }
         publishState()
         reply.send(.title(webView.title ?? ""))
+        // Page just committed its first paint; rasterize a few times to catch
+        // images / async layout settling (the steady pump continues afterward).
+        captureSnapshot()
     }
 
     func webViewWebContentProcessDidTerminate(_: WKWebView) {
@@ -204,29 +234,82 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         return nil
     }
 
-    // MARK: - Compositing (shared IOSurface — ADR-004 Candidate 2)
-    //
-    // NOTE: WKWebView hosts its content in WebKit's own process via a remote
-    // layer, so its backing layer does not expose a plain IOSurface the way the
-    // Ghostty IOSurfaceLayer does. Browser-pane compositing therefore needs its
-    // own mechanism (e.g. periodic WKWebView.takeSnapshot into an IOSurface) and
-    // is tracked separately; this keeps the structure parallel to the terminal.
+    // MARK: - Compositing (snapshot -> shared IOSurface — ADR-004 Candidate 2)
 
-    private func publishContextIfNeeded() { publishFrame() }
-
-    private func applyContentsScale(_ contentsScale: Double) {
-        guard contentsScale > 0, let layer = webView.layer else { return }
-        layer.contentsScale = CGFloat(contentsScale)
+    private func startSnapshotPump() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.2, repeating: .milliseconds(250))
+        timer.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.captureSnapshot() }
+        }
+        timer.resume()
+        snapshotTimer = timer
     }
 
-    private func publishFrame() {
-        guard let contents = webView.layer?.contents else { return }
-        let cf = contents as CFTypeRef
-        guard CFGetTypeID(cf) == IOSurfaceGetTypeID() else { return }
-        let surface = cf as! IOSurface
-        let seed = IOSurfaceGetSeed(surface)
-        guard seed != lastSurfaceSeed else { return }
-        lastSurfaceSeed = seed
+    /// (Re)allocates the shared BGRA surface when the pane pixel size changes.
+    private func ensureSurface(width: Int, height: Int) {
+        guard width > 0, height > 0 else { return }
+        guard width != surfaceWidth || height != surfaceHeight || surface == nil else { return }
+        surface = IOSurface(properties: [
+            .width: width,
+            .height: height,
+            .bytesPerElement: 4,
+            .bytesPerRow: width * 4,
+            .pixelFormat: Int(kCVPixelFormatType_32BGRA),
+        ])
+        surfaceWidth = width
+        surfaceHeight = height
+    }
+
+    /// Rasterizes the web view and draws it into the shared surface, then notifies
+    /// the app. Coalesced: a snapshot already in flight skips this tick.
+    private func captureSnapshot() {
+        guard !snapshotInFlight, surface != nil, webView.bounds.width > 0,
+            webView.bounds.height > 0
+        else { return }
+        snapshotInFlight = true
+        let configuration = WKSnapshotConfiguration()
+        configuration.rect = webView.bounds
+        configuration.afterScreenUpdates = false
+        webView.takeSnapshot(with: configuration) { [weak self] image, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.snapshotInFlight = false
+                guard let image else { return }
+                self.draw(image: image)
+            }
+        }
+    }
+
+    /// Draws `image` into the shared surface (vertically flipped: a snapshot is
+    /// top-left origin, a `CGContext` is bottom-left) and publishes the frame.
+    private func draw(image: NSImage) {
+        guard let surface else { return }
+        var proposed = CGRect(x: 0, y: 0, width: surfaceWidth, height: surfaceHeight)
+        guard let cgImage = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil)
+        else { return }
+        IOSurfaceLock(surface, [], nil)
+        defer { IOSurfaceUnlock(surface, [], nil) }
+        guard
+            let context = CGContext(
+                data: IOSurfaceGetBaseAddress(surface),
+                width: surfaceWidth,
+                height: surfaceHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: IOSurfaceGetBytesPerRow(surface),
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                    | CGBitmapInfo.byteOrder32Little.rawValue
+            )
+        else { return }
+        let rect = CGRect(x: 0, y: 0, width: surfaceWidth, height: surfaceHeight)
+        context.clear(rect)
+        // Flip: a snapshot CGImage is top-left origin, but the surface is sampled
+        // by the pane layer top-left while CGContext draws bottom-left — without
+        // this the page renders upside down.
+        context.translateBy(x: 0, y: CGFloat(surfaceHeight))
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cgImage, in: rect)
         reply.frameReady(generation: nextGeneration(), surface: surface)
     }
 
