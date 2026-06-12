@@ -80,7 +80,16 @@ extension ActivityStore {
                 root: thread.workingDirectory, ignoreRules: ignoreRules)
             let cached = await indexActor.cachedIndex(threadID: threadID, key: key)
             if !forceReindex, cached != nil { return }
-            if publishCachedSnapshot, !Task.isCancelled {
+            // Publish/complete are gated on the thread still being SELECTED, not on
+            // `!Task.isCancelled`: rapid re-triggers (e.g. an FSEvents burst on the
+            // watched root) cancel the prior task, and a cancelled task that skipped
+            // `finishFileBrowserRefresh` left `isIndexing` stuck true with no entries
+            // published — a permanently empty Files tree (DEFERRED #25). The index
+            // actor coalesces the walk, so every awaiter gets the same fresh result;
+            // publishing it whenever the thread is still selected is correct and
+            // idempotent, while a thread switch is filtered by the selected-thread
+            // check here and in `finishFileBrowserRefresh`.
+            if publishCachedSnapshot, self.workspace.selectedThreadID == threadID {
                 let entries = cached?.entries ?? self.fileBrowserEntriesByThreadID[threadID] ?? []
                 self.publishFileBrowserState(
                     for: thread, entries: entries, metadata: cached?.metadata,
@@ -93,10 +102,10 @@ extension ActivityStore {
                 let result = try await indexActor.refreshIndex(
                     threadID: threadID, root: thread.workingDirectory, ignoreRules: ignoreRules,
                     key: key)
-                guard !Task.isCancelled else { return }
                 self.finishFileBrowserRefresh(threadID: threadID, result: .success(result))
+            } catch is CancellationError {
+                return
             } catch {
-                guard !Task.isCancelled else { return }
                 self.finishFileBrowserRefresh(threadID: threadID, result: .failure(error))
             }
         }
