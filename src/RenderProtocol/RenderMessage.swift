@@ -4,8 +4,8 @@ import Foundation
 ///
 /// These are the only commands the app sends. They are binary-safe `Codable`
 /// envelopes (no base64): ``input(_:)`` carries raw `Data`, and frame buffers
-/// never travel this channel — compositing is handled out of band via
-/// ``RenderEvent/frameReady(generation:ioSurfaceRef:contextID:)``.
+/// never travel this channel — compositing is handled out of band via the `@objc`
+/// `YAAWRenderReplyProtocol.frameReady(generation:surface:)` (shared `IOSurface`).
 public enum RenderMessage: Codable, Equatable, Sendable {
     /// Initial setup: launch the hosted process/surface.
     case launch(LaunchPayload)

@@ -2,22 +2,11 @@ import Foundation
 
 /// An upbound event from a `YAAWRenderHost` helper to the app.
 ///
-/// Events are binary-safe `Codable` envelopes. The compositing handshake
-/// (``frameReady(generation:ioSurfaceRef:contextID:)``) carries both a
-/// `CAContext.contextID` (Candidate 1, the primary path per ADR-004) and an
-/// optional `IOSurface` reference (Candidate 2, the fallback path); the app uses
-/// whichever the helper populated. No per-frame pixel data crosses this channel.
+/// Events are binary-safe `Codable` envelopes. Frames are delivered out of band
+/// via the `@objc` ``YAAWRenderReplyProtocol/frameReady(generation:surface:)`` —
+/// the shared `IOSurface` is passed natively over XPC (ADR-004 Candidate 2) — so
+/// no per-frame pixel data crosses this `Codable` channel.
 public enum RenderEvent: Codable, Equatable, Sendable {
-    /// A new frame is ready to composite.
-    ///
-    /// - Parameters:
-    ///   - generation: Monotonic counter; the app drops frames older than the
-    ///     last one it rendered.
-    ///   - ioSurfaceRef: An `IOSurfaceRef` mach port value (IOSurface fallback
-    ///     path), or `nil` when compositing via `CAContext`.
-    ///   - contextID: A `CAContext.contextID` (primary path), or `0` when
-    ///     compositing via IOSurface.
-    case frameReady(generation: UInt64, ioSurfaceRef: UInt64?, contextID: UInt32)
     /// The surface title changed.
     case title(String)
     /// Parsed activity state from the capture log.

@@ -66,15 +66,6 @@ final class RenderProtocolTests: XCTestCase {
 
     // MARK: - RenderEvent round-trips
 
-    func testRenderEventFrameReadyCarriesBothCompositingPaths() throws {
-        // CAContext primary path: contextID set, IOSurface absent.
-        try assertRoundTrips(
-            RenderEvent.frameReady(generation: 42, ioSurfaceRef: nil, contextID: 7))
-        // IOSurface fallback path: surface ref set, contextID zero.
-        try assertRoundTrips(
-            RenderEvent.frameReady(generation: 43, ioSurfaceRef: 0xDEAD_BEEF, contextID: 0))
-    }
-
     func testRenderEventVariantsRoundTrip() throws {
         try assertRoundTrips(RenderEvent.title("Agent"))
         try assertRoundTrips(

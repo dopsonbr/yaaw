@@ -275,11 +275,9 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
     }
 
     fileprivate func handleEvent(role: RenderSurfaceRole, event: RenderEvent) {
+        // Frames arrive via the @objc reply (handleFrameReady) carrying the shared
+        // IOSurface, not through this Codable event channel.
         switch event {
-        case .frameReady:
-            // Frames arrive via the @objc reply (handleFrameReady) carrying the
-            // shared IOSurface, not through the Codable event channel.
-            break
         case .title(let title):
             updateSnapshot(role: role) { $0.title = title }
             onSurfaceEvent?(role, event)
