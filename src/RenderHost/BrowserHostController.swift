@@ -43,6 +43,12 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
     /// Drives periodic snapshots so async page rendering / scrolling reaches the
     /// pane. WebKit owns the actual rendering; this just re-rasterizes.
     private var snapshotTimer: DispatchSourceTimer?
+    /// Forced-snapshot retries left in the current settle session, whether a painted
+    /// (non-blank) frame has landed since it began, and whether a settle loop is
+    /// already running — see ``scheduleSettlingSnapshots()``.
+    private var settleAttemptsRemaining = 0
+    private var capturedNonBlankFrame = false
+    private var settleLoopActive = false
 
     init(launch: LaunchPayload, reply: RenderEventReply) {
         self.reply = reply
@@ -95,9 +101,10 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
             webView.frame = NSRect(origin: .zero, size: frame.size)
             ensureSurface(width: Int(payload.widthPixels), height: Int(payload.heightPixels))
         }
-        // Force a paint: the surface may have just been (re)allocated, and the
-        // first snapshot after the pane gives us a size must not be a blank.
-        captureSnapshot(forcingRender: true)
+        // Re-settle: keep forcing snapshots until WebKit finishes relaying out at the
+        // new size and a painted frame lands. Blank intermediate snapshots are
+        // dropped (see `draw`), so the pane holds the last good frame rather than
+        // flickering to black through a drag-resize.
         scheduleSettlingSnapshots()
     }
 
@@ -241,10 +248,9 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         }
         publishState()
         reply.send(.title(webView.title ?? ""))
-        // Page just committed its first paint; force-render now and again over the
-        // next ~0.6 s to catch images / async layout settling and to defeat an
-        // occlusion-throttled first paint (the steady pump continues afterward).
-        captureSnapshot(forcingRender: true)
+        // Page just committed its first paint; keep forcing snapshots until a
+        // painted (non-blank) frame actually lands, so the pane never stays black
+        // when WebKit paints later than a fixed delay would have guessed.
         scheduleSettlingSnapshots()
     }
 
@@ -324,15 +330,36 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         }
     }
 
-    /// After a load finishes, fire a few forced-render snapshots so async content
-    /// (images, web fonts, markdown layout) and any occlusion-throttled first paint
-    /// reliably reach the pane instead of leaving it black until the next user
-    /// interaction.
+    /// After a load/resize, keep forcing snapshots — a `WKWebView` paints async, so
+    /// the first attempts after a load can come back unpainted — until a painted
+    /// frame lands or a bounded number of attempts elapse. The previous fixed set of
+    /// delays raced WebKit's paint and sometimes *all* missed, leaving the pane black
+    /// until a manual resize.
+    ///
+    /// Crucially this runs *at most one* loop: a drag-resize fires `resize` (hence
+    /// this) dozens of times a second, and the old code took a forced
+    /// `afterScreenUpdates` snapshot on each — thrashing WebKit's relayout and
+    /// strobing the pane. Here repeated calls only refresh the retry budget; a
+    /// single loop drives forced snapshots at ~10/s and stops the instant a real
+    /// frame is captured (`draw` sets `capturedNonBlankFrame`). The steady pump's
+    /// cheap non-forced snapshots carry intermediate frames in the meantime.
     private func scheduleSettlingSnapshots() {
-        for delay in [0.05, 0.2, 0.6] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.captureSnapshot(forcingRender: true)
-            }
+        capturedNonBlankFrame = false
+        settleAttemptsRemaining = 16  // ~1.6 s of retries at 0.1 s spacing
+        guard !settleLoopActive else { return }
+        settleLoopActive = true
+        settleTick()
+    }
+
+    private func settleTick() {
+        guard settleAttemptsRemaining > 0, !capturedNonBlankFrame else {
+            settleLoopActive = false
+            return
+        }
+        settleAttemptsRemaining -= 1
+        captureSnapshot(forcingRender: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.settleTick()
         }
     }
 
@@ -343,6 +370,13 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         var proposed = CGRect(x: 0, y: 0, width: surfaceWidth, height: surfaceHeight)
         guard let cgImage = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil)
         else { return }
+        // Drop unpainted snapshots: keep the last good frame rather than clearing the
+        // pane to black. This is what fixes both the intermittent black pane (a blank
+        // first snapshot no longer flips the pane to a black "ready" state) and the
+        // resize flicker (blank mid-relayout frames during a drag are no longer
+        // pushed, so the pane holds the last good frame instead of strobing).
+        if isBlank(cgImage) { return }
+        capturedNonBlankFrame = true
         IOSurfaceLock(surface, [], nil)
         defer { IOSurfaceUnlock(surface, [], nil) }
         guard
@@ -368,6 +402,36 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         // verified on a real run).
         context.draw(cgImage, in: rect)
         reply.frameReady(generation: nextGeneration(), surface: surface)
+    }
+
+    /// Whether a snapshot is effectively unpainted. `WKWebView.takeSnapshot` returns
+    /// a fully transparent image when called before the page has painted (right
+    /// after a load, or mid-relayout during a resize). Detected by downsampling to a
+    /// small grid and checking every sampled pixel's alpha: real content is opaque,
+    /// an unpainted snapshot is transparent. (A genuinely transparent page is
+    /// degenerate for a file/markdown preview, so treating it as blank is fine.)
+    private func isBlank(_ cgImage: CGImage) -> Bool {
+        let side = 12
+        let byteCount = side * side * 4
+        var pixels = [UInt8](repeating: 0, count: byteCount)
+        return pixels.withUnsafeMutableBytes { raw in
+            guard let baseAddress = raw.baseAddress,
+                let context = CGContext(
+                    data: baseAddress,
+                    width: side,
+                    height: side,
+                    bitsPerComponent: 8,
+                    bytesPerRow: side * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
+            // Alpha is the 4th byte of each RGBA pixel; any opaque pixel => painted.
+            for index in stride(from: 3, to: byteCount, by: 4) where raw[index] != 0 {
+                return false
+            }
+            return true
+        }
     }
 
     private func nextGeneration() -> UInt64 {
