@@ -1,32 +1,52 @@
 import Foundation
 
+/// A semantic color role within a theme palette.
 public enum ThemeRole: String, CaseIterable, Identifiable, Sendable {
+    /// The base background color.
     case background
+    /// The current-line / subtle surface color.
     case currentLine
+    /// The primary foreground (text) color.
     case foreground
+    /// The muted color used for comments and secondary text.
     case comment
+    /// The cyan accent color.
     case cyan
+    /// The green accent color.
     case green
+    /// The orange accent color.
     case orange
+    /// The pink accent color.
     case pink
+    /// The purple accent color.
     case purple
+    /// The red accent color.
     case red
+    /// The yellow accent color.
     case yellow
 
+    /// The stable identifier (the raw value).
     public var id: String {
         rawValue
     }
 }
 
+/// Legacy alias for `ThemeRole`, retained for the Dracula baseline API.
 public typealias DraculaRole = ThemeRole
 
+/// The appearance grouping a theme belongs to.
 public enum ThemeGroup: String, CaseIterable, Identifiable, Sendable {
+    /// A light-appearance theme.
     case light
+    /// A dark-appearance theme.
     case dark
+    /// A high-contrast theme.
     case highContrast
 
+    /// The stable identifier (the raw value).
     public var id: String { rawValue }
 
+    /// The human-readable name for this group.
     public var displayName: String {
         switch self {
         case .light:
@@ -39,45 +59,68 @@ public enum ThemeGroup: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// The color scheme a theme prefers when pairing with system chrome.
 public enum ThemePreferredColorScheme: String, Equatable, Sendable {
+    /// A light color scheme.
     case light
+    /// A dark color scheme.
     case dark
 }
 
+/// A semantic role for app chrome controls, derived from theme tokens.
 public enum ThemeUIRole: String, CaseIterable, Identifiable, Sendable {
+    /// The background fill of a control.
     case controlBackground
+    /// The foreground (text/glyph) color of a control.
     case controlForeground
+    /// The color for secondary labels.
     case secondaryLabel
+    /// The border color of a control.
     case controlBorder
+    /// The accent color used for focus rings.
     case focusAccent
 
+    /// The stable identifier (the raw value).
     public var id: String { rawValue }
 }
 
+/// A single role-to-color mapping within a theme.
 public struct ThemeToken: Equatable, Sendable {
+    /// The semantic role this token colors.
     public let role: ThemeRole
+    /// The token's color as a hex string.
     public let hex: String
 
+    /// Creates a theme token for a role and hex color.
     public init(role: ThemeRole, hex: String) {
         self.role = role
         self.hex = hex
     }
 }
 
+/// A single role-to-color mapping for the Dracula baseline palette.
 public struct DraculaToken: Equatable, Sendable {
+    /// The semantic role this token colors.
     public let role: ThemeRole
+    /// The token's color as a hex string.
     public let hex: String
 
+    /// Creates a Dracula token for a role and hex color.
     public init(role: ThemeRole, hex: String) {
         self.role = role
         self.hex = hex
     }
 }
 
+/// A complete theme: its identity, appearance group, and color tokens.
 public struct ThemeDefinition: Equatable, Identifiable, Sendable {
+    /// The stable theme identifier.
     public let id: String
+    /// The human-readable theme name.
     public let displayName: String
+    /// The appearance group this theme belongs to.
     public let group: ThemeGroup
+    /// The role-to-color tokens defining the palette.
     public let tokens: [ThemeToken]
     /// Explicit 16-color terminal palette; `nil` derives one from the role tokens.
     public let ansiPalette: [String]?
@@ -85,6 +128,7 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
     /// materials instead of theme-tinted ones.
     public let prefersSystemMaterials: Bool
 
+    /// Creates a theme definition from its identity, group, tokens, and chrome options.
     public init(
         id: String,
         displayName: String,
@@ -101,14 +145,17 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
         self.prefersSystemMaterials = prefersSystemMaterials
     }
 
+    /// Returns the hex color for a role, falling back to the default theme.
     public func hex(for role: ThemeRole) -> String {
         tokens.first { $0.role == role }?.hex ?? ThemeCatalog.defaultTheme.hex(for: role)
     }
 
+    /// The color scheme this theme prefers when pairing with system chrome.
     public var preferredColorScheme: ThemePreferredColorScheme {
         group == .light || id == "light-high-contrast" ? .light : .dark
     }
 
+    /// Returns the hex color for a chrome control role, derived from the palette.
     public func uiHex(for role: ThemeUIRole) -> String {
         switch role {
         case .controlBackground:
@@ -139,6 +186,8 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
         return 0.7
     }
 
+    /// The 16-color terminal palette, using `ansiPalette` if present or
+    /// otherwise derived from the role tokens.
     public var terminalANSIPalette: [String] {
         if let ansiPalette {
             return ansiPalette
@@ -265,12 +314,16 @@ public struct ThemeDefinition: Equatable, Identifiable, Sendable {
     }
 }
 
+/// The catalog of built-in themes and lookup helpers over them.
 public enum ThemeCatalog {
+    /// The identifier of the default theme.
     public static let defaultID = "ghostty-default"
     /// Themes the System appearance mode pairs with macOS light/dark by default.
     public static let defaultLightID = "macos-light"
+    /// The dark theme the System appearance mode pairs with by default.
     public static let defaultDarkID = "macos-dark"
 
+    /// All built-in themes.
     public static let themes: [ThemeDefinition] = [
         theme(
             id: "macos-light",
@@ -604,17 +657,22 @@ public enum ThemeCatalog {
         ),
     ]
 
+    /// The theme matching `defaultID`.
     public static let defaultTheme = themes.first { $0.id == defaultID }!
 
+    /// The identifiers of all built-in themes.
     public static var supportedIDs: [String] {
         themes.map(\.id)
     }
 
+    /// Returns the theme with the given identifier, trimming and lowercasing it
+    /// before matching, or `nil` if none matches.
     public static func theme(id: String) -> ThemeDefinition? {
         let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return themes.first { $0.id == normalizedID }
     }
 
+    /// Returns the built-in themes belonging to the given appearance group.
     public static func themes(in group: ThemeGroup) -> [ThemeDefinition] {
         themes.filter { $0.group == group }
     }
@@ -660,13 +718,16 @@ public enum ThemeCatalog {
     }
 }
 
+/// The Dracula baseline theme, exposed as a stable built-in palette.
 public enum DraculaTheme {
     private static let theme = ThemeCatalog.theme(id: "dracula")!
 
+    /// The Dracula palette as role-to-color tokens.
     public static let tokens: [DraculaToken] = theme.tokens.map {
         DraculaToken(role: $0.role, hex: $0.hex)
     }
 
+    /// Returns the Dracula hex color for the given role.
     public static func hex(for role: ThemeRole) -> String {
         theme.hex(for: role)
     }

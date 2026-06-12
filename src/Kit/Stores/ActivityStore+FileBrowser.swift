@@ -8,6 +8,8 @@ extension ActivityStore {
 
     // MARK: - Refresh
 
+    /// Refreshes the file index for the currently selected thread, clearing the browser
+    /// state when no thread is selected.
     public func refreshSelectedFileBrowser() {
         guard let thread = workspace.selectedThread else {
             fileBrowserState = FileBrowserState()
@@ -203,6 +205,8 @@ extension ActivityStore {
 
     // MARK: - Search / selection
 
+    /// Applies a fuzzy search query to the selected thread's file entries and updates the
+    /// visible-entry list and selection accordingly.
     public func updateFileSearchQuery(_ query: String) {
         let fullEntries =
             workspace.selectedThreadID.flatMap { fileBrowserEntriesByThreadID[$0] } ?? []
@@ -222,6 +226,8 @@ extension ActivityStore {
         updateSelectedFileAfterVisibleEntriesChanged()
     }
 
+    /// Selects the file at the given relative path (normalized) when it exists in the
+    /// current index, or clears the selection when passed `nil`.
     public func selectFile(relativePath: String?) {
         guard let relativePath else {
             rightPanel.setSelectedFile(nil)
@@ -234,6 +240,7 @@ extension ActivityStore {
         rightPanel.setSelectedFile(normalizedPath)
     }
 
+    /// Moves the file selection up or down among the visible (non-directory) entries.
     public func selectAdjacentFile(direction: ProjectMoveDirection) {
         let entries = fileBrowserState.visibleEntries.filter { !$0.isDirectory }
         guard !entries.isEmpty else {

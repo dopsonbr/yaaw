@@ -58,6 +58,8 @@ public final class BackgroundFileIndexer: FileIndexing {
         self.queue = queue
     }
 
+    /// Indexes the full tree under `root` on the background queue, applying
+    /// `ignoreRules`, and delivers the result to `completion`.
     public func indexFiles(
         threadID: UUID,
         root: URL,
@@ -75,6 +77,9 @@ public final class BackgroundFileIndexer: FileIndexing {
         }
     }
 
+    /// Indexes the pruned subtree at `relativeSubpath` on the background queue and
+    /// delivers entries (relative to `root`) to `completion` for merging into the
+    /// full index.
     public func indexSubtree(
         threadID: UUID,
         root: URL,

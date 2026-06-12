@@ -74,6 +74,8 @@ extension ActivityStore {
         pendingTerminalTitlesByThreadID.removeValue(forKey: threadID)
     }
 
+    /// Tracks focus on a thread's project terminal: focusing marks its activity read
+    /// and suppresses notifications; blurring clears the focused-thread tracking.
     public func recordAgentTerminalFocus(threadID: UUID, focused: Bool) {
         if focused {
             focusedProjectTerminalThreadID = threadID
@@ -83,6 +85,8 @@ extension ActivityStore {
         }
     }
 
+    /// Records a terminal notification as unread activity, inferring status from the
+    /// title/body and dispatching a system notification unless suppressed by focus.
     public func recordAgentTerminalNotification(threadID: UUID, title: String, body: String) {
         let status = ThreadActivityText.inferredStatus(title: title, body: body)
         applyThreadActivity(
@@ -94,6 +98,8 @@ extension ActivityStore {
         )
     }
 
+    /// Records that a thread's terminal closed: clears capture offsets and polling, sets
+    /// the activity to inactive, and drops the thread's focus tracking.
     public func recordAgentTerminalClosed(threadID: UUID) {
         activityReadOffsetsByThreadID.removeValue(forKey: threadID)
         activityPartialLinesByThreadID.removeValue(forKey: threadID)
@@ -108,6 +114,8 @@ extension ActivityStore {
         if focusedProjectTerminalThreadID == threadID { focusedProjectTerminalThreadID = nil }
     }
 
+    /// Records that a command finished in a thread's terminal, publishing a complete
+    /// activity status with the exit code (if known) as the body.
     public func recordAgentCommandFinished(threadID: UUID, exitCode: Int?) {
         let body = exitCode.map { "Command exited with status \($0)" } ?? "Command finished"
         applyThreadActivity(

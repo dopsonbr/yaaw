@@ -10,7 +10,9 @@ import Observation
 @MainActor
 @Observable
 public final class ActivityStore {
+    /// The latest activity state (status/preview/unread) for each thread, keyed by thread ID.
     public internal(set) var threadActivityByThreadID: [UUID: ThreadActivityState]
+    /// The published file-browser state for the selected thread.
     public internal(set) var fileBrowserState: FileBrowserState
 
     @ObservationIgnored let environment: AppEnvironment
@@ -74,14 +76,18 @@ public final class ActivityStore {
 
     // MARK: - Reads
 
+    /// The number of threads whose latest activity is currently unread (drives the dock badge).
     public var unreadThreadActivityCount: Int {
         threadActivityByThreadID.values.filter(\.isUnread).count
     }
 
+    /// Returns the activity state for the thread, or a fresh empty state if none exists.
     public func threadActivity(for threadID: UUID) -> ThreadActivityState {
         threadActivityByThreadID[threadID] ?? ThreadActivityState(threadID: threadID)
     }
 
+    /// The most recent interaction time for a thread: the later of its `lastOpenedAt`
+    /// and its latest activity update.
     public func lastInteractionDate(for thread: AgentThread) -> Date {
         guard let activity = threadActivityByThreadID[thread.id] else { return thread.lastOpenedAt }
         return max(thread.lastOpenedAt, activity.updatedAt)

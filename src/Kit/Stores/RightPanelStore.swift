@@ -9,9 +9,13 @@ import Observation
 @MainActor
 @Observable
 public final class RightPanelStore {
+    /// The remembered right-panel mode for each thread.
     public internal(set) var rightPanelModesByThreadID: [UUID: RightPanelMode]
+    /// The full persisted right-panel state (tabs, folders, selection) per thread.
     public internal(set) var rightPanelStatesByThreadID: [UUID: RightPanelState]
+    /// The currently published file-browser selection, relative to the thread root.
     public internal(set) var selectedFileRelativePath: String?
+    /// Browser-preview-unavailable messages to show, keyed by thread.
     public internal(set) var browserUnavailableMessagesByThreadID: [UUID: String]
 
     @ObservationIgnored let persistence: StorePersistenceQueue
@@ -58,6 +62,7 @@ public final class RightPanelStore {
 
     // MARK: - Computed (scoped to selected thread)
 
+    /// The right-panel mode of the selected thread, defaulting to `.files`.
     public var selectedRightPanelMode: RightPanelMode {
         guard let selectedThreadID else { return .files }
         return rightPanelStatesByThreadID[selectedThreadID]?.selectedMode
@@ -65,6 +70,7 @@ public final class RightPanelStore {
             ?? .files
     }
 
+    /// The full right-panel state of the selected thread, or a default state.
     public var selectedRightPanelState: RightPanelState {
         guard let selectedThreadID else { return RightPanelState() }
         return rightPanelStatesByThreadID[selectedThreadID]
@@ -72,14 +78,17 @@ public final class RightPanelStore {
                 selectedMode: rightPanelModesByThreadID[selectedThreadID] ?? .files)
     }
 
+    /// The active tab within the selected thread's right-panel state.
     public var selectedRightPanelTab: RightPanelTab { selectedRightPanelState.selectedTab }
 
+    /// The browser-unavailable message for the selected thread, if any.
     public var selectedBrowserUnavailableMessage: String? {
         selectedThreadID.flatMap { browserUnavailableMessagesByThreadID[$0] }
     }
 
     // MARK: - Mode / tab selection
 
+    /// Selects the right-panel mode for the selected thread and persists it.
     public func selectRightPanelMode(_ mode: RightPanelMode) {
         guard let selectedThreadID else { return }
         rightPanelModesByThreadID[selectedThreadID] = mode
@@ -89,6 +98,8 @@ public final class RightPanelStore {
         persistRightPanel(threadID: selectedThreadID)
     }
 
+    /// Selects the tab with the given ID for the selected thread, syncing the
+    /// thread's mode to the tab and persisting the change.
     public func selectRightPanelTab(id tabID: String) {
         guard let selectedThreadID else { return }
         var state = selectedRightPanelState
@@ -98,6 +109,8 @@ public final class RightPanelStore {
         persistRightPanel(threadID: selectedThreadID)
     }
 
+    /// Closes the tab with the given ID for the selected thread, tearing down any
+    /// associated surface (nvim) or message (browser) and persisting the change.
     public func closeRightPanelTab(id tabID: String) {
         guard let selectedThreadID else { return }
         var state = selectedRightPanelState
@@ -118,7 +131,9 @@ public final class RightPanelStore {
         persistRightPanel(threadID: selectedThreadID)
     }
 
+    /// Selects the next right-panel mode in cycle order.
     public func cycleRightPanelModeForward() { selectRightPanelMode(selectedRightPanelMode.next) }
+    /// Selects the previous right-panel mode in cycle order.
     public func cycleRightPanelModeBackward() {
         selectRightPanelMode(selectedRightPanelMode.previous)
     }
@@ -130,6 +145,7 @@ public final class RightPanelStore {
         rightPanelStatesByThreadID[id]?.expandedFolders ?? []
     }
 
+    /// Records the expanded folders for a thread and persists them (schema v18).
     public func setExpandedFolders(_ folders: Set<String>, forThreadID id: UUID) {
         var state = rightPanelStatesByThreadID[id] ?? RightPanelState.defaultState()
         guard state.expandedFolders != folders else { return }

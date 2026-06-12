@@ -14,6 +14,8 @@ public struct FileIndexGitIdentityResolver: FileIndexGitIdentityResolving {
     /// Creates a resolver.
     public init() {}
 
+    /// Resolves the git identity for the working tree containing `root` by walking
+    /// up to the nearest `.git` and parsing its `HEAD`.
     public func gitIdentity(for root: URL) -> FileIndexGitIdentity {
         guard let gitURL = Self.findGitURL(startingAt: root.standardizedFileURL) else {
             return .notRepository

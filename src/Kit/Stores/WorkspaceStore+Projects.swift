@@ -3,6 +3,10 @@ import Foundation
 extension WorkspaceStore {
     // MARK: - Project CRUD
 
+    /// Creates a project for the given directory, selects it, persists it, and
+    /// returns its identifier. Falls back to the directory name when the supplied
+    /// display name is blank. Throws if the directory is missing or the resolved
+    /// name is empty.
     @discardableResult
     public func createProject(displayName: String, rootDirectory: URL, now: Date = Date()) throws
         -> UUID
@@ -39,6 +43,8 @@ extension WorkspaceStore {
         return project.id
     }
 
+    /// Toggles the given project's pinned state, re-sorts it within its pin group,
+    /// and persists the change.
     public func toggleProjectPinned(id projectID: UUID) {
         guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
         projects[index].isPinned.toggle()
@@ -47,8 +53,10 @@ extension WorkspaceStore {
         if let pinned = projects.first(where: { $0.id == projectID }) { persistProject(pinned) }
     }
 
+    /// Toggles the pinned state of the currently selected project.
     public func toggleSelectedProjectPinned() { toggleProjectPinned(id: selectedProjectID) }
 
+    /// Moves the given project one position up or down within its pin group.
     public func moveProject(id projectID: UUID, direction: ProjectMoveDirection) {
         projects = Self.sortedProjects(projects)
         guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
@@ -60,6 +68,8 @@ extension WorkspaceStore {
         normalizeProjectSortOrders(preservingCurrentOrder: true)
     }
 
+    /// Reorders the given project to sit immediately before the target project,
+    /// when both share the same pin group.
     public func reorderProject(id projectID: UUID, before targetProjectID: UUID) {
         guard projectID != targetProjectID else { return }
         projects = Self.sortedProjects(projects)
@@ -73,10 +83,12 @@ extension WorkspaceStore {
         normalizeProjectSortOrders(preservingCurrentOrder: true)
     }
 
+    /// Moves the currently selected project one position up or down.
     public func moveSelectedProject(direction: ProjectMoveDirection) {
         moveProject(id: selectedProjectID, direction: direction)
     }
 
+    /// Expands or collapses the given project's active-thread list and persists it.
     public func setProjectExpanded(_ projectID: UUID, isExpanded: Bool) {
         guard projects.contains(where: { $0.id == projectID }) else { return }
         if isExpanded {
@@ -87,10 +99,12 @@ extension WorkspaceStore {
         persistProjectExpanded(projectID: projectID)
     }
 
+    /// Toggles whether the selected project's active-thread list is expanded.
     public func toggleSelectedProjectExpanded() {
         setProjectExpanded(selectedProjectID, isExpanded: !isProjectExpanded(selectedProjectID))
     }
 
+    /// Expands or collapses the given project's archived-thread list and persists it.
     public func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool) {
         guard projects.contains(where: { $0.id == projectID }) else { return }
         if isExpanded {
@@ -101,6 +115,7 @@ extension WorkspaceStore {
         persistProjectArchiveExpanded(projectID: projectID)
     }
 
+    /// Toggles whether the selected project's archived-thread list is expanded.
     public func toggleSelectedProjectArchiveExpanded() {
         setProjectArchiveExpanded(
             selectedProjectID, isExpanded: !isProjectArchiveExpanded(selectedProjectID))
@@ -108,11 +123,14 @@ extension WorkspaceStore {
 
     // MARK: - Project archive
 
+    /// Whether the given project may be archived (the Global project may not).
     public func canArchiveProject(id projectID: UUID) -> Bool {
         guard let project = projects.first(where: { $0.id == projectID }) else { return false }
         return !isGlobalProject(project)
     }
 
+    /// Archives the given project (never the Global project), selecting a fallback
+    /// active project if the archived one was selected, and persists the change.
     public func archiveProject(id projectID: UUID) {
         guard let index = projects.firstIndex(where: { $0.id == projectID }),
             !isGlobalProject(projects[index])
@@ -127,8 +145,10 @@ extension WorkspaceStore {
         persistProject(archivedProject)
     }
 
+    /// Archives the currently selected project.
     public func archiveSelectedProject() { archiveProject(id: selectedProjectID) }
 
+    /// Unarchives the given project, marks it opened, selects it, and persists it.
     public func unarchiveProject(id projectID: UUID) {
         guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
         projects[index].isArchived = false

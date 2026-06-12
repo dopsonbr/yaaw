@@ -1,12 +1,19 @@
 import Foundation
 
+/// Per-thread overrides applied when launching an agent CLI, such as the
+/// executable to invoke, the permission mode, and extra command-line arguments.
 public struct AgentLaunchOptions: Codable, Equatable, Sendable {
+    /// The identifier used to represent the CLI's default permission mode.
     public static let defaultPermissionModeID = "default"
 
+    /// An override for the agent CLI executable name, or `nil` to use the default.
     public var executableName: String?
+    /// The selected permission mode identifier, or `nil` to use the default.
     public var permissionModeID: String?
+    /// Extra command-line arguments appended to the agent CLI invocation.
     public var additionalArguments: [String]
 
+    /// Creates launch options, trimming blank values and dropping empty arguments.
     public init(
         executableName: String? = nil,
         permissionModeID: String? = nil,
@@ -19,10 +26,13 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
         }
     }
 
+    /// Whether no overrides are set and the CLI defaults apply.
     public var isEmpty: Bool {
         executableName == nil && permissionModeID == nil && additionalArguments.isEmpty
     }
 
+    /// Returns a copy with the permission mode cleared if it is not supported by
+    /// the given CLI's available permission modes.
     public func validated(
         for agentCLI: AgentCLIKind,
         permissionModes: [AgentPermissionMode]? = nil
@@ -39,6 +49,8 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
         )
     }
 
+    /// Returns the command-line arguments for the selected permission mode, or an
+    /// empty array if no mode is selected or the mode is unknown.
     public func permissionArguments(
         for agentCLI: AgentCLIKind,
         permissionModes: [AgentPermissionMode]? = nil
@@ -51,6 +63,11 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
             .arguments ?? []
     }
 
+    /// Parses a shell-like argument string into individual arguments, honoring
+    /// single/double quotes and backslash escapes.
+    ///
+    /// - Throws: ``AgentLaunchOptionsArgumentError`` if the string ends in a
+    ///   dangling escape or contains an unclosed quote.
     public static func parseAdditionalArguments(_ text: String) throws -> [String] {
         var arguments: [String] = []
         var current = ""
@@ -108,6 +125,8 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
         return arguments
     }
 
+    /// Formats arguments back into a single shell-like string, quoting and
+    /// escaping values that contain whitespace or are empty.
     public static func formatAdditionalArguments(_ arguments: [String]) -> String {
         arguments.map { argument in
             let needsQuoting = argument.isEmpty || argument.contains { $0.isWhitespace }
@@ -119,26 +138,37 @@ public struct AgentLaunchOptions: Codable, Equatable, Sendable {
     }
 }
 
+/// Errors raised while parsing additional argument strings.
 public enum AgentLaunchOptionsArgumentError: Error, Equatable, Sendable {
+    /// The argument string ended with an unterminated backslash escape.
     case trailingEscape
+    /// The argument string contained a quote that was never closed.
     case unclosedQuote
 }
 
+/// A named permission/approval mode for an agent CLI and the command-line
+/// arguments that select it.
 public struct AgentPermissionMode: Identifiable, Codable, Equatable, Sendable {
+    /// The stable identifier for the permission mode.
     public var id: String
+    /// The user-facing name shown for the permission mode.
     public var displayName: String
+    /// The command-line arguments that enable this mode.
     public var arguments: [String]
 
+    /// Creates a permission mode with the given identifier, display name, and arguments.
     public init(id: String, displayName: String, arguments: [String]) {
         self.id = id
         self.displayName = displayName
         self.arguments = arguments
     }
 
+    /// Returns the permission modes available for the given agent CLI.
     public static func supportedModes(for agentCLI: AgentCLIKind) -> [AgentPermissionMode] {
         builtInModes(for: agentCLI)
     }
 
+    /// Returns the built-in permission modes defined for the given agent CLI.
     public static func builtInModes(for agentCLI: AgentCLIKind) -> [AgentPermissionMode] {
         switch agentCLI {
         case .codex:

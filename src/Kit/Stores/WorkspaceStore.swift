@@ -4,14 +4,23 @@ import Observation
 /// Errors raised by workspace mutations. Re-homed verbatim from the pre-rewrite
 /// `AppModelError`.
 public enum WorkspaceStoreError: Error, Equatable, Sendable {
+    /// A project was created or renamed with a blank display name.
     case emptyProjectName
+    /// A thread was created or renamed with a blank name.
     case emptyThreadName
+    /// The project's root directory does not exist at the given path.
     case missingProjectDirectory(String)
+    /// The operation needs a selected project but none is selected.
     case selectedProjectMissing
+    /// A thread was requested without a project to host it.
     case projectRequiredForThreadCreation
+    /// Thread creation lacked the required agent CLI selection.
     case missingAgentCLI
+    /// No thread matches the requested identifier.
     case threadNotFound
+    /// A thread's bound agent CLI family cannot be changed after creation.
     case agentCLIChangeNotAllowed
+    /// Renaming the underlying CLI session is not supported.
     case sessionRenameNotSupported
 }
 
@@ -23,13 +32,21 @@ public enum WorkspaceStoreError: Error, Equatable, Sendable {
 @MainActor
 @Observable
 public final class WorkspaceStore {
+    /// All projects, sorted by pin state and sort order.
     public internal(set) var projects: [Project]
+    /// All threads across every project, active and archived.
     public internal(set) var threads: [AgentThread]
+    /// Identifier of the currently selected project.
     public internal(set) var selectedProjectID: UUID
+    /// Identifier of the currently selected thread, or `nil` when none is selected.
     public internal(set) var selectedThreadID: UUID?
+    /// Projects whose active-thread list is expanded in the sidebar.
     public internal(set) var expandedProjectIDs: Set<UUID>
+    /// Projects whose archived-thread list is expanded in the sidebar.
     public internal(set) var expandedArchivedProjectIDs: Set<UUID>
+    /// Threads still awaiting a session-link prompt before they can resume.
     public internal(set) var sessionLinkRequiredThreadIDs: Set<UUID>
+    /// Back/forward selection history for project and thread navigation.
     public internal(set) var navigationHistory: NavigationHistory
 
     @ObservationIgnored let persistence: StorePersistenceQueue
@@ -174,6 +191,7 @@ public final class WorkspaceStore {
 
     // MARK: - Computed
 
+    /// The currently selected thread, or `nil` when none is selected.
     public var selectedThread: AgentThread? {
         guard let selectedThreadID, let index = threadIndexByID[selectedThreadID] else {
             return nil
@@ -181,69 +199,88 @@ public final class WorkspaceStore {
         return threads[index]
     }
 
+    /// Whether the selected thread is awaiting a session-link prompt before it can resume.
     public var selectedThreadRequiresSessionLink: Bool {
         selectedThreadID.map { sessionLinkRequiredThreadIDs.contains($0) } ?? false
     }
 
+    /// The currently selected project, or `nil` if it cannot be found.
     public var selectedProject: Project? {
         projects.first { $0.id == selectedProjectID }
     }
 
+    /// Projects that are not archived.
     public var activeProjects: [Project] { projects.filter { !$0.isArchived } }
+    /// Projects that have been archived.
     public var archivedProjects: [Project] { projects.filter { $0.isArchived } }
 
+    /// Active threads for the selected project, from the O(1) cache.
     public var activeThreadsForSelectedProject: [AgentThread] {
         cachedActiveThreadsByProject[selectedProjectID] ?? []
     }
 
+    /// Archived threads for the selected project, from the O(1) cache.
     public var archivedThreadsForSelectedProject: [AgentThread] {
         cachedArchivedThreadsByProject[selectedProjectID] ?? []
     }
 
+    /// Active threads for the given project, from the O(1) cache.
     public func activeThreads(for projectID: UUID) -> [AgentThread] {
         cachedActiveThreadsByProject[projectID] ?? []
     }
 
+    /// Archived threads for the given project, from the O(1) cache.
     public func archivedThreads(for projectID: UUID) -> [AgentThread] {
         cachedArchivedThreadsByProject[projectID] ?? []
     }
 
+    /// Archived threads across every project.
     public var archivedThreads: [AgentThread] {
         projects.flatMap { cachedArchivedThreadsByProject[$0.id] ?? [] }
     }
 
+    /// Whether the selected project has any archived threads.
     public var hasArchivedThreadsForSelectedProject: Bool {
         !archivedThreadsForSelectedProject.isEmpty
     }
 
+    /// Whether any project has archived threads.
     public var hasArchivedThreads: Bool { !archivedThreads.isEmpty }
 
+    /// Title for the app window, combining the selected project and thread names.
     public var windowTitle: String {
         guard let project = selectedProject else { return "Agent IDE" }
         guard let thread = selectedThread else { return project.displayName }
         return "\(project.displayName) - \(thread.displayName)"
     }
 
+    /// Display name for the given project, or a placeholder if it is unknown.
     public func projectDisplayName(for projectID: UUID) -> String {
         projects.first { $0.id == projectID }?.displayName ?? "Unknown Project"
     }
 
+    /// Whether the given project's active-thread list is expanded.
     public func isProjectExpanded(_ projectID: UUID) -> Bool {
         expandedProjectIDs.contains(projectID)
     }
 
+    /// Whether the given project's archived-thread list is expanded.
     public func isProjectArchiveExpanded(_ projectID: UUID) -> Bool {
         expandedArchivedProjectIDs.contains(projectID)
     }
 
+    /// Availability state of the selected project's root directory on disk.
     public var selectedProjectDirectoryState: ProjectDirectoryState? {
         selectedProject.map { directoryState(for: $0.rootDirectory) }
     }
 
+    /// Availability state of the selected thread's working directory on disk.
     public var selectedThreadWorkingDirectoryState: ProjectDirectoryState? {
         selectedThread.map { directoryState(for: $0.workingDirectory) }
     }
 
+    /// The directory the selected thread or project should open in an external
+    /// app (Finder/editor), or `nil` when no existing directory is available.
     public var selectedExternalOpenDirectoryTarget: ExternalOpenTarget? {
         if let thread = selectedThread {
             guard isExistingDirectory(thread.workingDirectory) else { return nil }

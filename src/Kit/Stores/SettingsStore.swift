@@ -8,8 +8,11 @@ import Observation
 @MainActor
 @Observable
 public final class SettingsStore {
+    /// The current validated configuration loaded from `settings.yaml`.
     public private(set) var configuration: YAAWConfiguration
+    /// Whether the live macOS appearance is dark, pushed in by the app layer.
     public private(set) var systemAppearanceIsDark: Bool
+    /// The discovered per-CLI option catalog (permission presets, etc.).
     public private(set) var agentCLIOptionCatalog: AgentCLIOptionCatalog
 
     @ObservationIgnored private let environment: AppEnvironment
@@ -44,21 +47,26 @@ public final class SettingsStore {
         configuration.resolvedTheme(systemAppearanceIsDark: systemAppearanceIsDark)
     }
 
+    /// The configured default agent CLI family for new threads.
     public var defaultAgentCLI: AgentCLIKind {
         configuration.defaultAgentCLI
     }
 
     // MARK: - Reads used by other stores / views
 
+    /// The permission presets available for an agent CLI family, from the catalog.
     public func permissionModes(for agentCLI: AgentCLIKind) -> [AgentPermissionMode] {
         agentCLIOptionCatalog.permissionPresets(for: agentCLI)
     }
 
+    /// The configured default launch options for an agent CLI family, validated
+    /// against the family's available permission modes.
     public func configuredLaunchOptions(for agentCLI: AgentCLIKind) -> AgentLaunchOptions {
         configuration.defaultLaunchOptions(for: agentCLI)
             .validated(for: agentCLI, permissionModes: permissionModes(for: agentCLI))
     }
 
+    /// The configured key binding for a keyboard-shortcut action.
     public func keyboardShortcutDefinition(for action: KeyboardShortcutAction)
         -> KeyboardShortcutDefinition
     {
@@ -98,11 +106,14 @@ public final class SettingsStore {
         for handler in reloadHandlers { handler(self.configuration) }
     }
 
+    /// Updates the live macOS appearance, no-op when unchanged.
     public func updateSystemAppearance(isDark: Bool) {
         guard systemAppearanceIsDark != isDark else { return }
         systemAppearanceIsDark = isDark
     }
 
+    /// Re-probes each CLI's options, updates and persists the catalog, records a
+    /// diagnostic, and returns the refreshed catalog.
     @discardableResult
     public func refreshAgentCLIOptionCatalog() -> AgentCLIOptionCatalog {
         let catalog = environment.agentCLIOptionCatalogService.refreshCatalog(

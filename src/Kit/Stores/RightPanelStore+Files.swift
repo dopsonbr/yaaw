@@ -22,10 +22,14 @@ extension RightPanelStore {
         return (normalizedPath, url)
     }
 
+    /// An "open externally" target for the file at the given relative path, or
+    /// `nil` if it cannot be resolved under the selected thread's root.
     public func externalOpenFileTarget(relativePath: String) -> ExternalOpenTarget? {
         fileBrowserExternalOpenTarget(relativePath: relativePath, isDirectory: false)
     }
 
+    /// An "open externally" target for the file or directory at the given relative
+    /// path, or `nil` if it cannot be resolved under the selected thread's root.
     public func fileBrowserExternalOpenTarget(relativePath: String, isDirectory: Bool)
         -> ExternalOpenTarget?
     {
@@ -33,6 +37,7 @@ extension RightPanelStore {
         return ExternalOpenTarget(url: url, kind: isDirectory ? .directory : .file)
     }
 
+    /// An "open externally" target for the currently selected file, if any.
     public var selectedExternalOpenFileTarget: ExternalOpenTarget? {
         guard let selectedFileRelativePath else { return nil }
         return externalOpenFileTarget(relativePath: selectedFileRelativePath)
@@ -40,11 +45,14 @@ extension RightPanelStore {
 
     // MARK: - Open in nvim
 
+    /// Opens the currently selected file in an nvim tab, if a file is selected.
     public func openSelectedFileInNvim() {
         guard let selectedFileRelativePath else { return }
         openFileInNvim(relativePath: selectedFileRelativePath)
     }
 
+    /// Opens the file at the given relative path in an nvim tab (reusing an
+    /// existing tab if already open), switches the panel to nvim, and persists.
     public func openFileInNvim(relativePath: String) {
         guard let selectedThreadID,
             let resolvedFile = selectedThreadFileURL(relativePath: relativePath)
@@ -67,6 +75,9 @@ extension RightPanelStore {
         persistRightPanel(threadID: selectedThreadID)
     }
 
+    /// Opens a file from the browser's primary action: routes markdown/HTML to the
+    /// browser preview when `markdownAndHTMLToBrowser` is set and it succeeds,
+    /// otherwise opens the file in nvim.
     public func openFileFromBrowserPrimary(relativePath: String, markdownAndHTMLToBrowser: Bool) {
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         guard
@@ -81,6 +92,8 @@ extension RightPanelStore {
 
     // MARK: - Open in browser
 
+    /// Opens a new browser tab (optionally at a normalized URL), switches the
+    /// panel to browser mode, and persists.
     public func openBrowserTab(urlString: String? = nil) {
         guard let selectedThreadID else { return }
         var state = selectedRightPanelState
@@ -91,6 +104,8 @@ extension RightPanelStore {
         persistRightPanel(threadID: selectedThreadID)
     }
 
+    /// Navigates the selected browser tab to a normalized URL, no-op unless the
+    /// selected tab is a browser tab.
     public func updateSelectedBrowserTab(urlString: String) {
         guard let selectedThreadID else { return }
         var state = selectedRightPanelState
@@ -103,6 +118,9 @@ extension RightPanelStore {
         persistRightPanel(threadID: selectedThreadID)
     }
 
+    /// Opens a local file at the given relative path in the browser preview after
+    /// validating type, path containment, and existence. Returns `true` on
+    /// success; on failure sets a browser-unavailable message and returns `false`.
     @discardableResult
     public func openFileInBrowser(relativePath: String) -> Bool {
         guard let selectedThreadID, let root = selectedThreadWorkingDirectory?() else {
@@ -161,6 +179,8 @@ extension RightPanelStore {
 
     // MARK: - Type helpers
 
+    /// Whether the file at the given relative path has an extension the browser
+    /// preview can render (HTML, images, PDF, markdown, text, JSON, XML).
     public static func isBrowserPreviewSupported(relativePath: String) -> Bool {
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         let supportedExtensions: Set<String> = [
@@ -171,6 +191,7 @@ extension RightPanelStore {
             URL(fileURLWithPath: normalizedPath).pathExtension.lowercased())
     }
 
+    /// Whether the file at the given relative path is markdown or HTML.
     public static func isMarkdownOrHTML(relativePath: String) -> Bool {
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(relativePath)
         return ["md", "markdown", "html", "htm"].contains(

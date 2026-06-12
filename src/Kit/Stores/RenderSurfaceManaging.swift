@@ -24,10 +24,15 @@ public enum RenderSurfaceRole: Equatable, Sendable, Hashable {
 /// `TerminalSessionManaging`/`RenderHostClient`; it is modeled here as the set of
 /// methods the stores need to drive a surface.
 public struct RenderSurfaceLaunch: Equatable, Sendable {
+    /// The surface role this launch drives.
     public var role: RenderSurfaceRole
+    /// The display title for the surface.
     public var title: String
+    /// The working directory the surface's process runs in.
     public var workingDirectory: URL
+    /// The argv used to launch the surface's process.
     public var command: [String]
+    /// The agent CLI family associated with the surface.
     public var agentCLI: AgentCLIKind
     /// The capture-wrapped agent launch descriptor, when this is an agent PTY
     /// surface; `nil` for plain exec surfaces (bottom shell, nvim, lazygit).
@@ -36,6 +41,7 @@ public struct RenderSurfaceLaunch: Equatable, Sendable {
     /// nvim file switches). `nil` when no relaunch is requested.
     public var relaunchToken: UUID?
 
+    /// Creates a launch descriptor for a surface.
     public init(
         role: RenderSurfaceRole,
         title: String,
@@ -77,9 +83,13 @@ public protocol RenderSurfaceManaging: Sendable {
 /// The default no-op surface manager: stores construct and persist correctly with
 /// no live rendering. Used in the bare binary and as the `AppEnvironment` default.
 public final class NoopRenderSurfaceManager: RenderSurfaceManaging {
+    /// Creates the no-op manager.
     public init() {}
+    /// Does nothing and reports no active surface.
     @discardableResult
     public func activate(_ launch: RenderSurfaceLaunch) -> Bool { false }
+    /// Does nothing; there is no surface to tear down.
     public func shutdown(role: RenderSurfaceRole) {}
+    /// Always reports no active surface.
     public func isActive(role: RenderSurfaceRole) -> Bool { false }
 }

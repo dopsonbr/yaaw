@@ -65,6 +65,8 @@ extension SQLiteYAAWStore {
         }
     }
 
+    /// Returns the cached file index stored under `cacheKey`, or `nil` if none is
+    /// present. A read error is recorded as a diagnostic and degrades to `nil`.
     public func cachedFileIndex(cacheKey: String) -> CachedFileIndex? {
         do {
             return try Self.loadCachedFileIndex(database, cacheKey: cacheKey)

@@ -1,10 +1,15 @@
 import Foundation
 import SQLite3
 
+/// Errors raised by the SQLite-backed store layer.
 public enum SQLiteStoreError: Error, Equatable, Sendable {
+    /// Opening the database failed (the SQLite error message).
     case openFailed(String)
+    /// Executing a statement failed (the SQLite error message).
     case executionFailed(String)
+    /// Compiling a statement failed (the SQLite error message).
     case prepareFailed(String)
+    /// The operation required a database handle that was not available.
     case missingDatabase
 }
 
@@ -27,6 +32,7 @@ struct SidebarProjectStateRow {
 /// actor's isolated synchronous method legally witnesses the `async` protocol
 /// requirement, so external callers simply `await`.
 public actor SQLiteYAAWStore: YAAWStore {
+    /// The current on-disk schema version this store migrates to.
     public static let schemaVersion = 18
 
     let databasePath: URL
@@ -43,6 +49,8 @@ public actor SQLiteYAAWStore: YAAWStore {
     /// The live SQLite connection handle (set once at init).
     var database: OpaquePointer? { connection.handle }
 
+    /// Opens (creating parent directories as needed) and migrates the database at
+    /// `databasePath`, throwing if the open or migration fails.
     public init(
         databasePath: URL,
         diagnosticRecorder: DiagnosticEventRecording = LoggerDiagnosticEventRecorder.shared
@@ -74,10 +82,12 @@ public actor SQLiteYAAWStore: YAAWStore {
         }
     }
 
+    /// Opens a store at the default Application Support database path.
     public static func defaultStore() throws -> YAAWStore {
         try SQLiteYAAWStore(databasePath: defaultDatabasePath())
     }
 
+    /// The default database path under `Application Support/YAAW/YAAW.sqlite`.
     public static func defaultDatabasePath() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
             0]

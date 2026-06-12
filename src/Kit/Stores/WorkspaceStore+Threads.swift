@@ -3,6 +3,9 @@ import Foundation
 extension WorkspaceStore {
     // MARK: - Thread creation
 
+    /// Creates a new agent thread in the given project (or the current selection),
+    /// resolves its launch options and working directory, persists it, selects it,
+    /// and activates its terminal. Returns the new thread's identifier.
     @discardableResult
     public func createThread(
         projectID: UUID? = nil,
@@ -89,6 +92,8 @@ extension WorkspaceStore {
             for: agentCLI, permissionModes: settings.permissionModes(for: agentCLI))
     }
 
+    /// Always throws: a thread is permanently bound to its CLI family, so changing
+    /// the agent CLI is not allowed (throws `threadNotFound` for an unknown thread).
     public func changeAgentCLI(for threadID: UUID, to agentCLI: AgentCLIKind) throws {
         guard threadIndexByID[threadID] != nil else { throw WorkspaceStoreError.threadNotFound }
         throw WorkspaceStoreError.agentCLIChangeNotAllowed
@@ -96,22 +101,30 @@ extension WorkspaceStore {
 
     // MARK: - Thread pin / rename
 
+    /// Toggles the pinned state of the thread with the given identifier and persists it.
     public func toggleThreadPinned(id threadID: UUID) {
         guard let index = threadIndexByID[threadID] else { return }
         mutateThread(at: index) { $0.isPinned.toggle() }
         persistThread(threads[index])
     }
 
+    /// Toggles the pinned state of the currently selected thread, if any.
     public func toggleSelectedThreadPinned() {
         guard let selectedThreadID else { return }
         toggleThreadPinned(id: selectedThreadID)
     }
 
+    /// Reports whether the thread's bound CLI supports renaming its session, gating
+    /// whether a rename can be requested.
     public func canRequestThreadRename(id threadID: UUID) async -> Bool {
         guard let thread = thread(withID: threadID) else { return false }
         return await environment.sessionBindingActor.supportsSessionRename(for: thread.agentCLI)
     }
 
+    /// Requests a session rename for a thread: records the pending rename, invalidates
+    /// cached launch/polling state, and relaunches the selected thread's terminal so the
+    /// new name applies. Throws if the thread is missing, the CLI lacks rename support,
+    /// or the name is empty.
     public func requestThreadRename(id threadID: UUID, to rawName: String) async throws {
         guard let index = threadIndexByID[threadID] else {
             throw WorkspaceStoreError.threadNotFound
@@ -160,6 +173,8 @@ extension WorkspaceStore {
 
     // MARK: - Thread archive
 
+    /// Archives the thread, advancing selection to the next active thread in its
+    /// project when the archived thread was selected, then persists the change.
     public func archiveThread(id threadID: UUID) {
         guard let index = threadIndexByID[threadID] else { return }
         let projectID = threads[index].projectID
@@ -173,11 +188,13 @@ extension WorkspaceStore {
         persistSelection()
     }
 
+    /// Archives the currently selected thread, if any.
     public func archiveSelectedThread() {
         guard let selectedThreadID else { return }
         archiveThread(id: selectedThreadID)
     }
 
+    /// Unarchives the thread, refreshes its `lastOpenedAt`, and selects it.
     public func unarchiveThread(id threadID: UUID) {
         guard let index = threadIndexByID[threadID] else { return }
         mutateThread(at: index) {
@@ -187,6 +204,7 @@ extension WorkspaceStore {
         selectThread(id: threadID)
     }
 
+    /// Unarchives the currently selected thread, if any.
     public func unarchiveSelectedThread() {
         guard let selectedThreadID else { return }
         unarchiveThread(id: selectedThreadID)

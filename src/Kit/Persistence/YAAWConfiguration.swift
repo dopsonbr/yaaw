@@ -1,27 +1,42 @@
 import Foundation
 
+/// The root user-settings document persisted as `settings.yaml`, grouping every
+/// configurable subsystem (agents, projects, theme, icons, fonts, shortcuts,
+/// tools, file browser, indexing) under one Codable value.
 public struct YAAWConfiguration: Codable, Equatable, Sendable {
     /// Current settings-*schema* version. Bumped when the shape of the config
     /// changes in a way that needs an in-memory migration on load. Distinct from
     /// ``version`` (the user-facing config-file version).
     public static let currentSchemaVersion = 1
 
+    /// User-facing config-file version, surfaced to users and clamped to at
+    /// least `1` on load. Distinct from ``schemaVersion``.
     public var version: Int
     /// Schema version this snapshot was written against; drives the migration
     /// ladder in ``validated(diagnosticRecorder:)``. Files written before the
     /// rewrite have no `schemaVersion` key and decode as `0` (legacy), which the
     /// ladder upgrades to ``currentSchemaVersion``.
     public var schemaVersion: Int
+    /// Default agent CLI and per-CLI launch defaults.
     public var agent: AgentSettings
+    /// Project-level settings such as the global chats directory.
     public var projects: ProjectSettings
+    /// Active theme selection and the light/dark pairing for system mode.
     public var theme: ThemeSettings
+    /// File-browser icon pack selection.
     public var icons: IconSettings
+    /// Interface, editor, terminal, and file-browser font families and sizes.
     public var fonts: FontSettings
+    /// Per-action keyboard shortcut bindings.
     public var keyboardShortcuts: KeyboardShortcutSettings
+    /// Executable names and other settings for the bundled/isolated tools.
     public var tools: ToolSettings
+    /// File-browser presentation and behavior settings.
     public var fileBrowser: FileBrowserSettings
+    /// File-indexing settings, including the directory ignore rules.
     public var fileIndexing: FileIndexingSettings
 
+    /// Creates a configuration, defaulting any group not supplied to its own defaults.
     public init(
         version: Int = 1,
         schemaVersion: Int = YAAWConfiguration.currentSchemaVersion,
@@ -48,6 +63,8 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         self.fileIndexing = fileIndexing
     }
 
+    /// Decodes a configuration, tolerating missing keys (each group falls back to
+    /// its defaults) and treating a missing `schemaVersion` as legacy schema `0`.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
@@ -82,32 +99,41 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
             ) ?? FileIndexingSettings()
     }
 
+    /// The built-in default directory ignore rules used by file indexing.
     public static let defaultIgnoreRules = FileIndexingSettings.defaultIgnoreRules
 
+    /// The raw active-theme identifier (may be the `system` sentinel).
     public var themeName: String {
         theme.active
     }
 
+    /// Resolves the concrete theme to use given the current system appearance.
     public func resolvedTheme(systemAppearanceIsDark: Bool) -> ThemeDefinition {
         theme.resolvedTheme(systemAppearanceIsDark: systemAppearanceIsDark)
     }
 
+    /// The directory ignore rules applied during file indexing.
     public var ignoreRules: [String] {
         fileIndexing.ignoreRules
     }
 
+    /// The resolved file-browser icon pack.
     public var fileIconPack: FileIconPack {
         icons.resolvedFileBrowserPack
     }
 
+    /// The default agent CLI used when starting a new thread.
     public var defaultAgentCLI: AgentCLIKind {
         agent.default
     }
 
+    /// The configured executable name for the given agent CLI family.
     public func agentExecutableName(for kind: AgentCLIKind) -> String {
         tools.agents.executableName(for: kind)
     }
 
+    /// Builds the default launch options (executable, permission mode, extra
+    /// arguments) for the given agent CLI family.
     public func defaultLaunchOptions(for kind: AgentCLIKind) -> AgentLaunchOptions {
         let defaults = agent.launchDefaults.defaults(for: kind)
         return AgentLaunchOptions(
@@ -117,10 +143,14 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
         )
     }
 
+    /// The keyboard shortcut bound to the given action.
     public func shortcut(for action: KeyboardShortcutAction) -> KeyboardShortcutDefinition {
         keyboardShortcuts.definition(for: action)
     }
 
+    /// Returns a normalized copy: migrated to the current schema and with each
+    /// settings group validated, optionally recording diagnostics for any
+    /// corrections (unsupported themes/icons, duplicate shortcuts, etc.).
     public func validated(diagnosticRecorder: DiagnosticEventRecording? = nil) -> YAAWConfiguration
     {
         var configuration = self.migratedToCurrentSchema(diagnosticRecorder: diagnosticRecorder)
@@ -176,10 +206,14 @@ public struct YAAWConfiguration: Codable, Equatable, Sendable {
     }
 }
 
+/// Agent-related settings: the default CLI family and per-family launch defaults.
 public struct AgentSettings: Codable, Equatable, Sendable {
+    /// The agent CLI family used by default when starting a new thread.
     public var `default`: AgentCLIKind
+    /// Per-CLI-family default launch options.
     public var launchDefaults: AgentLaunchDefaultsSettings
 
+    /// Creates agent settings with the given default CLI and launch defaults.
     public init(
         default: AgentCLIKind = .codex,
         launchDefaults: AgentLaunchDefaultsSettings = AgentLaunchDefaultsSettings()
@@ -188,6 +222,7 @@ public struct AgentSettings: Codable, Equatable, Sendable {
         self.launchDefaults = launchDefaults
     }
 
+    /// Decodes agent settings, defaulting any missing key.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.default = try container.decodeIfPresent(AgentCLIKind.self, forKey: .default) ?? .codex
@@ -205,15 +240,22 @@ public struct AgentSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Default launch options applied to a single agent CLI family.
 public struct AgentLaunchDefaultSettings: Codable, Equatable, Sendable {
+    /// The default permission-mode identifier, or `nil` to use the CLI's own default.
     public var permissionModeID: String?
+    /// Extra command-line arguments appended when launching the CLI.
     public var additionalArguments: [String]
 
+    /// Creates launch defaults, blanking an empty permission mode and trimming
+    /// and dropping empty additional arguments.
     public init(permissionModeID: String? = nil, additionalArguments: [String] = []) {
         self.permissionModeID = permissionModeID?.configurationNilIfBlank
         self.additionalArguments = additionalArguments.map(\.trimmed).filter { !$0.isEmpty }
     }
 
+    /// Decodes launch defaults, defaulting missing keys and blanking an empty
+    /// permission mode.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.permissionModeID =
@@ -231,12 +273,18 @@ public struct AgentLaunchDefaultSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Per-CLI-family launch defaults for every supported agent CLI.
 public struct AgentLaunchDefaultsSettings: Codable, Equatable, Sendable {
+    /// Launch defaults for the `codex` CLI.
     public var codex: AgentLaunchDefaultSettings
+    /// Launch defaults for the `claude` CLI.
     public var claude: AgentLaunchDefaultSettings
+    /// Launch defaults for the `opencode` CLI.
     public var opencode: AgentLaunchDefaultSettings
+    /// Launch defaults for the `copilot` CLI.
     public var copilot: AgentLaunchDefaultSettings
 
+    /// Creates launch defaults for each CLI family, defaulting any not supplied.
     public init(
         codex: AgentLaunchDefaultSettings = AgentLaunchDefaultSettings(),
         claude: AgentLaunchDefaultSettings = AgentLaunchDefaultSettings(),
@@ -249,6 +297,7 @@ public struct AgentLaunchDefaultsSettings: Codable, Equatable, Sendable {
         self.copilot = copilot
     }
 
+    /// Decodes per-CLI launch defaults, defaulting any missing family.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.codex =
@@ -265,6 +314,7 @@ public struct AgentLaunchDefaultsSettings: Codable, Equatable, Sendable {
             ?? AgentLaunchDefaultSettings()
     }
 
+    /// The launch defaults for the given CLI family.
     public func defaults(for kind: AgentCLIKind) -> AgentLaunchDefaultSettings {
         switch kind {
         case .codex:
@@ -278,6 +328,7 @@ public struct AgentLaunchDefaultsSettings: Codable, Equatable, Sendable {
         }
     }
 
+    /// Replaces the launch defaults for the given CLI family.
     public mutating func setDefaults(_ defaults: AgentLaunchDefaultSettings, for kind: AgentCLIKind)
     {
         switch kind {
@@ -302,15 +353,20 @@ public struct AgentLaunchDefaultsSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Project-level settings, currently the location of the global chats directory.
 public struct ProjectSettings: Codable, Equatable, Sendable {
+    /// The default location for the global chats directory.
     public static let defaultGlobalChatsDirectory = "~/yaaw"
 
+    /// The configured global chats directory, possibly using `~`/relative paths.
     public var globalChatsDirectory: String
 
+    /// Creates project settings with the given global chats directory.
     public init(globalChatsDirectory: String = Self.defaultGlobalChatsDirectory) {
         self.globalChatsDirectory = globalChatsDirectory
     }
 
+    /// Decodes project settings, defaulting a missing global chats directory.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.globalChatsDirectory =
@@ -318,6 +374,8 @@ public struct ProjectSettings: Codable, Equatable, Sendable {
             ?? Self.defaultGlobalChatsDirectory
     }
 
+    /// Resolves the configured global chats directory to an absolute URL,
+    /// expanding `~`/`~/` and treating bare relative paths as home-relative.
     public func resolvedGlobalChatsDirectory(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {
@@ -344,21 +402,29 @@ public struct ProjectSettings: Codable, Equatable, Sendable {
 /// How the active theme is chosen: follow the macOS appearance with a
 /// light/dark pairing, or pin one fixed theme.
 public enum ThemeSelectionMode: Equatable, Sendable {
+    /// Follow the macOS appearance, picking the light or dark paired theme.
     case system
+    /// Always use the theme with the given identifier.
     case fixed(String)
 }
 
+/// Theme selection: the active theme plus the light/dark pairing used in system
+/// mode, and any user-defined custom theme definitions.
 public struct ThemeSettings: Codable, Equatable, Sendable {
     /// Sentinel `active` value meaning "follow the macOS appearance".
     public static let systemActiveID = "system"
 
+    /// The active theme identifier, or the ``systemActiveID`` sentinel.
     public var active: String
     /// Theme used by system mode in the light appearance.
     public var light: String
     /// Theme used by system mode in the dark appearance.
     public var dark: String
+    /// User-defined custom theme definitions, keyed by identifier.
     public var custom: [String: String]
 
+    /// Creates theme settings with the given active theme, light/dark pairing,
+    /// and custom themes.
     public init(
         active: String = ThemeSettings.systemActiveID,
         light: String = ThemeCatalog.defaultLightID,
@@ -371,6 +437,7 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
         self.custom = custom
     }
 
+    /// Decodes theme settings, defaulting any missing key.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.active =
@@ -385,10 +452,13 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
         self.custom = try container.decodeIfPresent([String: String].self, forKey: .custom) ?? [:]
     }
 
+    /// The selection mode implied by ``active``: system pairing or a fixed theme.
     public var mode: ThemeSelectionMode {
         active.trimmed.lowercased() == Self.systemActiveID ? .system : .fixed(active)
     }
 
+    /// Resolves the concrete theme to use given the current system appearance,
+    /// falling back to catalog defaults when the requested theme is unknown.
     public func resolvedTheme(systemAppearanceIsDark: Bool) -> ThemeDefinition {
         switch mode {
         case .system:
@@ -463,13 +533,17 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Icon-related settings, currently the file-browser icon pack selection.
 public struct IconSettings: Codable, Equatable, Sendable {
+    /// The raw identifier of the selected file-browser icon pack.
     public var fileBrowserPack: String
 
+    /// Creates icon settings with the given file-browser icon pack identifier.
     public init(fileBrowserPack: String = FileIconPack.fallback.rawValue) {
         self.fileBrowserPack = fileBrowserPack
     }
 
+    /// Decodes icon settings, defaulting a missing icon pack to the fallback.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.fileBrowserPack =
@@ -477,6 +551,7 @@ public struct IconSettings: Codable, Equatable, Sendable {
             ?? FileIconPack.fallback.rawValue
     }
 
+    /// The resolved file-browser icon pack, falling back when unrecognized.
     public var resolvedFileBrowserPack: FileIconPack {
         FileIconPack(rawValue: fileBrowserPack.trimmed) ?? .fallback
     }
@@ -502,15 +577,22 @@ public struct IconSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Font families and sizes for the interface, editor, terminal, and file browser.
 public struct FontSettings: Codable, Equatable, Sendable {
     /// Sentinel family meaning "use the interface font/size" for the file browser.
     public static let inheritFamily = "inherit"
 
+    /// The interface (UI chrome) font family.
     public var interfaceFamily: String
+    /// The interface font size in points.
     public var interfaceSize: Double
+    /// The editor font family.
     public var editorFamily: String
+    /// The editor font size in points.
     public var editorSize: Double
+    /// The terminal font family.
     public var terminalFamily: String
+    /// The terminal font size in points.
     public var terminalSize: Double
     /// File browser list font. `inherit` (the default) means follow the interface font.
     public var fileBrowserFamily: String
@@ -519,6 +601,7 @@ public struct FontSettings: Codable, Equatable, Sendable {
     /// Whether editor and terminal text shapes font ligatures (when the font has them).
     public var ligatures: Bool
 
+    /// Creates font settings, defaulting any value not supplied.
     public init(
         interfaceFamily: String = "system",
         interfaceSize: Double = 13,
@@ -541,6 +624,7 @@ public struct FontSettings: Codable, Equatable, Sendable {
         self.ligatures = ligatures
     }
 
+    /// Decodes font settings, defaulting any missing key.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.interfaceFamily =

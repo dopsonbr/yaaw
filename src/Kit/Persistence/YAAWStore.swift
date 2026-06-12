@@ -7,20 +7,35 @@ import Foundation
 /// (`upsertThread`, `setRightPanelMode`, …) exist for hot paths that should not
 /// pay the cost of serializing the whole world.
 public struct YAAWSnapshot: Equatable, Sendable {
+    /// All projects, in display order.
     public var projects: [Project]
+    /// All agent threads across every project, in display order.
     public var threads: [AgentThread]
+    /// The currently selected project.
     public var selectedProjectID: UUID
+    /// The currently selected thread, or `nil` when none is selected.
     public var selectedThreadID: UUID?
+    /// The right-panel mode chosen per thread.
     public var rightPanelModesByThreadID: [UUID: RightPanelMode]
+    /// The persisted right-panel state per thread.
     public var rightPanelStatesByThreadID: [UUID: RightPanelState]
+    /// The right-panel mode to apply to threads with no per-thread choice.
     public var selectedRightPanelMode: RightPanelMode
+    /// The set of threads whose bottom terminal is expanded.
     public var bottomTerminalExpandedThreadIDs: Set<UUID>
+    /// The persisted window/pane layout state.
     public var layoutState: LayoutState
+    /// The file-index metadata recorded per thread.
     public var fileIndexMetadataByThreadID: [UUID: FileIndexMetadata]
+    /// The activity state recorded per thread.
     public var threadActivityByThreadID: [UUID: ThreadActivityState]
+    /// The set of projects expanded in the project list.
     public var expandedProjectIDs: Set<UUID>
+    /// The set of projects whose archived section is expanded.
     public var expandedArchivedProjectIDs: Set<UUID>
 
+    /// Whether the selected thread's bottom terminal is expanded; setting it
+    /// toggles membership in `bottomTerminalExpandedThreadIDs` for that thread.
     public var isGlobalTerminalExpanded: Bool {
         get { selectedThreadID.map { bottomTerminalExpandedThreadIDs.contains($0) } ?? false }
         set {
@@ -33,6 +48,9 @@ public struct YAAWSnapshot: Equatable, Sendable {
         }
     }
 
+    /// Creates a snapshot, backfilling default right-panel states for threads
+    /// that have a mode but no explicit state and seeding the layout state from
+    /// `isGlobalTerminalExpanded` when no `layoutState` is supplied.
     public init(
         projects: [Project],
         threads: [AgentThread],
@@ -80,9 +98,12 @@ public struct YAAWSnapshot: Equatable, Sendable {
 
 /// A persisted file-index cache row: directory metadata plus its ordered entries.
 public struct CachedFileIndex: Equatable, Sendable {
+    /// The directory metadata (cache key, git identity, timestamps).
     public var metadata: FileIndexMetadata
+    /// The ordered file-browser entries for the directory.
     public var entries: [FileBrowserEntry]
 
+    /// Creates a cached file index from its metadata and entries.
     public init(metadata: FileIndexMetadata, entries: [FileBrowserEntry]) {
         self.metadata = metadata
         self.entries = entries

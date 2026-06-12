@@ -1,9 +1,13 @@
 import Foundation
 
+/// A resolved icon, either an SF Symbol or a bundled file-icon asset.
 public enum AppIcon: Equatable, Sendable {
+    /// An SF Symbol identified by its system symbol name.
     case systemSymbol(String)
+    /// A bundled file-icon asset from one of the icon packs.
     case bundledAsset(BundledIconAsset)
 
+    /// The SF Symbol name used to render this icon.
     public var systemSymbolName: String {
         switch self {
         case .systemSymbol(let name):
@@ -13,6 +17,7 @@ public enum AppIcon: Equatable, Sendable {
         }
     }
 
+    /// The theme role tint for this icon, or `nil` for plain system symbols.
     public var draculaRole: DraculaRole? {
         switch self {
         case .systemSymbol:
@@ -23,12 +28,18 @@ public enum AppIcon: Equatable, Sendable {
     }
 }
 
+/// A file-icon asset drawn from an icon pack, with its symbol and tint role.
 public struct BundledIconAsset: Equatable, Sendable {
+    /// The asset identifier, namespaced by pack.
     public let id: String
+    /// The icon pack this asset belongs to.
     public let pack: FileIconPack
+    /// The SF Symbol name used to render the asset.
     public let systemSymbolName: String
+    /// The theme role used to tint the asset.
     public let draculaRole: DraculaRole
 
+    /// Creates a bundled icon asset.
     public init(id: String, pack: FileIconPack, systemSymbolName: String, draculaRole: DraculaRole)
     {
         self.id = id
@@ -38,35 +49,64 @@ public struct BundledIconAsset: Equatable, Sendable {
     }
 }
 
+/// A semantic UI icon role that maps to a concrete `AppIcon`.
 public enum IconRole: Equatable, Sendable {
+    /// Toggle for the left sidebar.
     case sidebar
+    /// Toggle for the right sidebar.
     case rightSidebar
+    /// Navigate to the previous location.
     case navigateBack
+    /// Navigate to the next location.
     case navigateForward
+    /// Open the settings/preferences surface.
     case settings
+    /// Close the current item or surface.
     case close
+    /// Open a document.
     case openDocument
+    /// Reload the current content.
     case reload
+    /// Install a pending update.
     case installUpdate
+    /// Create a new project.
     case newProject
+    /// Disclosure indicator for an expanded item.
     case disclosureExpanded
+    /// Disclosure indicator for a collapsed item.
     case disclosureCollapsed
+    /// Pin an item.
     case pin
+    /// Unpin an item.
     case unpin
+    /// Indicator for an already-pinned item.
     case pinned
+    /// Move an item up in its ordering.
     case moveUp
+    /// Move an item down in its ordering.
     case moveDown
+    /// Create a new thread.
     case newThread
+    /// Archive an item.
     case archive
+    /// Restore an archived item.
     case unarchive
+    /// Reveal additional actions.
     case moreActions
+    /// Add a new item.
     case add
+    /// A warning indicator.
     case warning
+    /// Toggle for the bottom terminal.
     case bottomTerminal
+    /// Swap between workspaces.
     case workspaceSwap
+    /// Icon for a given right-panel mode.
     case rightPanelMode(RightPanelMode)
+    /// Overlay badge for a file's git/index state.
     case fileStateOverlay(FileStateOverlay)
 
+    /// The concrete icon that renders this role.
     public var icon: AppIcon {
         switch self {
         case .sidebar:
@@ -136,20 +176,33 @@ public enum IconRole: Equatable, Sendable {
     }
 }
 
+/// A badge overlaying a file icon to convey its git or indexing state.
 public enum FileStateOverlay: String, CaseIterable, Equatable, Identifiable, Sendable {
+    /// The file has uncommitted modifications.
     case modified
+    /// The file is newly added to the index.
     case added
+    /// The file has been deleted.
     case deleted
+    /// The file has been renamed.
     case renamed
+    /// The file is ignored by git.
     case ignored
+    /// The file is untracked by git.
     case untracked
+    /// The file has a merge conflict.
     case conflicted
+    /// The file is awaiting indexing.
     case indexingPending
+    /// Indexing the file failed.
     case indexingFailed
+    /// A required external tool is unavailable.
     case externalToolUnavailable
 
+    /// The stable identifier (the raw value).
     public var id: String { rawValue }
 
+    /// The SF Symbol name used to render this overlay badge.
     public var systemSymbolName: String {
         switch self {
         case .modified:
@@ -176,26 +229,42 @@ public enum FileStateOverlay: String, CaseIterable, Equatable, Identifiable, Sen
     }
 }
 
+/// A selectable file-icon pack.
 public enum FileIconPack: String, CaseIterable, Codable, Equatable, Identifiable, Sendable {
+    /// The Material file icon theme.
     case material = "material-file-icons"
+    /// The Catppuccin icon theme.
     case catppuccin = "catppuccin-file-icons"
 
+    /// The stable identifier (the raw value).
     public var id: String { rawValue }
 
+    /// The pack used when none is selected.
     public static let fallback: FileIconPack = .material
 }
 
+/// One manifest rule mapping file/folder name patterns to an icon asset.
 public struct FileIconManifestEntry: Equatable, Sendable {
+    /// The asset identifier, namespaced by pack.
     public let assetID: String
+    /// The icon pack this entry belongs to.
     public let pack: FileIconPack
+    /// The license identifier for the asset's source.
     public let licenseID: String
+    /// Lowercased file names matched exactly.
     public let exactFileNames: Set<String>
+    /// Lowercased compound extensions (for example `test.ts`) matched as suffixes.
     public let compoundExtensions: Set<String>
+    /// Lowercased single file extensions matched against the path extension.
     public let extensions: Set<String>
+    /// Lowercased folder names matched exactly.
     public let folderNames: Set<String>
+    /// The SF Symbol name used to render the asset.
     public let systemSymbolName: String
+    /// The theme role used to tint the asset.
     public let draculaRole: DraculaRole
 
+    /// Creates a manifest entry, lowercasing all name and extension patterns.
     public init(
         assetID: String,
         pack: FileIconPack,
@@ -218,6 +287,7 @@ public struct FileIconManifestEntry: Equatable, Sendable {
         self.draculaRole = draculaRole
     }
 
+    /// The bundled icon asset described by this entry.
     public var asset: BundledIconAsset {
         BundledIconAsset(
             id: assetID,
@@ -228,12 +298,18 @@ public struct FileIconManifestEntry: Equatable, Sendable {
     }
 }
 
+/// The full set of icon-mapping rules for a single icon pack.
 public struct FileIconManifest: Equatable, Sendable {
+    /// The icon pack this manifest describes.
     public let pack: FileIconPack
+    /// The human-readable name of the pack's source.
     public let sourceName: String
+    /// The license identifier for the pack's source.
     public let licenseID: String
+    /// The ordered icon-mapping entries; earlier entries take precedence.
     public let entries: [FileIconManifestEntry]
 
+    /// Creates a manifest from its pack metadata and entries.
     public init(
         pack: FileIconPack, sourceName: String, licenseID: String, entries: [FileIconManifestEntry]
     ) {
@@ -243,6 +319,7 @@ public struct FileIconManifest: Equatable, Sendable {
         self.entries = entries
     }
 
+    /// Returns the built-in manifest for the given icon pack.
     public static func manifest(for pack: FileIconPack) -> FileIconManifest {
         switch pack {
         case .material:
@@ -348,15 +425,20 @@ public struct FileIconManifest: Equatable, Sendable {
     }
 }
 
+/// Resolves the icon for a file-browser entry using a pack's manifest.
 public struct FileIconResolver: Equatable, Sendable {
+    /// The icon pack used to resolve icons.
     public let pack: FileIconPack
     private let manifest: FileIconManifest
 
+    /// Creates a resolver backed by the given icon pack.
     public init(pack: FileIconPack = .fallback) {
         self.pack = pack
         self.manifest = FileIconManifest.manifest(for: pack)
     }
 
+    /// Resolves the icon for a file-browser entry, using the expanded folder
+    /// variant when `isExpanded` is `true`.
     public func icon(for entry: FileBrowserEntry, isExpanded: Bool = false) -> AppIcon {
         let normalizedPath = FilePathNormalizer.normalizedRelativePath(entry.relativePath)
             .lowercased()

@@ -3,6 +3,8 @@ import Foundation
 extension WorkspaceStore {
     // MARK: - Selection
 
+    /// Selects the project, expands it, selects its first active thread (or none for the
+    /// global project), records the change in navigation history, and persists it.
     public func selectProject(id projectID: UUID) {
         guard let project = projects.first(where: { $0.id == projectID }) else { return }
         guard selectedProjectID != projectID else { return }
@@ -20,6 +22,8 @@ extension WorkspaceStore {
             touchedProject: projects.first { $0.id == projectID }, expandedProjectID: projectID)
     }
 
+    /// Selects the thread and its owning project, marks both opened, records the change
+    /// in navigation history, and persists it.
     public func selectThread(id threadID: UUID) {
         guard let thread = thread(withID: threadID) else { return }
         markProjectOpened(thread.projectID)
@@ -46,12 +50,14 @@ extension WorkspaceStore {
 
     // MARK: - Navigation
 
+    /// Moves to the previous selection in navigation history, if any, and persists it.
     public func navigateBack() {
         guard let selection = navigationHistory.goBack() else { return }
         apply(selection)
         persistSelectionChange(expandedProjectID: selection.projectID)
     }
 
+    /// Moves to the next selection in navigation history, if any, and persists it.
     public func navigateForward() {
         guard let selection = navigationHistory.goForward() else { return }
         apply(selection)

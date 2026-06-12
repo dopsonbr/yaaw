@@ -3,11 +3,15 @@ import Foundation
 extension WorkspaceStore {
     // MARK: - Session-link candidates / manual link
 
+    /// Returns the candidate existing CLI sessions a thread could be linked to, queried
+    /// from the binding actor (empty when the thread is unknown).
     public func sessionLinkCandidates(for threadID: UUID) async -> [SessionLinkCandidate] {
         guard let thread = thread(withID: threadID) else { return [] }
         return await environment.sessionBindingActor.sessionLinkCandidates(for: thread)
     }
 
+    /// Links a thread to the chosen existing session candidate, applying its identity
+    /// and name (ignored when the candidate's CLI does not match the thread's).
     public func linkSession(threadID: UUID, candidate: SessionLinkCandidate) {
         guard let index = threadIndexByID[threadID],
             threads[index].agentCLI == candidate.agentCLI
@@ -24,6 +28,8 @@ extension WorkspaceStore {
         )
     }
 
+    /// Clears any session identity for an unlinked thread and marks it as having
+    /// deliberately skipped linking, so it launches a fresh session instead.
     public func startNewSessionForUnlinkedThread(threadID: UUID) {
         guard let index = threadIndexByID[threadID] else { return }
         mutateThread(at: index) {

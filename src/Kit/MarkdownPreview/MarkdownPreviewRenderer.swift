@@ -1,6 +1,9 @@
 import Foundation
 
+/// Renders Markdown source into a self-contained, sanitized HTML document for the
+/// in-app preview, including styling and client-side Mermaid diagram rendering.
 public enum MarkdownPreviewRenderer {
+    /// Renders the Markdown source into a full HTML document titled from `sourceURL`.
     public static func renderHTML(markdown: String, sourceURL: URL) -> String {
         let title =
             sourceURL.lastPathComponent.isEmpty ? "Markdown Preview" : sourceURL.lastPathComponent
@@ -52,6 +55,7 @@ public enum MarkdownPreviewRenderer {
         return escaped
     }
 
+    /// Reports whether the URL is a local Markdown file (`.md` or `.markdown`).
     public static func isMarkdownURL(_ url: URL) -> Bool {
         guard url.isFileURL else { return false }
         let pathExtension = url.pathExtension.lowercased()

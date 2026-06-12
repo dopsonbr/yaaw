@@ -2,6 +2,8 @@
     import AppKit
 
     extension KeyboardShortcutDefinition {
+        /// Reports whether the given key-down event matches this shortcut's key and
+        /// modifier set (false for non-key-down, unbound, or invalid definitions).
         public func matches(_ event: NSEvent) -> Bool {
             guard event.type == .keyDown, isBound, isValid else { return false }
             guard event.yaawShortcutKey == normalizedKey else { return false }
@@ -10,6 +12,8 @@
     }
 
     extension NSEvent {
+        /// The event's single normalized shortcut key (lowercased, shift-mapped back to
+        /// its unshifted punctuation), or `nil` if it is not a single character.
         public var yaawShortcutKey: String? {
             let rawKey = charactersIgnoringModifiers ?? characters
             let key = rawKey?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -22,6 +26,7 @@
             return key
         }
 
+        /// The event's active modifier flags expressed as YAAW shortcut modifiers.
         public var yaawShortcutModifiers: Set<KeyboardShortcutModifier> {
             var shortcutModifiers: Set<KeyboardShortcutModifier> = []
             let relevantFlags = modifierFlags.intersection(.deviceIndependentFlagsMask)

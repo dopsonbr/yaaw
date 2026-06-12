@@ -1,10 +1,14 @@
 import Foundation
 import Yams
 
+/// Loads, validates, renders, and atomically saves the user's YAML settings file
+/// (`settings.yaml`), recovering to defaults when the on-disk file is invalid.
 public final class YAMLConfigurationStore {
     private let path: URL
     private let diagnosticRecorder: DiagnosticEventRecording
 
+    /// Creates a store backed by the YAML file at `path`, recording recovery events
+    /// through the given diagnostic recorder.
     public init(
         path: URL,
         diagnosticRecorder: DiagnosticEventRecording = LoggerDiagnosticEventRecorder.shared
@@ -13,6 +17,7 @@ public final class YAMLConfigurationStore {
         self.diagnosticRecorder = diagnosticRecorder
     }
 
+    /// The default settings path: `~/Library/Application Support/YAAW/settings.yaml`.
     public static func defaultPath() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
             0]
@@ -20,21 +25,26 @@ public final class YAMLConfigurationStore {
             .appendingPathComponent("settings.yaml")
     }
 
+    /// Writes a default settings file to disk if none exists yet.
     public func ensureFileExists() throws {
         guard !FileManager.default.fileExists(atPath: path.path) else { return }
         try save(YAAWConfiguration())
     }
 
+    /// Returns the raw YAML text from disk, creating the default file first if needed.
     public func loadText() throws -> String {
         try ensureFileExists()
         return try String(contentsOf: path, encoding: .utf8)
     }
 
+    /// Decodes and validates YAML text into a `YAAWConfiguration`, throwing on failure.
     public func validate(text: String) throws -> YAAWConfiguration {
         try YAMLDecoder().decode(YAAWConfiguration.self, from: text)
             .validated(diagnosticRecorder: diagnosticRecorder)
     }
 
+    /// Loads and validates the configuration, recording a recovery diagnostic and
+    /// returning defaults when the on-disk file is missing or invalid.
     public func load() -> YAAWConfiguration {
         do {
             return try validate(text: loadText())
@@ -53,10 +63,13 @@ public final class YAMLConfigurationStore {
         }
     }
 
+    /// Validates and renders the configuration, then writes it to disk atomically.
     public func save(_ configuration: YAAWConfiguration) throws {
         try saveText(Self.render(configuration.validated()))
     }
 
+    /// Validates the YAML text, then writes it to the settings path atomically via a
+    /// temporary file. Throws if validation or the file write fails.
     public func saveText(_ text: String) throws {
         _ = try validate(text: text)
         try FileManager.default.createDirectory(
@@ -74,6 +87,8 @@ public final class YAMLConfigurationStore {
         }
     }
 
+    /// Renders the configuration to commented, human-editable YAML text that documents
+    /// the defaults and active behavior for each setting.
     public static func render(_ configuration: YAAWConfiguration = YAAWConfiguration()) -> String {
         let configuration = configuration.validated()
         return """

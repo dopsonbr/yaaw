@@ -161,6 +161,9 @@ extension WorkspaceStore {
 
     // MARK: - Activation
 
+    /// Activates (launches or re-focuses) the render surface for a role. Non-agent and
+    /// already-cached agent launches activate synchronously; a first agent launch is
+    /// built asynchronously. Returns whether the surface is active after the call.
     @discardableResult
     public func activateTerminal(role: RenderSurfaceRole) -> Bool {
         // Synchronous activation path: build the non-agent launch directly and the
@@ -219,6 +222,8 @@ extension WorkspaceStore {
             metadata: ["role": role.diagnosticName])
     }
 
+    /// Shuts down the render surface for a role; for project terminals it also clears the
+    /// cached launch descriptor and capture offset and records the terminal as closed.
     public func terminateTerminal(role: RenderSurfaceRole) {
         environment.renderSurfaceManager.shutdown(role: role)
         if case .project(let threadID) = role {

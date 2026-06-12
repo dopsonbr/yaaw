@@ -184,18 +184,21 @@ extension SQLiteYAAWStore {
 // MARK: - Incremental operations
 
 extension SQLiteYAAWStore {
+    /// Inserts or updates a single project row.
     public func upsertProject(_ project: Project) {
         runIncremental(name: "upsert_project") {
             try upsertProjectStatement(project)
         }
     }
 
+    /// Inserts or updates a single thread row.
     public func upsertThread(_ thread: AgentThread) {
         runIncremental(name: "upsert_thread") {
             try upsertThreadStatement(thread)
         }
     }
 
+    /// Deletes a thread by ID, cascading to its child rows.
     public func deleteThread(id: UUID) {
         runIncremental(name: "delete_thread") {
             let statement = try cachedPrepare("DELETE FROM threads WHERE id = ?")
@@ -205,36 +208,43 @@ extension SQLiteYAAWStore {
         }
     }
 
+    /// Persists the right-panel mode for a thread.
     public func setRightPanelMode(threadID: UUID, mode: RightPanelMode) {
         runIncremental(name: "set_right_panel_mode") {
             try upsertRightPanelModeStatement(threadID: threadID, mode: mode)
         }
     }
 
+    /// Persists the full right-panel state (tabs, folders, selection) for a thread.
     public func setRightPanelState(threadID: UUID, state: RightPanelState) {
         runIncremental(name: "set_right_panel_state") {
             try writeRightPanelState(threadID: threadID, state: state)
         }
     }
 
+    /// Persists whether a thread's bottom terminal is expanded.
     public func setBottomTerminalExpanded(threadID: UUID, isExpanded: Bool) {
         runIncremental(name: "set_bottom_terminal_expanded") {
             try setBottomTerminalExpandedStatement(threadID: threadID, isExpanded: isExpanded)
         }
     }
 
+    /// Persists the selected project.
     public func setSelectedProject(_ projectID: UUID) {
         runIncremental(name: "set_selected_project") {
             try upsertAppStateStatement(key: "selected_project_id", value: projectID.uuidString)
         }
     }
 
+    /// Persists the selected thread, or clears it when `nil`.
     public func setSelectedThread(_ threadID: UUID?) {
         runIncremental(name: "set_selected_thread") {
             try setSelectedThreadStatement(threadID)
         }
     }
 
+    /// Persists a selection change in one transaction: any touched project/thread
+    /// rows, the optionally expanded project, and the selected project/thread.
     public func persistSelectionChange(
         selectedProjectID: UUID,
         selectedThreadID: UUID?,
@@ -258,18 +268,23 @@ extension SQLiteYAAWStore {
         }
     }
 
+    /// Persists the workspace layout state (split sizes and collapse flags).
     public func setLayoutState(_ state: LayoutState) {
         runIncremental(name: "set_layout_state") {
             try saveLayoutState(state)
         }
     }
 
+    /// Persists whether a project's sidebar row is expanded, preserving its
+    /// archive-expanded flag.
     public func setProjectExpanded(_ projectID: UUID, isExpanded: Bool) {
         runIncremental(name: "set_project_expanded") {
             try setProjectExpandedStatement(projectID: projectID, isExpanded: isExpanded)
         }
     }
 
+    /// Persists whether a project's archived-threads section is expanded,
+    /// preserving its expanded flag.
     public func setProjectArchiveExpanded(_ projectID: UUID, isExpanded: Bool) {
         runIncremental(name: "set_project_archive_expanded") {
             let currentExpandedState =
@@ -283,18 +298,23 @@ extension SQLiteYAAWStore {
         }
     }
 
+    /// Inserts or updates a thread's file-index metadata row.
     public func upsertFileIndexMetadata(_ metadata: FileIndexMetadata) {
         runIncremental(name: "upsert_file_index_metadata") {
             try upsertFileIndexMetadataStatement(metadata)
         }
     }
 
+    /// Inserts or updates a thread's activity-state row.
     public func upsertThreadActivity(_ activity: ThreadActivityState) {
         runIncremental(name: "upsert_thread_activity") {
             try upsertThreadActivityStatement(activity)
         }
     }
 
+    /// Replaces the shared cached file index for one cache key: clears its prior
+    /// entries, then writes the new metadata and ordered entries. No-op when the
+    /// index has no cache key.
     public func upsertCachedFileIndex(_ index: CachedFileIndex) {
         runIncremental(name: "upsert_cached_file_index") {
             guard let cacheKey = index.metadata.cacheKey else { return }

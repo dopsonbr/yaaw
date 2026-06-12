@@ -46,12 +46,19 @@ public struct AgentCLIOptionCatalog: Codable, Equatable, Sendable {
 /// One CLI family's discovered options: executable path, version, help hash,
 /// permission presets, and a diagnostic note.
 public struct AgentCLIOptionCatalogEntry: Codable, Equatable, Sendable {
+    /// The CLI family this entry describes.
     public var kind: AgentCLIKind
+    /// The resolved executable path probed, or `nil` if not found.
     public var executablePath: String?
+    /// The CLI's reported version, or `nil` if unknown.
     public var version: String?
+    /// A stable hash of the CLI's `--help` output used to detect changes.
     public var helpHash: String?
+    /// When this entry was last probed, or `nil` for fallbacks.
     public var capturedAt: Date?
+    /// The permission presets discovered for this family.
     public var permissionPresets: [AgentPermissionMode]
+    /// A human-readable note about how this entry was produced, if any.
     public var diagnostic: String?
 
     /// Creates an entry; blank version/hash/diagnostic are normalized to `nil`.
@@ -122,6 +129,8 @@ public final class AgentCLIOptionCatalogService: AgentCLIOptionCatalogServicing 
             .appendingPathComponent("catalog.json")
     }
 
+    /// Loads the cached catalog from disk, returning the built-in fallback when
+    /// the cache is missing or fails to decode.
     public func loadCatalog() -> AgentCLIOptionCatalog {
         guard fileManager.fileExists(atPath: cachePath.path) else {
             return .fallback
@@ -135,6 +144,8 @@ public final class AgentCLIOptionCatalogService: AgentCLIOptionCatalogServicing 
         }
     }
 
+    /// Re-probes each CLI's `--help`, falling back to the prior cached entry (then
+    /// the built-in fallback) on failure, then persists and returns the catalog.
     public func refreshCatalog(
         configuration: YAAWConfiguration,
         resolver: any AgentCLIExecutableResolving,
@@ -329,9 +340,13 @@ public enum AgentCLIOptionCatalogParser {
 
 /// Errors raised while probing a CLI for its option catalog.
 public enum AgentCLIOptionCatalogError: Error, Equatable, Sendable {
+    /// The CLI executable could not be resolved (the named executable).
     case missingExecutable(String)
+    /// The probe did not finish within the timeout (the executable path).
     case timeout(String)
+    /// The CLI produced no output (the executable path).
     case emptyOutput(String)
+    /// The CLI's `--help` output did not yield recognizable presets (the family).
     case unrecognizedHelp(String)
 }
 
