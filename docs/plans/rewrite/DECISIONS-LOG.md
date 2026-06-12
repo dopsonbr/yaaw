@@ -598,3 +598,39 @@ real GUI (the `YAAWE2E` `screenshot`/`send-key`/`send-click`/`frontmost`/
 > and "no floaters" were not re-screenshotted live this round — they rest on the
 > isolated proof + the unchanged snapshot→IOSurface→pane path, pending the owner's
 > eyeball (DEFERRED #29).
+
+> **[D-032] Browser pane: intermittent black + extreme resize flicker (snapshot-timing)** — *(2026-06-12)*
+> **Symptom (owner eyeball after D-031):** floaters gone, but the browser pane
+> (a) sometimes stayed black until a manual resize and (b) flickered extremely
+> during resize. The same file rendered fine once resized (Image #5), so this was
+> a snapshot-*timing* race, not a render failure.
+> **Root cause:** the `WKWebView` → `takeSnapshot` → shared-IOSurface pipeline
+> raced WebKit's async paint. (1) The first snapshot after a load could be
+> unpainted; `draw` drew it anyway, clearing the surface to transparent
+> (composited black over the pane backdrop), and the three fixed-delay settling
+> snapshots sometimes *all* missed the real paint → black until a resize forced a
+> fresh one. (2) `resize` took a forced `afterScreenUpdates` snapshot on **every**
+> resize event (dozens/sec during a drag), thrashing WebKit's relayout, and any
+> blank/transparent intermediate frame was pushed → the pane strobed between
+> content and black.
+> **Options:** (a) debounce resize so the surface is re-snapshotted only after the
+> drag settles — smoothest, but the pane shows stretched content mid-drag and it's
+> more moving parts; (b) drop unpainted snapshots + bound/coalesce the forced
+> snapshots — minimal, attacks both root causes directly.
+> **Decision:** (b). In `draw`, detect a blank snapshot (downsample 12×12, every
+> sampled alpha 0 ⇒ unpainted) and **skip the push**, keeping the last good frame.
+> Replace the fixed delays with a *single* coalesced retry loop (`settleLoopActive`
+> guard) that forces snapshots at ~10/s and stops the instant a painted frame lands
+> (`capturedNonBlankFrame`); repeated resizes only refresh its retry budget instead
+> of each taking a forced snapshot. **Why:** dropping blanks kills the flicker (no
+> black frame is ever composited) and the stays-black (a blank no longer flips the
+> pane to a black "ready" state — the loading overlay holds until real pixels
+> arrive); the single loop removes the per-event forced-relayout thrash; the steady
+> 250 ms pump carries intermediate frames.
+> **Verification:** isolated experiments (`/tmp/{blanktest,resizetest}.swift`)
+> confirmed an unpainted snapshot returns **nil** (already guarded) or a fully
+> transparent image (now dropped), that painted content is **never** misclassified
+> as blank (no false drops — the load-bearing risk), and that mid-resize snapshots
+> return opaque content. Build + 331 tests + lint (0 serious) green. Live in-app
+> resize feel is the owner's to confirm (DEFERRED #29) — if any residual jitter
+> remains, debouncing the resize (option a) is the next lever.
