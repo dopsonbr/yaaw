@@ -36,6 +36,46 @@ final class RightPanelStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testExpandedFoldersAreRememberedPerThread() async {
+        let fixture = StoreFixture()
+        let harness = await StoreHarnessBuilder.make(store: fixture.makeStore())
+
+        harness.rightPanel.setExpandedFolders(
+            ["src", "src/App"], forThreadID: fixture.firstThreadID)
+        harness.rightPanel.setExpandedFolders(["docs"], forThreadID: fixture.secondThreadID)
+
+        // Each thread keeps its own expansion set; setting one never touches the other.
+        XCTAssertEqual(
+            harness.rightPanel.expandedFolders(forThreadID: fixture.firstThreadID),
+            ["src", "src/App"])
+        XCTAssertEqual(
+            harness.rightPanel.expandedFolders(forThreadID: fixture.secondThreadID), ["docs"])
+        XCTAssertFalse(
+            harness.rightPanel.expandedFolders(forThreadID: fixture.firstThreadID).contains("docs"))
+    }
+
+    @MainActor
+    func testSelectedFileMemoryIsScopedToThreadAndRestoredOnSwitchBack() async {
+        let fixture = StoreFixture()
+        let harness = await StoreHarnessBuilder.make(store: fixture.makeStore())
+
+        // Selecting a file while thread A is selected records it as A's remembered file.
+        harness.rightPanel.setSelectedFile("README.md")
+        XCTAssertEqual(
+            harness.rightPanel.rememberedSelectedFile(forThreadID: fixture.firstThreadID),
+            "README.md")
+        XCTAssertNil(
+            harness.rightPanel.rememberedSelectedFile(forThreadID: fixture.secondThreadID))
+
+        // Re-pointing to thread B (none remembered) clears the published selection,
+        // and switching back to A restores A's remembered file.
+        harness.rightPanel.restoreSelectedFile(forThreadID: fixture.secondThreadID)
+        XCTAssertNil(harness.rightPanel.selectedFileRelativePath)
+        harness.rightPanel.restoreSelectedFile(forThreadID: fixture.firstThreadID)
+        XCTAssertEqual(harness.rightPanel.selectedFileRelativePath, "README.md")
+    }
+
+    @MainActor
     func testRightPanelTabOrderKeepsFilesGitNvimTabsThenPlusSlot() async {
         let harness = await makeHarness()
         harness.rightPanel.openFileInNvim(relativePath: "README.md")
