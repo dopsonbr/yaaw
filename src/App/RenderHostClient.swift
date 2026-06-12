@@ -195,6 +195,10 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
         connectionsByRole[role]?.send(.input(InputPayload(data: data)))
     }
 
+    func sendMouse(role: RenderSurfaceRole, payload: MousePayload) {
+        connectionsByRole[role]?.send(.mouse(payload))
+    }
+
     func shutdownAll() {
         for role in Array(connectionsByRole.keys) {
             shutdown(role: role)

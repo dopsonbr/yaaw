@@ -3,6 +3,7 @@ import IOSurface
 import QuartzCore
 import SwiftUI
 import YAAWKit
+import YAAWRenderProtocol
 
 /// SwiftUI host for a render-helper surface. Displays the helper's shared
 /// `IOSurface` directly as the pane layer's `contents` (ADR-004 Candidate 2):
@@ -158,9 +159,78 @@ final class TerminalPaneView: NSView {
         forward(Data(text.utf8))
     }
 
+    // MARK: - Mouse forwarding
+
+    // All mouse events are forwarded to the helper surface (the real NSView lives
+    // off-screen in the helper, so it never receives them directly). The terminal
+    // helper feeds them to libghostty (mouse-mode escape sequences for
+    // nvim/lazygit/less/etc.); the browser helper maps scroll/click to WebKit.
+    // Positions are the pane-local point in this flipped (top-left) view, which
+    // is the coordinate space the helper expects.
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        super.mouseDown(with: event)
+        forwardMouse(event, action: .down, button: .left)
+    }
+    override func mouseUp(with event: NSEvent) { forwardMouse(event, action: .up, button: .left) }
+    override func mouseDragged(with event: NSEvent) {
+        forwardMouse(event, action: .dragged, button: .left)
+    }
+    override func rightMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        forwardMouse(event, action: .down, button: .right)
+    }
+    override func rightMouseUp(with event: NSEvent) {
+        forwardMouse(event, action: .up, button: .right)
+    }
+    override func rightMouseDragged(with event: NSEvent) {
+        forwardMouse(event, action: .dragged, button: .right)
+    }
+    override func otherMouseDown(with event: NSEvent) {
+        forwardMouse(event, action: .down, button: .middle)
+    }
+    override func otherMouseUp(with event: NSEvent) {
+        forwardMouse(event, action: .up, button: .middle)
+    }
+    override func otherMouseDragged(with event: NSEvent) {
+        forwardMouse(event, action: .dragged, button: .middle)
+    }
+    override func mouseMoved(with event: NSEvent) {
+        forwardMouse(event, action: .moved, button: .left)
+    }
+    override func scrollWheel(with event: NSEvent) {
+        forwardMouse(event, action: .scroll, button: .left)
+    }
+
+    /// A tracking area so `mouseMoved` (hover, no button) reaches this view
+    /// without toggling the window-global `acceptsMouseMovedEvents`.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: bounds,
+                options: [.mouseMoved, .activeInActiveApp, .inVisibleRect],
+                owner: self,
+                userInfo: nil))
+    }
+
+    private func forwardMouse(
+        _ event: NSEvent, action: MousePayload.Action, button: MousePayload.Button
+    ) {
+        guard let client, let role else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        client.sendMouse(
+            role: role,
+            payload: MousePayload(
+                action: action,
+                button: button,
+                x: Double(point.x),
+                y: Double(point.y),
+                modifierFlags: event.modifierFlags.rawValue,
+                scrollDeltaX: Double(event.scrollingDeltaX),
+                scrollDeltaY: Double(event.scrollingDeltaY),
+                hasPreciseScrolling: event.hasPreciseScrollingDeltas))
     }
 
     /// Auto-focus the agent (project) terminal when it enters the window, so the
@@ -168,14 +238,34 @@ final class TerminalPaneView: NSView {
     /// reaches the pane once the window is keyed, without depending on a pointer
     /// click. Only claims focus when nothing meaningful holds it (so it never
     /// steals focus from e.g. the file-search field). Non-project surfaces keep
-    /// click-to-focus.
+    /// click-to-focus. Also pushes the real backing scale to the helper as soon as
+    /// the view has a window, so the first composited frame is rendered at the
+    /// correct density rather than the helper's pre-resize default (blurry-until-
+    /// resized fix; see also `viewDidChangeBackingProperties`).
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window != nil { applyBackingScaleAndReportViewport() }
         guard let window, case .project? = role else { return }
         let current = window.firstResponder
         if current == nil || current === window {
             window.makeFirstResponder(self)
         }
+    }
+
+    /// Fired when the backing scale becomes known or changes (entering a window,
+    /// moving between displays of different density). Re-stamps the layer scale and
+    /// re-sends the viewport so the helper re-renders the shared surface at the new
+    /// density — this is what makes the first frame crisp without a manual resize.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyBackingScaleAndReportViewport()
+    }
+
+    private func applyBackingScaleAndReportViewport() {
+        let scale = window?.backingScaleFactor ?? 2.0
+        layer?.contentsScale = scale
+        surfaceLayer.contentsScale = scale
+        sendViewportIfNeeded(scale: scale)
     }
 
     private func forward(_ data: Data) {

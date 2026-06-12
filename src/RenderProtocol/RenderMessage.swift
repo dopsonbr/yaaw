@@ -13,10 +13,69 @@ public enum RenderMessage: Codable, Equatable, Sendable {
     case resize(ResizePayload)
     /// Keyboard or paste input to inject into the surface.
     case input(InputPayload)
+    /// A mouse event (button / move / drag / scroll) to inject into the surface.
+    case mouse(MousePayload)
     /// Hot-reload theme/font/ligatures on the live surface (no relaunch).
     case setRendering(RenderingPayload)
     /// Terminate the helper cleanly.
     case shutdown
+}
+
+/// A mouse event forwarded from the app pane to a helper surface, sent in
+/// ``RenderMessage/mouse(_:)``.
+///
+/// Coordinates are **pane-local points in a top-left origin** (the app pane is a
+/// flipped `NSView`, and libghostty's `mousePoint` likewise yields top-left), so
+/// the helper can map them straight onto its surface without another flip.
+/// `modifierFlags` is the raw `NSEvent.ModifierFlags` value so the helper can
+/// rebuild the exact modifier set. Terminal helpers feed these to libghostty
+/// (which emits the right SGR/X11 sequences per the terminal's mouse mode);
+/// browser helpers translate scroll/click to WebKit actions.
+public struct MousePayload: Codable, Equatable, Sendable {
+    /// The kind of mouse event.
+    public enum Action: String, Codable, Sendable {
+        case down, up, dragged, moved, scroll
+    }
+    /// Which button the event concerns (ignored for `.moved`/`.scroll`).
+    public enum Button: String, Codable, Sendable { case left, right, middle }
+
+    /// What happened.
+    public var action: Action
+    /// The button for `.down`/`.up`/`.dragged`.
+    public var button: Button
+    /// Pane-local X in points (top-left origin).
+    public var x: Double
+    /// Pane-local Y in points (top-left origin).
+    public var y: Double
+    /// Raw `NSEvent.ModifierFlags` value.
+    public var modifierFlags: UInt
+    /// Scroll delta X in points (for `.scroll`).
+    public var scrollDeltaX: Double
+    /// Scroll delta Y in points (for `.scroll`).
+    public var scrollDeltaY: Double
+    /// Whether the scroll deltas are precise (trackpad) vs line-based (wheel).
+    public var hasPreciseScrolling: Bool
+
+    /// Creates a mouse payload.
+    public init(
+        action: Action,
+        button: Button = .left,
+        x: Double,
+        y: Double,
+        modifierFlags: UInt = 0,
+        scrollDeltaX: Double = 0,
+        scrollDeltaY: Double = 0,
+        hasPreciseScrolling: Bool = false
+    ) {
+        self.action = action
+        self.button = button
+        self.x = x
+        self.y = y
+        self.modifierFlags = modifierFlags
+        self.scrollDeltaX = scrollDeltaX
+        self.scrollDeltaY = scrollDeltaY
+        self.hasPreciseScrolling = hasPreciseScrolling
+    }
 }
 
 /// Initial setup parameters for a render helper, sent in ``RenderMessage/launch(_:)``.

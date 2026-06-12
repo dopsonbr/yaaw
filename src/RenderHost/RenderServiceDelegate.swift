@@ -94,6 +94,9 @@ final class RenderServiceExporter: NSObject, YAAWRenderServiceProtocol {
         case .input(let payload):
             terminalController?.sendInput(payload.data)
             browserController?.handleInput(payload.data)
+        case .mouse(let payload):
+            terminalController?.handleMouse(payload)
+            browserController?.handleMouse(payload)
         case .setRendering(let payload):
             // Rendering hot-reload is terminal-only; the browser has no theme.
             terminalController?.applyRendering(payload)

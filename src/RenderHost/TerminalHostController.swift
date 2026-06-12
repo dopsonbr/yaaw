@@ -167,6 +167,84 @@ final class TerminalHostController {
         driver.write(data)
     }
 
+    /// Forwards a mouse event from the app pane into the off-screen `TerminalView`.
+    /// The view is never on screen so it gets no real mouse events; we reconstruct
+    /// an `NSEvent` (or a `CGEvent`-backed scroll event) at the pane's top-left
+    /// point and call the view's `open` mouse handlers, which feed libghostty's
+    /// mouse API. libghostty emits the right SGR/X11 sequences per the terminal's
+    /// current mouse mode, so nvim/lazygit/less/etc. receive mouse input.
+    func handleMouse(_ payload: MousePayload) {
+        let modifiers = NSEvent.ModifierFlags(rawValue: payload.modifierFlags)
+        switch payload.action {
+        case .scroll:
+            guard let event = Self.scrollEvent(payload: payload) else { return }
+            view.scrollWheel(with: event)
+        case .moved:
+            guard let event = mouseEvent(type: .mouseMoved, payload: payload, modifiers: modifiers)
+            else { return }
+            view.mouseMoved(with: event)
+        case .down, .up, .dragged:
+            dispatchButtonEvent(payload: payload, modifiers: modifiers)
+        }
+        publishFrame()
+    }
+
+    private func dispatchButtonEvent(payload: MousePayload, modifiers: NSEvent.ModifierFlags) {
+        // One switch maps (action, button) straight to the event type and the
+        // view's matching `open` handler, so there is no second dispatch.
+        let resolved: (type: NSEvent.EventType, handler: (NSEvent) -> Void)
+        switch (payload.action, payload.button) {
+        case (.down, .left): resolved = (.leftMouseDown, view.mouseDown(with:))
+        case (.up, .left): resolved = (.leftMouseUp, view.mouseUp(with:))
+        case (.dragged, .left): resolved = (.leftMouseDragged, view.mouseDragged(with:))
+        case (.down, .right): resolved = (.rightMouseDown, view.rightMouseDown(with:))
+        case (.up, .right): resolved = (.rightMouseUp, view.rightMouseUp(with:))
+        case (.dragged, .right): resolved = (.rightMouseDragged, view.rightMouseDragged(with:))
+        case (.down, .middle): resolved = (.otherMouseDown, view.otherMouseDown(with:))
+        case (.up, .middle): resolved = (.otherMouseUp, view.otherMouseUp(with:))
+        case (.dragged, .middle): resolved = (.otherMouseDragged, view.otherMouseDragged(with:))
+        default: return
+        }
+        guard let event = mouseEvent(type: resolved.type, payload: payload, modifiers: modifiers)
+        else { return }
+        resolved.handler(event)
+    }
+
+    private func mouseEvent(
+        type: NSEvent.EventType, payload: MousePayload, modifiers: NSEvent.ModifierFlags
+    ) -> NSEvent? {
+        // The pane sends a top-left point; the view's `mousePoint` flips with
+        // `bounds.height`, so place the event at `locationInWindow = (x, H - y)`
+        // (the view fills its window at the origin, so window-base == view coords).
+        let location = NSPoint(x: payload.x, y: view.bounds.height - payload.y)
+        let isUp = type == .leftMouseUp || type == .rightMouseUp || type == .otherMouseUp
+        return NSEvent.mouseEvent(
+            with: type,
+            location: location,
+            modifierFlags: modifiers,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: isUp ? 0 : 1
+        )
+    }
+
+    private static func scrollEvent(payload: MousePayload) -> NSEvent? {
+        let units: CGScrollEventUnit = payload.hasPreciseScrolling ? .pixel : .line
+        guard
+            let cgEvent = CGEvent(
+                scrollWheelEvent2Source: nil,
+                units: units,
+                wheelCount: 2,
+                wheel1: Int32(payload.scrollDeltaY.rounded()),
+                wheel2: Int32(payload.scrollDeltaX.rounded()),
+                wheel3: 0)
+        else { return nil }
+        return NSEvent(cgEvent: cgEvent)
+    }
+
     /// Applies a theme/font/ligature change to the live surface without
     /// restarting the hosted process (hot-reload). Going through the state
     /// mutators only is deliberate: touching `state.configuration` /

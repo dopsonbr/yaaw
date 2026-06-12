@@ -93,7 +93,10 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
             webView.frame = NSRect(origin: .zero, size: frame.size)
             ensureSurface(width: Int(payload.widthPixels), height: Int(payload.heightPixels))
         }
-        captureSnapshot()
+        // Force a paint: the surface may have just been (re)allocated, and the
+        // first snapshot after the pane gives us a size must not be a blank.
+        captureSnapshot(forcingRender: true)
+        scheduleSettlingSnapshots()
     }
 
     /// Browser navigation arrives as a UTF-8 command over the input channel.
@@ -114,6 +117,36 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
             if trimmed.hasPrefix("load ") {
                 load(urlString: String(trimmed.dropFirst("load ".count)))
             }
+        }
+    }
+
+    /// Browser mouse support. The off-screen `WKWebView` can't consume synthetic
+    /// `NSEvent`s (hit-testing needs an on-screen view), so scroll and left-click
+    /// are applied via JavaScript against the page's own viewport coordinates
+    /// (the pane sends top-left points, which match CSS pixels here), then a fresh
+    /// snapshot is taken so the change reaches the pane.
+    func handleMouse(_ payload: MousePayload) {
+        switch payload.action {
+        case .scroll:
+            // Negated so a natural two-finger / wheel gesture moves the page the
+            // expected direction (AppKit scroll deltas vs. window.scrollBy sign).
+            let deltaX = -payload.scrollDeltaX
+            let deltaY = -payload.scrollDeltaY
+            evaluateJavaScript("window.scrollBy(\(deltaX), \(deltaY));", forceRender: false)
+        case .up where payload.button == .left:
+            let x = Int(payload.x.rounded())
+            let y = Int(payload.y.rounded())
+            evaluateJavaScript(
+                "var __el = document.elementFromPoint(\(x), \(y)); if (__el) { __el.click(); }",
+                forceRender: true)
+        default:
+            break
+        }
+    }
+
+    private func evaluateJavaScript(_ script: String, forceRender: Bool) {
+        webView.evaluateJavaScript(script) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.captureSnapshot(forcingRender: forceRender) }
         }
     }
 
@@ -206,9 +239,11 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         }
         publishState()
         reply.send(.title(webView.title ?? ""))
-        // Page just committed its first paint; rasterize a few times to catch
-        // images / async layout settling (the steady pump continues afterward).
-        captureSnapshot()
+        // Page just committed its first paint; force-render now and again over the
+        // next ~0.6 s to catch images / async layout settling and to defeat an
+        // occlusion-throttled first paint (the steady pump continues afterward).
+        captureSnapshot(forcingRender: true)
+        scheduleSettlingSnapshots()
     }
 
     func webViewWebContentProcessDidTerminate(_: WKWebView) {
@@ -263,20 +298,38 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
 
     /// Rasterizes the web view and draws it into the shared surface, then notifies
     /// the app. Coalesced: a snapshot already in flight skips this tick.
-    private func captureSnapshot() {
-        guard !snapshotInFlight, surface != nil, webView.bounds.width > 0,
-            webView.bounds.height > 0
-        else { return }
+    /// Rasterizes the web view into the shared surface. `forcingRender` sets
+    /// `afterScreenUpdates`, which makes WebKit run a layout+paint pass before the
+    /// snapshot — essential right after a load/resize (otherwise the snapshot can
+    /// capture a pre-paint blank, the "stays black" symptom) but too costly to do
+    /// on every steady-state pump tick, so the pump leaves it off.
+    private func captureSnapshot(forcingRender: Bool = false) {
+        guard surface != nil, webView.bounds.width > 0, webView.bounds.height > 0 else { return }
+        // A forced-render request always runs (it must land a painted frame); only
+        // best-effort pump ticks coalesce behind an in-flight snapshot.
+        if snapshotInFlight, !forcingRender { return }
         snapshotInFlight = true
         let configuration = WKSnapshotConfiguration()
         configuration.rect = webView.bounds
-        configuration.afterScreenUpdates = false
+        configuration.afterScreenUpdates = forcingRender
         webView.takeSnapshot(with: configuration) { [weak self] image, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.snapshotInFlight = false
                 guard let image else { return }
                 self.draw(image: image)
+            }
+        }
+    }
+
+    /// After a load finishes, fire a few forced-render snapshots so async content
+    /// (images, web fonts, markdown layout) and any occlusion-throttled first paint
+    /// reliably reach the pane instead of leaving it black until the next user
+    /// interaction.
+    private func scheduleSettlingSnapshots() {
+        for delay in [0.05, 0.2, 0.6] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.captureSnapshot(forcingRender: true)
             }
         }
     }
