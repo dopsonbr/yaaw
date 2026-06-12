@@ -4,16 +4,20 @@ import QuartzCore
 import SwiftUI
 import YAAWKit
 
-/// SwiftUI host for a render-helper surface. Composites the helper's remote
-/// layer inside the pane via `CALayerHost(contextID:)` (ADR-004 Candidate 1):
-/// the helper publishes a `CAContext.contextID`, the window server shares the
-/// layer tree, and we host it with native clipping/scrolling — no overlay window,
-/// no viewport polling.
+/// SwiftUI host for a render-helper surface. Displays the helper's shared
+/// `IOSurface` directly as the pane layer's `contents` (ADR-004 Candidate 2):
+/// the helper renders into an `IOSurface` and shares it natively over XPC, and
+/// the pane shows it with native clipping/scrolling — no overlay window, no
+/// viewport polling. (CAContext/`CALayerHost` remote-layer hosting — Candidate 1
+/// — was found not to share the IOSurface-backed layer cross-process.)
 ///
-/// Input (key/mouse/scroll/paste) is forwarded to the `RenderHostClient` as raw
+/// Frames are delivered through a non-`@Published` sink registered on the client,
+/// so live output / cursor blink never re-invalidate SwiftUI. Input
+/// (key/mouse/scroll/paste) is forwarded to the `RenderHostClient` as raw
 /// `RenderMessage.input` bytes. On `layout()` the view enforces `contentsScale`
-/// per the display backing scale and sends a resize. Overlay states cover
-/// launching / reconnecting / exited.
+/// per the display backing scale and sends a resize. The lifecycle overlay
+/// (launching / reconnecting / exited) is layered in SwiftUI by
+/// `TerminalPlaceholderView`, driven by the `@Published` phase.
 struct TerminalSurfaceHostView: NSViewRepresentable {
     @ObservedObject var client: RenderHostClient
     let role: RenderSurfaceRole
@@ -23,13 +27,18 @@ struct TerminalSurfaceHostView: NSViewRepresentable {
         let view = TerminalPaneView()
         view.client = client
         view.role = role
+        view.registerFrameSink()
+        view.display(client.surface(for: role))
         return view
     }
 
     func updateNSView(_ nsView: TerminalPaneView, context: Context) {
         nsView.client = client
         nsView.role = role
-        nsView.apply(snapshot: client.snapshot(for: role), fonts: fonts)
+        // Re-assert the sink (client/role may have changed) and re-show the latest
+        // surface; this runs only on rare phase/title changes, not per frame.
+        nsView.registerFrameSink()
+        nsView.display(client.surface(for: role))
     }
 }
 
@@ -45,7 +54,6 @@ final class TerminalPaneView: NSView {
     /// The layer that displays the shared IOSurface (a sublayer over a black
     /// backdrop so unrendered frames read as a clean black pane).
     private let surfaceLayer = CALayer()
-    private var lastShownGeneration: UInt64 = 0
     private var lastReportedViewport: ResizePayloadKey?
 
     override var isFlipped: Bool { true }
@@ -68,19 +76,23 @@ final class TerminalPaneView: NSView {
         layer?.addSublayer(surfaceLayer)
     }
 
-    /// Displays the latest shared IOSurface for this role. Re-asserts contents on
-    /// each new frame generation; `setContentsChanged` forces a re-sample when the
-    /// helper renders in place into the same surface.
-    func apply(snapshot: RenderSurfaceSnapshot, fonts: FontSettings) {
+    /// Registers this pane's frame sink with the client so new frames are pushed
+    /// straight to the layer (no `@Published`, no SwiftUI invalidation per frame).
+    func registerFrameSink() {
         guard let client, let role else { return }
-        guard snapshot.generation != lastShownGeneration else { return }
-        lastShownGeneration = snapshot.generation
-        let surface = client.surface(for: role)
+        client.setFrameSink(role: role) { [weak self] surface in
+            self?.display(surface)
+        }
+    }
+
+    /// Displays the shared IOSurface as the pane layer's contents. Re-assigning
+    /// `contents` forces Core Animation to re-sample even when the helper rendered
+    /// in place into the same surface object (the helper only pushes a frame when
+    /// the surface seed actually advanced).
+    func display(_ surface: IOSurface?) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         if let surface {
-            // Re-assigning contents each generation forces CA to re-display; the
-            // helper advances the generation only when the surface seed changes.
             surfaceLayer.contents = surface
             surfaceLayer.isHidden = false
         } else {

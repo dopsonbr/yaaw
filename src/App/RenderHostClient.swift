@@ -18,14 +18,15 @@ enum RenderSurfacePhase: Equatable, Sendable {
     case exited(Int32?)
 }
 
-/// Observable per-surface state the host view reads: the frame generation (which
-/// advances when a new shared IOSurface arrives, so the view re-displays only on
-/// real frames), the lifecycle phase, and the title. The IOSurface itself is held
-/// separately (see ``RenderHostClient/surface(for:)``) because it is not
-/// `Sendable`.
+/// Observable per-surface state the host view reads: the lifecycle phase and the
+/// title. Deliberately does **not** carry the per-frame generation — frames are
+/// delivered straight to the pane layer through a non-`@Published` sink (see
+/// ``RenderHostClient/setFrameSink(role:_:)``) so a blinking cursor / live output
+/// never re-invalidates SwiftUI. Only phase/title transitions (which are rare)
+/// flow through `@Published`. The IOSurface itself is held separately (see
+/// ``RenderHostClient/surface(for:)``) because it is not `Sendable`.
 struct RenderSurfaceSnapshot: Equatable, Sendable {
     var phase: RenderSurfacePhase = .idle
-    var generation: UInt64 = 0
     var exitCode: Int32?
     var title: String = ""
 }
@@ -65,6 +66,12 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
     /// Latest shared IOSurface per role (kept out of the `Sendable`
     /// `RenderSurfaceSnapshot`; the host view reads it via ``surface(for:)``).
     private var surfacesByRole: [RenderSurfaceRole: IOSurface] = [:]
+    /// Last frame generation accepted per role (stale-frame guard, kept out of
+    /// `@Published` so frame delivery never invalidates SwiftUI).
+    private var lastGenerationByRole: [RenderSurfaceRole: UInt64] = [:]
+    /// Per-role frame sink the pane view registers; called on every new frame to
+    /// set the pane layer's contents directly, bypassing `@Published`.
+    private var frameSinksByRole: [RenderSurfaceRole: (IOSurface?) -> Void] = [:]
 
     init(
         helperURLProvider: @escaping @MainActor () -> URL? = RenderHostClient.defaultHelperURL,
@@ -117,6 +124,14 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
     /// set as its layer contents (ADR-004 Candidate 2).
     func surface(for role: RenderSurfaceRole) -> IOSurface? {
         surfacesByRole[role]
+    }
+
+    /// Registers (or clears, with `nil`) the pane view's frame sink for `role`.
+    /// The newest registered pane view wins; the sink is invoked on the main
+    /// actor for every new frame. Frame delivery goes through this sink rather
+    /// than `@Published` so 30 fps frames never trigger SwiftUI invalidation.
+    func setFrameSink(role: RenderSurfaceRole, _ sink: ((IOSurface?) -> Void)?) {
+        frameSinksByRole[role] = sink
     }
 
     // MARK: - Launch / hot-reload / relaunch
@@ -189,6 +204,12 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
     // MARK: - Connection lifecycle
 
     private func startConnection(role: RenderSurfaceRole, launch: IsolatedTerminalLaunch) {
+        // A fresh helper process restarts its frame generation at 0, so drop the
+        // previous helper's generation watermark (and stale surface) — otherwise
+        // the new helper's first frames are rejected as stale and a relaunched /
+        // crash-recovered pane stays black. This is what lets recovery re-render.
+        lastGenerationByRole[role] = 0
+        surfacesByRole.removeValue(forKey: role)
         guard let helperURL = helperURLProvider() else {
             updateSnapshot(role: role) {
                 $0.phase = .failed("Render helper is unavailable.")
@@ -240,11 +261,16 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
     fileprivate func handleFrameReady(
         role: RenderSurfaceRole, generation: UInt64, surface: IOSurface?
     ) {
-        guard generation >= (snapshotsByRole[role]?.generation ?? 0) else { return }
+        guard generation >= (lastGenerationByRole[role] ?? 0) else { return }
+        lastGenerationByRole[role] = generation
         if let surface { surfacesByRole[role] = surface }
-        updateSnapshot(role: role) {
-            $0.generation = generation
-            if case .ready = $0.phase {} else { $0.phase = .ready }
+        // Deliver the frame straight to the pane layer — NOT through `@Published`
+        // — so live output / cursor blink never re-invalidate SwiftUI.
+        frameSinksByRole[role]?(surfacesByRole[role])
+        // First frame only: flip the pane out of its launching/reconnecting
+        // overlay. Subsequent frames never touch `@Published`.
+        if snapshotsByRole[role]?.phase != .ready {
+            updateSnapshot(role: role) { $0.phase = .ready }
         }
     }
 

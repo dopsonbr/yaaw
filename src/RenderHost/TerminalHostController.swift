@@ -10,11 +10,12 @@ import YAAWRenderProtocol
 /// `forkpty` runs through ``AgentTerminalProcess``; its output is tee'd to the
 /// capture-log writer and to the Ghostty `InMemoryTerminalSession` through the
 /// throttled ``AgentTerminalOutputPump`` behind a lossless
-/// ``TerminalBackpressureGate``. The surface renders into a `CAMetalLayer`
-/// inside a headless, off-screen window; that layer is wrapped in a
-/// ``RemoteLayerContext`` and its `contextID` published to the app, which hosts
-/// it with `CALayerHost` (ADR-004). Surface delegate events are forwarded to the
-/// app via ``HelperTerminalDelegate``; capture-buffer overflow surfaces as
+/// ``TerminalBackpressureGate``. The surface renders into libghostty's
+/// `IOSurfaceLayer` inside a headless, off-screen window; the backing `IOSurface`
+/// is shared with the app over XPC, which displays it as its pane layer's
+/// `contents` (ADR-004 Candidate 2 — CAContext/`CALayerHost` was found not to
+/// share cross-process). Surface delegate events are forwarded to the app via
+/// ``HelperTerminalDelegate``; capture-buffer overflow surfaces as
 /// ``RenderEvent/captureTruncated(truncatedAtByte:)``.
 @MainActor
 final class TerminalHostController {
@@ -30,10 +31,22 @@ final class TerminalHostController {
     private var frameGeneration: UInt64 = 0
     private var lastSurfaceSeed: UInt32 = .max
     private var lastSurfaceID = ObjectIdentifier(NSNull())
-    // Pushes the current IOSurface to the app on a modest cadence so terminal
-    // output / cursor blink reach the pane. (A future refinement is to drive this
-    // from libghostty's onPostRender instead of a timer.)
+    // Pushes the current IOSurface to the app when it actually changes. libghostty
+    // renders into the shared surface on its own display link (which it pauses
+    // when the terminal is idle); we poll the surface seed and forward only
+    // changed frames. The cadence is adaptive — ~30 fps while frames keep
+    // changing, dropping to ~5 fps after a short quiet period — so a static pane
+    // costs almost no wakeups. A fully event-driven push would need libghostty's
+    // private `onPostRender`, which libghostty-spm 1.2.4 does not vend publicly
+    // (tracked in DEFERRED-ISSUES #21).
     private var frameTimer: DispatchSourceTimer?
+    private var idleFrameTicks = 0
+    private var currentFrameInterval: DispatchTimeInterval = TerminalHostController
+        .activeFrameInterval
+    private static let activeFrameInterval = DispatchTimeInterval.milliseconds(33)
+    private static let idleFrameInterval = DispatchTimeInterval.milliseconds(200)
+    /// Unchanged frames before dropping to the idle cadence (~0.6 s at 33 ms).
+    private static let idleFrameThreshold = 18
 
     private var driver: AgentTerminalProcessDriver { pipeline.driver }
 
@@ -116,16 +129,37 @@ final class TerminalHostController {
             view.frame = NSRect(origin: .zero, size: frame.size)
         }
         applyContentsScale(payload.contentsScale)
-        driver.resizeOrStart(
-            to: AgentTerminalViewport(
-                columns: payload.columns,
-                rows: payload.rows,
-                widthPixels: payload.widthPixels,
-                heightPixels: payload.heightPixels
-            )
-        )
+        // Start (idempotently) / resize the PTY, then fit the surface. Fitting
+        // makes libghostty recompute the grid from the *real* font cell metrics
+        // and call back through the in-memory session's receive-resize handler,
+        // which drives the PTY winsize with the emulator's authoritative grid —
+        // that callback fires last, so it is the final word on the winsize. The
+        // explicit call here only guarantees the process starts (using the real
+        // fitted grid when the surface has already attached, else the app's cell
+        // estimate as a pre-attach fallback) rather than depending on a magic
+        // cell size in the app.
+        driver.resizeOrStart(to: authoritativeViewport(fallback: payload))
         view.fitToSize()
         publishFrame()
+    }
+
+    /// The viewport to start/resize the PTY with: the surface's real fitted grid
+    /// (from libghostty's cell metrics) when available, else the app's estimate.
+    private func authoritativeViewport(fallback payload: ResizePayload) -> AgentTerminalViewport {
+        if let metrics = state.surfaceSize, metrics.columns > 0, metrics.rows > 0 {
+            return AgentTerminalViewport(
+                columns: UInt32(metrics.columns),
+                rows: UInt32(metrics.rows),
+                widthPixels: metrics.widthPixels,
+                heightPixels: metrics.heightPixels
+            )
+        }
+        return AgentTerminalViewport(
+            columns: payload.columns,
+            rows: payload.rows,
+            widthPixels: payload.widthPixels,
+            heightPixels: payload.heightPixels
+        )
     }
 
     /// Writes raw input bytes (keyboard / paste / host-injected) to the PTY.
@@ -161,15 +195,18 @@ final class TerminalHostController {
 
     /// Reads the IOSurface backing the rendered surface and, when it has changed
     /// (new surface object or advanced seed), shares it with the app over XPC.
-    /// The app sets it as its pane layer's `contents`.
-    private func publishFrame() {
-        guard let surface = currentSurface() else { return }
+    /// The app sets it as its pane layer's `contents`. Returns whether a frame was
+    /// actually pushed (drives the adaptive pump cadence).
+    @discardableResult
+    private func publishFrame() -> Bool {
+        guard let surface = currentSurface() else { return false }
         let id = ObjectIdentifier(surface)
         let seed = IOSurfaceGetSeed(surface)
-        guard id != lastSurfaceID || seed != lastSurfaceSeed else { return }
+        guard id != lastSurfaceID || seed != lastSurfaceSeed else { return false }
         lastSurfaceID = id
         lastSurfaceSeed = seed
         reply.frameReady(generation: nextGeneration(), surface: surface)
+        return true
     }
 
     /// The IOSurface libghostty rendered into. The view's backing layer is an
@@ -192,16 +229,41 @@ final class TerminalHostController {
         return nil
     }
 
-    /// Polls the surface on a modest cadence so ongoing terminal output reaches
-    /// the pane (publishFrame is a no-op when the surface seed is unchanged).
+    /// Polls the surface so ongoing terminal output reaches the pane (publishFrame
+    /// is a no-op when the surface seed is unchanged), adapting the cadence down
+    /// to the idle rate after a quiet period and back up on the next changed frame.
     private func startFramePump() {
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 0.1, repeating: .milliseconds(33))
         timer.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.publishFrame() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.adaptFrameCadence(pushed: self.publishFrame())
+            }
         }
+        timer.schedule(deadline: .now() + 0.1, repeating: Self.activeFrameInterval)
         timer.resume()
+        currentFrameInterval = Self.activeFrameInterval
         frameTimer = timer
+    }
+
+    /// Speeds the pump back to the active rate on a new frame; slows it to the
+    /// idle rate after `idleFrameThreshold` consecutive unchanged ticks.
+    private func adaptFrameCadence(pushed: Bool) {
+        if pushed {
+            idleFrameTicks = 0
+            setFrameInterval(Self.activeFrameInterval)
+        } else {
+            idleFrameTicks += 1
+            if idleFrameTicks >= Self.idleFrameThreshold {
+                setFrameInterval(Self.idleFrameInterval)
+            }
+        }
+    }
+
+    private func setFrameInterval(_ interval: DispatchTimeInterval) {
+        guard interval != currentFrameInterval, let frameTimer else { return }
+        currentFrameInterval = interval
+        frameTimer.schedule(deadline: .now() + interval, repeating: interval)
     }
 
     /// Replicates the coordinator's scale correction: enforce `contentsScale` on
