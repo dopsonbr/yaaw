@@ -388,3 +388,26 @@ real GUI (the `YAAWE2E` `screenshot`/`send-key`/`send-click`/`frontmost`/
 > burst that settles to idle. All 327 tests still green. **Why this is a major fix,
 > not deferred:** "idle CPU ≈ 0" and large-project usability are explicit DoD
 > items, and the app was unusable on a real monorepo.
+
+> **[D-023] Bound the eager file-index walk** — *(2026-06-12)*
+> **Question I'd have asked:** The file-index walk (`BackgroundFileIndexer`) is an
+> unbounded enumeration of the whole non-ignored tree. On order-up a pruned `find`
+> didn't finish in 120 s. Cap it? By count, time, or depth — and risk a lopsided
+> partial tree?
+> **Measured (via a `YAAW_INDEX_PROBE_PATH` probe added to `YAAWKitPerf`):** order-up's
+> non-ignored tree is **~157k entries** and the walk **completes in ~15 s** — not a
+> true hang, but unbounded in principle (a 1M-entry tree would build a 1M-element
+> array + sort + SQLite write). **Decision:** Two bounds — a hard **entry cap
+> (200k, checked every yield)** as the reliable memory/sort/DB bound, and a coarse
+> **time backstop (30 s)** for slow-per-entry trees. The backstop is generous on
+> purpose: order-up (~15 s) indexes *fully* rather than truncating, because a
+> complete index (everything searchable) beats an early-truncated one, and the walk
+> is off-main so the 15 s never blocks the UI (just a "Indexing…" spinner, then
+> cached). Trees past the cap truncate with a **visible** "Large project — indexed
+> first N items" status + a `file_index_truncated` diagnostic (loud, not silent).
+> Depth-first truncation is lopsided, but it only applies past 200k entries and is
+> strictly better than the prior hang. **Why not a tighter time bound:**
+> `FileManager`'s enumerator blocks in bursts, so a wall-clock budget can only be
+> checked between yields and overshoots (a 5 s budget measured 15 s on order-up) —
+> the entry cap is the dependable lever. Breadth-first / depth-limited indexing is
+> a possible future refinement (DEFERRED).
