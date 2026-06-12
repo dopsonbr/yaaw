@@ -16,7 +16,14 @@ public final class ActivityStore {
     public internal(set) var fileBrowserState: FileBrowserState
 
     @ObservationIgnored let environment: AppEnvironment
-    @ObservationIgnored unowned let workspace: WorkspaceStore
+    // Strong, not `unowned`: an in-flight file-index `Task` promotes `self`
+    // (ActivityStore) to a strong reference for its whole body, then reads
+    // `self.workspace` *after* an `await`. AppStores is the sole strong owner of
+    // both stores, so a teardown mid-await could free WorkspaceStore while the
+    // task keeps ActivityStore alive — an `unowned` read of freed memory (abort).
+    // WorkspaceStore's back-reference to ActivityStore is `weak`, so holding
+    // `workspace` strongly here is cycle-free and guarantees it outlives `self`.
+    @ObservationIgnored let workspace: WorkspaceStore
     @ObservationIgnored let settings: SettingsStore
     @ObservationIgnored let rightPanel: RightPanelStore
     @ObservationIgnored let persistence: StorePersistenceQueue
