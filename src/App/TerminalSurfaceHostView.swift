@@ -140,6 +140,11 @@ final class TerminalPaneView: NSView {
 
     // MARK: - Input forwarding (raw bytes; no base64)
 
+    /// Focus the pane on the *first* click even when its window only just became
+    /// key (e.g. activating the app by clicking the terminal): without this the
+    /// activating click is swallowed and the pane never becomes first responder.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func keyDown(with event: NSEvent) {
         guard let characters = event.characters, !characters.isEmpty else {
             super.keyDown(with: event)
@@ -156,6 +161,21 @@ final class TerminalPaneView: NSView {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         super.mouseDown(with: event)
+    }
+
+    /// Auto-focus the agent (project) terminal when it enters the window, so the
+    /// user can type immediately without first clicking it — and so keyboard input
+    /// reaches the pane once the window is keyed, without depending on a pointer
+    /// click. Only claims focus when nothing meaningful holds it (so it never
+    /// steals focus from e.g. the file-search field). Non-project surfaces keep
+    /// click-to-focus.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window, case .project? = role else { return }
+        let current = window.firstResponder
+        if current == nil || current === window {
+            window.makeFirstResponder(self)
+        }
     }
 
     private func forward(_ data: Data) {
