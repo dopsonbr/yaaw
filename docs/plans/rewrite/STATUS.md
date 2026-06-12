@@ -24,7 +24,7 @@ and is **complete and verified as far as a headless (no-GUI) environment allows*
   sign-off; see DECISIONS-LOG D-016/D-018 and ADR-004.)
 
 Everything that can be verified without a screen **is green**: the full package
-builds (debug **and** release), **329 headless tests pass (0 failures)**, both
+builds (debug **and** release), **331 headless tests pass (0 failures)**, both
 linters pass at the tightened thresholds (0 serious), the release perf gate runs,
 and **the signed `.app` launches and survives startup**.
 
@@ -34,7 +34,7 @@ and **the signed `.app` launches and survives startup**.
 |---|---|
 | `swift build` (full package: YAAW app, YAAWRenderHost helper, YAAWKit, YAAWRenderProtocol, YAAWKitPerf) | ✓ Build complete |
 | `swift build -c release --target YAAWKit` / `YAAWRenderProtocol` | ✓ complete (the `isolated deinit` release-optimizer crash was found and fixed — D-011) |
-| `swift test` | ✓ **329 passed, 0 failures**, 24 benchmark-skips |
+| `swift test` | ✓ **331 passed, 0 failures**, 24 benchmark-skips |
 | `swiftlint` (warn 400/err 800 file_length, 8/12 cyclomatic, 50/120 function, 250/400 type) | ✓ 0 serious |
 | `swift-format --strict` | ✓ clean |
 | `swift run -c release YAAWKitPerf` | ✓ runs (numbers below) |
@@ -168,7 +168,7 @@ YAAW_DATABASE_PATH=<a state .sqlite with a selected thread + bottom terminal> \
 
 ```sh
 cd /Users/BXD5017/github/dopsonbr/yaaw-rewrite
-scripts/check.sh                 # build + 329 tests
+scripts/check.sh                 # build + 331 tests
 scripts/lint.sh                  # tightened, 0 serious
 swift run -c release YAAWKitPerf # perf gate
 script/build_and_run.sh          # launch the real app, then exercise a terminal pane
