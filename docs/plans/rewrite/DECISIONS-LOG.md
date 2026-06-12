@@ -522,3 +522,38 @@ real GUI (the `YAAWE2E` `screenshot`/`send-key`/`send-click`/`frontmost`/
 > real-user way: launch the seeded `browser-preview` state headed, paste a file URL
 > into the auto-focused address bar + Return, screenshot — index.html composites
 > in-pane, upright. (The same run also re-confirmed terminal compositing.)
+
+> **[D-030] Mouse support in all panes + first-frame render fixes** — *(2026-06-12)*
+> Four issues from first real usage, fixed together (interwoven across protocol +
+> helper + app pane, so a per-bug split would not compile in isolation):
+> **(1) Mouse in terminal/nvim/lazygit.** The helper's `TerminalView` is off-screen
+> and never gets real mouse events. Added `RenderMessage.mouse(MousePayload)`
+> (pane-local top-left points + raw modifier flags + scroll deltas); the pane
+> forwards every AppKit mouse event (all buttons, drag, scroll, and hover via a
+> tracking area); the helper reconstructs an `NSEvent` — `CGEvent` for scroll, the
+> only public way to build one with deltas — at `(x, viewHeight − y)` and calls the
+> view's `open` mouse handlers, which feed libghostty. libghostty (`surface`/
+> `sendMouse*` are module-internal, so the view's `open` methods are the only
+> public seam) emits the correct mouse-mode escape sequences itself.
+> **(2) Mouse in browser.** A synthetic `NSEvent` can't drive an off-screen
+> `WKWebView` (hit-testing needs an on-screen view), so scroll/left-click are
+> applied via JavaScript (`window.scrollBy` / `elementFromPoint().click()`) then
+> re-snapshotted.
+> **(3) Blurry first frame / imperfect resize.** The pane only pushed the backing
+> scale in `layout()`, which can run before the real scale is known (defaulting to
+> 2.0 → blurry on a 3× display until a manual resize re-sent it). Added
+> `viewDidChangeBackingProperties` + a viewport push from `viewDidMoveToWindow`, so
+> the correct `contentsScale` reaches the helper for the first frame.
+> **(4) Browser open delay / sometimes-black.** Snapshots used
+> `afterScreenUpdates=false` and only the steady pump, so a pre-paint or
+> occlusion-throttled blank could be captured and stick. Nav/resize now force a
+> render and a short burst of settling snapshots (0.05/0.2/0.6 s) guarantees a
+> painted frame lands.
+> **Verification (honest):** smoke-tested on a real run — the terminal composites
+> crisply on the first frame and survives forwarded clicks (no helper crash), and
+> browser HTML composites upright (D-029). The env's headed-focus contention (the
+> agent terminal grabs first-responder; synthetic address-bar focus is unreliable
+> here) blocked deterministic interactive re-testing of mouse-mode behavior and the
+> markdown render this round; those rest on the verified shared pipeline + the
+> libghostty API, pending the owner's confirmation (DEFERRED #28 — scroll
+> direction/scale sign may need a one-line tweak after real use).
