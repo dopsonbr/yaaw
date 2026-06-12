@@ -10,4 +10,11 @@ if [[ -f "$WORKSPACE_STATE" ]] && ! grep -Fq "$ROOT_DIR" "$WORKSPACE_STATE"; the
   swift package reset
 fi
 
-swift build
+# Strict-concurrency (Swift 6 language mode) is always on per target. SWIFT_STRICT=1
+# additionally treats warnings as errors — the CI/cutover gate (D-006). The whole
+# package builds warnings-clean today, so this is enforceable.
+if [[ "${SWIFT_STRICT:-0}" == "1" ]]; then
+  swift build -Xswiftc -warnings-as-errors
+else
+  swift build
+fi

@@ -87,31 +87,52 @@ synthetic full-corpus operations). See DEFERRED-ISSUES #4/#6.
 | **G** | E2E driver + runner + crash-isolation probe + perf gate wiring | ◐ E2E target ported to compile + headless durable-state assertions + `test-e2e.sh` wired; **full GUI run needs a screen + accessibility** |
 | **cutover** | docs, scripts, clean merge | ◐ docs updated; scripts wired; final merge is the owner's call after GUI verification |
 
-## Verified on a real run (2026-06-12, screen + accessibility)
+## Verified on a real run (2026-06-12, screen + accessibility — session 2)
 
-- The signed `.app` launches; the full UI works (sidebar, projects/threads, split
-  layout, right-panel tabs, bottom terminal, theme/chrome, Files browser).
-- The `YAAWRenderHost` XPC service spawns, the per-surface `NSXPCConnection`
-  connects, PTYs run, and **terminals composite in-pane via shared IOSurface** —
-  agent + bottom terminals show live content (codex output, prompt, cursor,
-  JetBrains Mono, colors). No overlay window; helper invisible; no focus steal.
+The GUI-bound acceptance that was previously blocked is now done:
+
+- **Compositing (#20/#21):** terminal/nvim/lazygit/bottom surfaces composite
+  in-pane via shared IOSurface — crisp 1:1 at 3× zoom (no scaling blur), helper
+  invisible, no focus steal. Cell metrics are libghostty-authoritative (the app's
+  8×17 estimate was only a transient; #20 verified pixel-exact). #20/#21 done.
+- **Idle CPU:** ~**0.3%** with a live terminal (was ~15% from per-frame `@Published`
+  churn, and 99% from a session-catalog hot path) — the rewrite's "near-zero idle"
+  goal met. Fixes: decouple frame delivery from SwiftUI (D-020); cache the ISO-8601
+  formatter + memoize exact-link results + defer load-time reconcile (D-022).
+- **Large project (order-up, 38 GB / ~1.58M files):** loads immediately; its
+  ~157k-entry index completes bounded (entry cap + time backstop, D-023); steady
+  idle ~0.3%.
+- **Keyboard input:** verified the agent terminal receives pasted text + Enter
+  (auto-focus + `acceptsFirstMouse`, D-025).
+- **Full headless E2E suite passes (exit 0):** durable-state runner, release perf
+  gates, terminal-visibility (region/pixel checks), workspace shortcuts, settings
+  editor, **crash-isolation probe** (`kill -9` a helper → app + siblings survive,
+  pane recovers), 15 visual states, no-focus-steal between every probe. The suite
+  was reconciled to the IOSurface model (D-024); the typed-text keyboard probe is
+  `--headed`-only (typed input needs app focus, which headless forbids).
+- **Appearance parity (#16):** matches `docs/examples/screenshots/current/*` —
+  native unified-compact titlebar, liquid-glass sidebar, theme/fonts, layout.
+- **Warnings-as-errors (D-006):** the whole package builds warnings-clean under
+  `-warnings-as-errors` (`SWIFT_STRICT=1 scripts/build.sh`). Gate satisfied.
 
 ## What remains (the owner's finish-line)
 
-Mostly polish + the GUI-bound acceptance run, fully scoped in DEFERRED-ISSUES:
-
-1. **Compositing polish (#20–#22):** cell-metric/size tuning for pixel-exact text
-   (#20); replace the ~30Hz frame-pump poll with libghostty's `onPostRender`
-   event (#21); browser-pane IOSurface (WKWebView remote layer — #22). Terminals,
-   the primary surface, work today.
-2. **Appearance / screenshot parity (#16).** Capture via the E2E SCK path, diff
-   against `docs/examples/screenshots/current/*`, fix deltas. (Note: SCK
-   per-window capture does include the IOSurface contents — verified.)
-3. **Full E2E run (Chunk G).** Needs the running `.app` + accessibility; the
-   headless durable-state assertions + driver/probe machinery are in place.
-4. **Crash-isolation probe** — `kill -9` a render helper, assert app + siblings
-   survive and the pane recovers (recovery code path exists in RenderHostClient).
-5. **Doc sweep + warnings-as-errors flip** (D-006/D-007) — mechanical, pre-merge.
+1. **Public-API doc sweep (D-007).** `YAAW_LINT_DOCS=1 scripts/lint.sh` reports
+   ~708 `AllPublicDeclarationsHaveDocumentation` findings on the verbatim-ported
+   value types. Pure boilerplate, zero behavioral value — the one DoD item the
+   owner deliberately deferred to the cutover gate (D-007). Mechanical.
+2. **Two GUI bugs surfaced by the first full GUI run** (not regressions from the
+   rewrite-tuning work, both tracked):
+   - **DEFERRED #25 — intermittent empty Files tree** (SwiftUI view-lifecycle:
+     entries are cached + in `state`, but the tree doesn't render them on some
+     launches; rendered fine in other captures). Likely a pre-existing Chunk-F
+     view bug. Highest-priority follow-up.
+   - **DEFERRED #26 — browser-pane visual unconfirmed** (#22 implemented +
+     IOSurface wire verified; driving the preview was blocked by #25 + this
+     environment's multi-display/active-meeting focus contention).
+3. **Minor deferreds:** lint splits (#1–#3, warnings only), the lazy/lower-priority
+   reconcile to avoid the launch CPU burst (#27), session-capture-as-XPC-event (#8),
+   AppModel→store test re-homing (#10/#19), breadth-first indexing (#24).
 
 ### Reproducing the working terminal locally
 
