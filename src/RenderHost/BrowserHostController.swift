@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import IOSurface
 import WebKit
 import YAAWKit
 import YAAWRenderProtocol
@@ -21,8 +22,8 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
     private let window: HeadlessBrowserWindow
     private let reply: RenderEventReply
 
-    private var remoteLayer: RemoteLayerContext?
     private var frameGeneration: UInt64 = 0
+    private var lastSurfaceSeed: UInt32 = .max
     private var currentURLString: String?
     private var isLoadingMarkdownPreview = false
 
@@ -203,22 +204,15 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         return nil
     }
 
-    // MARK: - Compositing
+    // MARK: - Compositing (shared IOSurface — ADR-004 Candidate 2)
+    //
+    // NOTE: WKWebView hosts its content in WebKit's own process via a remote
+    // layer, so its backing layer does not expose a plain IOSurface the way the
+    // Ghostty IOSurfaceLayer does. Browser-pane compositing therefore needs its
+    // own mechanism (e.g. periodic WKWebView.takeSnapshot into an IOSurface) and
+    // is tracked separately; this keeps the structure parallel to the terminal.
 
-    private func publishContextIfNeeded() {
-        guard let layer = webView.layer else { return }
-        if let remoteLayer {
-            remoteLayer.attach(layer: layer)
-            return
-        }
-        guard let context = RemoteLayerContext(layer: layer) else {
-            // TODO(compositing): CAContext SPI unavailable — report contextID 0.
-            reply.frameReady(generation: nextGeneration(), contextID: 0)
-            return
-        }
-        remoteLayer = context
-        reply.frameReady(generation: nextGeneration(), contextID: context.contextID)
-    }
+    private func publishContextIfNeeded() { publishFrame() }
 
     private func applyContentsScale(_ contentsScale: Double) {
         guard contentsScale > 0, let layer = webView.layer else { return }
@@ -226,8 +220,14 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
     }
 
     private func publishFrame() {
-        guard let remoteLayer else { return }
-        reply.frameReady(generation: nextGeneration(), contextID: remoteLayer.contextID)
+        guard let contents = webView.layer?.contents else { return }
+        let cf = contents as CFTypeRef
+        guard CFGetTypeID(cf) == IOSurfaceGetTypeID() else { return }
+        let surface = cf as! IOSurface
+        let seed = IOSurfaceGetSeed(surface)
+        guard seed != lastSurfaceSeed else { return }
+        lastSurfaceSeed = seed
+        reply.frameReady(generation: nextGeneration(), surface: surface)
     }
 
     private func nextGeneration() -> UInt64 {

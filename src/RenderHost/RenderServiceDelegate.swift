@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import IOSurface
 import YAAWRenderProtocol
 
 /// Accepts the app's XPC connection and wires it to a ``RenderServiceExporter``.
@@ -137,15 +138,11 @@ final class RenderEventReply: @unchecked Sendable {
         proxy?.eventReceived(data)
     }
 
-    /// Notifies the app a new frame is ready to composite. `contextID` is the
-    /// primary (CAContext) path; `ioSurfaceRef` stays `nil` unless the IOSurface
-    /// fallback is in use.
-    func frameReady(generation: UInt64, contextID: UInt32, ioSurfaceRef: NSValue? = nil) {
-        proxy?.frameReady(
-            generation: generation,
-            ioSurfaceRef: ioSurfaceRef,
-            contextID: contextID
-        )
+    /// Notifies the app a new frame is ready to composite, sharing the rendered
+    /// `IOSurface` natively over XPC (the app sets it as its pane's layer
+    /// contents — ADR-004 Candidate 2).
+    func frameReady(generation: UInt64, surface: IOSurface?) {
+        proxy?.frameReady(generation: generation, surface: surface)
     }
 
     private var proxy: YAAWRenderReplyProtocol? {

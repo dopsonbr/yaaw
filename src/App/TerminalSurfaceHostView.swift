@@ -1,4 +1,5 @@
 import AppKit
+import IOSurface
 import QuartzCore
 import SwiftUI
 import YAAWKit
@@ -32,23 +33,19 @@ struct TerminalSurfaceHostView: NSViewRepresentable {
     }
 }
 
-/// `wantsLayer` NSView that hosts the helper's remote layer pointed at the
-/// helper's published `contextID`, and forwards first-responder input to the
-/// client.
-///
-/// ADR-004 composites via `CALayerHost(contextId:)`, which is SPI (not in the
-/// public SDK). To keep the app target building against the public SDK while
-/// using the documented mechanism, the host layer is created via the
-/// Objective-C runtime (`CALayerHost`) and its `contextId` is set with KVC. If
-/// the class is unavailable, the view falls back to a plain placeholder layer.
+/// `wantsLayer` NSView that displays the helper's shared `IOSurface` as its
+/// layer `contents` (ADR-004 Candidate 2), and forwards first-responder input to
+/// the client. CAContext/CALayerHost (Candidate 1) was found not to share the
+/// IOSurface-backed layer across processes, so the surface is shared natively
+/// over XPC and shown directly here.
 final class TerminalPaneView: NSView {
     weak var client: RenderHostClient?
     var role: RenderSurfaceRole?
 
-    /// The hosted remote layer — an instance of the SPI `CALayerHost`, or a plain
-    /// `CALayer` placeholder when the class can't be resolved.
-    private let hostLayer: CALayer = TerminalPaneView.makeHostLayer()
-    private var hostedContextID: UInt32 = 0
+    /// The layer that displays the shared IOSurface (a sublayer over a black
+    /// backdrop so unrendered frames read as a clean black pane).
+    private let surfaceLayer = CALayer()
+    private var lastShownGeneration: UInt64 = 0
     private var lastReportedViewport: ResizePayloadKey?
 
     override var isFlipped: Bool { true }
@@ -67,35 +64,40 @@ final class TerminalPaneView: NSView {
     private func configureLayer() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        layer?.addSublayer(hostLayer)
+        surfaceLayer.contentsGravity = .resize
+        layer?.addSublayer(surfaceLayer)
     }
 
-    /// Creates the remote-layer host. `CALayerHost` is window-server SPI; resolve
-    /// it dynamically so the target builds against the public SDK.
-    private static func makeHostLayer() -> CALayer {
-        if let hostClass = NSClassFromString("CALayerHost") as? CALayer.Type {
-            return hostClass.init()
-        }
-        return CALayer()
-    }
-
-    /// Hosts (or stops hosting) the helper's remote layer. A `contextID` of 0
-    /// means no composited frame yet → keep the black placeholder visible.
+    /// Displays the latest shared IOSurface for this role. Re-asserts contents on
+    /// each new frame generation; `setContentsChanged` forces a re-sample when the
+    /// helper renders in place into the same surface.
     func apply(snapshot: RenderSurfaceSnapshot, fonts: FontSettings) {
-        guard snapshot.contextID != hostedContextID else { return }
-        hostedContextID = snapshot.contextID
-        // `CALayerHost.contextId` is a `UInt32` KVC-settable property on the SPI
-        // class; a no-op on the plain-layer fallback.
-        hostLayer.setValue(NSNumber(value: snapshot.contextID), forKey: "contextId")
-        hostLayer.isHidden = snapshot.contextID == 0
+        guard let client, let role else { return }
+        guard snapshot.generation != lastShownGeneration else { return }
+        lastShownGeneration = snapshot.generation
+        let surface = client.surface(for: role)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if let surface {
+            // Re-assigning contents each generation forces CA to re-display; the
+            // helper advances the generation only when the surface seed changes.
+            surfaceLayer.contents = surface
+            surfaceLayer.isHidden = false
+        } else {
+            surfaceLayer.isHidden = true
+        }
+        CATransaction.commit()
     }
 
     override func layout() {
         super.layout()
         let scale = window?.backingScaleFactor ?? 2.0
         layer?.contentsScale = scale
-        hostLayer.contentsScale = scale
-        hostLayer.frame = bounds
+        surfaceLayer.contentsScale = scale
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        surfaceLayer.frame = bounds
+        CATransaction.commit()
         sendViewportIfNeeded(scale: scale)
     }
 

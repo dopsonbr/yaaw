@@ -25,6 +25,11 @@ final class HelperTerminalDelegate:
     private let state: TerminalViewState
     private let reply: RenderEventReply
 
+    /// Called when the Ghostty surface attaches (its `CAMetalLayer` now exists),
+    /// so the controller can publish the remote `contextID` — the layer is nil at
+    /// controller-init time, so publishing only there never sends a frame.
+    var onSurfaceAttached: (@MainActor () -> Void)?
+
     init(state: TerminalViewState, reply: RenderEventReply) {
         self.state = state
         self.reply = reply
@@ -71,6 +76,7 @@ final class HelperTerminalDelegate:
 
     func terminalDidAttachSurface(_ surface: TerminalSurface) {
         state.terminalDidAttachSurface(surface)
+        onSurfaceAttached?()
     }
 
     func terminalDidDetachSurface() {

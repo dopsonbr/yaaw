@@ -1,4 +1,5 @@
 import Foundation
+import IOSurface
 
 /// The XPC interface a `YAAWRenderHost` helper exposes to the app.
 ///
@@ -23,23 +24,23 @@ import Foundation
 /// The XPC interface the app exposes to receive events from a helper.
 ///
 /// Frame-ready notifications are delivered out of band via
-/// ``frameReady(generation:ioSurfaceRef:contextID:)`` so an `IOSurface` can be
-/// passed natively (it is `NSSecureCoding`-compliant) without flowing through a
-/// `Data` envelope; all other events arrive as encoded ``RenderEvent`` values
-/// via ``eventReceived(_:)``.
+/// ``frameReady(generation:surface:)`` so the helper's `IOSurface` is passed
+/// natively over XPC (it is `NSSecureCoding`-compliant); the app sets it as its
+/// pane layer's `contents`. (CAContext/CALayerHost remote-layer hosting — ADR-004
+/// Candidate 1 — was found not to share the IOSurface-backed layer across
+/// processes, so the shared-IOSurface path, Candidate 2, is used.) All other
+/// events arrive as encoded ``RenderEvent`` values via ``eventReceived(_:)``.
 @objc public protocol YAAWRenderReplyProtocol: NSObjectProtocol {
     /// A new frame is ready to composite.
     ///
     /// - Parameters:
     ///   - generation: Monotonic frame counter; the app drops stale frames.
-    ///   - ioSurfaceRef: An `NSValue` wrapping an `IOSurfaceRef` (fallback
-    ///     path), or `nil` when compositing via `CAContext`.
-    ///   - contextID: A `CAContext.contextID` (primary path), or `0` when
-    ///     compositing via IOSurface.
+    ///   - surface: The `IOSurface` the helper rendered into, shared natively
+    ///     over XPC; the app displays it via `layer.contents`. `nil` only if the
+    ///     surface couldn't be obtained yet.
     func frameReady(
         generation: UInt64,
-        ioSurfaceRef: NSValue?,
-        contextID: UInt32
+        surface: IOSurface?
     )
 
     /// Delivers a single encoded ``RenderEvent``.

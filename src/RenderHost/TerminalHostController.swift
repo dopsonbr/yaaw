@@ -27,8 +27,13 @@ final class TerminalHostController {
     private let eventForwarder: HelperTerminalDelegate
     private let reply: RenderEventReply
 
-    private var remoteLayer: RemoteLayerContext?
     private var frameGeneration: UInt64 = 0
+    private var lastSurfaceSeed: UInt32 = .max
+    private var lastSurfaceID = ObjectIdentifier(NSNull())
+    // Pushes the current IOSurface to the app on a modest cadence so terminal
+    // output / cursor blink reach the pane. (A future refinement is to drive this
+    // from libghostty's onPostRender instead of a timer.)
+    private var frameTimer: DispatchSourceTimer?
 
     private var driver: AgentTerminalProcessDriver { pipeline.driver }
 
@@ -82,11 +87,21 @@ final class TerminalHostController {
         window.contentView = view
         self.window = window
 
-        // Attaching to the window + marking the surface visible starts the
-        // display link so frames render; the window itself is never ordered in.
-        window.orderOut(nil)
+        // The window MUST be ordered in (Ghostty's display link only renders into
+        // its IOSurface while the window is live; `orderOut` stops rendering). It
+        // stays invisible by sitting below the desktop window level (the wallpaper
+        // occludes it) and is never made key (no focus steal). With IOSurface
+        // sharing the app displays the surface directly, so this window is never
+        // seen — and unlike CAContext, it does not need to be composited on screen.
+        window.level = NSWindow.Level(
+            rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
+        window.orderFrontRegardless()
         view.setSurfaceVisible(true)
-        publishContextIfNeeded()
+        // self is now fully initialized — safe to capture. Publish the shared
+        // IOSurface once the surface attaches (the layer/surface is nil at init).
+        eventForwarder.onSurfaceAttached = { [weak self] in self?.publishFrame() }
+        startFramePump()
+        publishFrame()
     }
 
     /// Resizes the live PTY grid and refits the surface, then re-publishes the
@@ -110,7 +125,6 @@ final class TerminalHostController {
             )
         )
         view.fitToSize()
-        publishContextIfNeeded()
         publishFrame()
     }
 
@@ -135,59 +149,66 @@ final class TerminalHostController {
     }
 
     func terminate() {
+        frameTimer?.cancel()
+        frameTimer = nil
         driver.terminate()
         view.setSurfaceVisible(false)
         window.orderOut(nil)
         window.contentView = nil
     }
 
-    // MARK: - Compositing
+    // MARK: - Compositing (shared IOSurface — ADR-004 Candidate 2)
 
-    /// Wraps the surface's backing layer in a remote context and publishes its
-    /// `contextID` once a layer exists. Idempotent: re-points an existing
-    /// context at a freshly-swapped layer (e.g. after a backing-scale change)
-    /// rather than minting a new id, keeping the app's `CALayerHost` stable.
-    private func publishContextIfNeeded() {
-        guard let layer = view.layer else { return }
-        if let remoteLayer {
-            remoteLayer.attach(layer: layer)
-            return
-        }
-        guard let context = RemoteLayerContext(layer: layer) else {
-            // TODO(compositing): CAContext SPI unavailable — report contextID 0
-            // so the app keeps the pane in a non-composited "reconnecting"-like
-            // state instead of crashing. The structure (PTY + surface + events)
-            // is otherwise fully live.
-            reply.frameReady(generation: nextGeneration(), contextID: 0)
-            return
-        }
-        remoteLayer = context
-        reply.frameReady(generation: nextGeneration(), contextID: context.contextID)
+    /// Reads the IOSurface backing the rendered surface and, when it has changed
+    /// (new surface object or advanced seed), shares it with the app over XPC.
+    /// The app sets it as its pane layer's `contents`.
+    private func publishFrame() {
+        guard let surface = currentSurface() else { return }
+        let id = ObjectIdentifier(surface)
+        let seed = IOSurfaceGetSeed(surface)
+        guard id != lastSurfaceID || seed != lastSurfaceSeed else { return }
+        lastSurfaceID = id
+        lastSurfaceSeed = seed
+        reply.frameReady(generation: nextGeneration(), surface: surface)
     }
 
-    /// Replicates the libghostty coordinator's `onPostRender` scale correction:
-    /// enforce `contentsScale` on the backing layer and resize a `CAMetalLayer`'s
-    /// `drawableSize` to `bounds * scale`, so the composited frame does not jump
-    /// when the pane's backing scale changes.
+    /// The IOSurface libghostty rendered into. The view's backing layer is an
+    /// `IOSurfaceLayer`; its surface is exposed via `contents` (auto-bridged or a
+    /// raw `IOSurfaceRef`) — fall back to KVC keys if a future layer hides it.
+    private func currentSurface() -> IOSurface? {
+        guard let contents = view.layer?.contents else { return nil }
+        if let surface = contents as? IOSurface { return surface }
+        let cf = contents as CFTypeRef
+        if CFGetTypeID(cf) == IOSurfaceGetTypeID() {
+            return (cf as! IOSurface)
+        }
+        for key in ["surface", "ioSurface", "contents"] {
+            guard let value = view.layer?.value(forKey: key) else { continue }
+            let valueCF = value as CFTypeRef
+            if CFGetTypeID(valueCF) == IOSurfaceGetTypeID() {
+                return (valueCF as! IOSurface)
+            }
+        }
+        return nil
+    }
+
+    /// Polls the surface on a modest cadence so ongoing terminal output reaches
+    /// the pane (publishFrame is a no-op when the surface seed is unchanged).
+    private func startFramePump() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.1, repeating: .milliseconds(33))
+        timer.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.publishFrame() }
+        }
+        timer.resume()
+        frameTimer = timer
+    }
+
+    /// Replicates the coordinator's scale correction: enforce `contentsScale` on
+    /// the backing layer so the shared surface is sampled at the right density.
     private func applyContentsScale(_ contentsScale: Double) {
         guard contentsScale > 0, let layer = view.layer else { return }
-        let scale = CGFloat(contentsScale)
-        layer.contentsScale = scale
-        if let metalLayer = layer as? CAMetalLayer {
-            metalLayer.drawableSize = CGSize(
-                width: view.bounds.width * scale,
-                height: view.bounds.height * scale
-            )
-        }
-    }
-
-    /// Bumps the generation and notifies the app a frame is ready to composite.
-    /// With CAContext hosting the window server shares the layer tree, so this
-    /// is a handshake (re-assert the contextID + advance generation on layout
-    /// changes) rather than a per-frame pixel copy.
-    private func publishFrame() {
-        guard let remoteLayer else { return }
-        reply.frameReady(generation: nextGeneration(), contextID: remoteLayer.contextID)
+        layer.contentsScale = CGFloat(contentsScale)
     }
 
     private func nextGeneration() -> UInt64 {

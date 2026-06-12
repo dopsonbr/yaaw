@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import IOSurface
 import YAAWKit
 import YAAWRenderProtocol
 
@@ -17,12 +18,13 @@ enum RenderSurfacePhase: Equatable, Sendable {
     case exited(Int32?)
 }
 
-/// Observable per-surface state the host view reads: the latest composited
-/// `contextID` (0 ⇒ no frame yet / non-composited), the frame generation (so the
-/// view ignores stale frames), and the lifecycle phase.
+/// Observable per-surface state the host view reads: the frame generation (which
+/// advances when a new shared IOSurface arrives, so the view re-displays only on
+/// real frames), the lifecycle phase, and the title. The IOSurface itself is held
+/// separately (see ``RenderHostClient/surface(for:)``) because it is not
+/// `Sendable`.
 struct RenderSurfaceSnapshot: Equatable, Sendable {
     var phase: RenderSurfacePhase = .idle
-    var contextID: UInt32 = 0
     var generation: UInt64 = 0
     var exitCode: Int32?
     var title: String = ""
@@ -60,6 +62,9 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
     private let helperURLProvider: @MainActor () -> URL?
     private let diagnosticRecorder: any DiagnosticEventRecording
     private var connectionsByRole: [RenderSurfaceRole: SurfaceConnection] = [:]
+    /// Latest shared IOSurface per role (kept out of the `Sendable`
+    /// `RenderSurfaceSnapshot`; the host view reads it via ``surface(for:)``).
+    private var surfacesByRole: [RenderSurfaceRole: IOSurface] = [:]
 
     init(
         helperURLProvider: @escaping @MainActor () -> URL? = RenderHostClient.defaultHelperURL,
@@ -106,6 +111,12 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
 
     func snapshot(for role: RenderSurfaceRole) -> RenderSurfaceSnapshot {
         snapshotsByRole[role] ?? RenderSurfaceSnapshot()
+    }
+
+    /// The latest IOSurface the helper shared for `role`, for the host view to
+    /// set as its layer contents (ADR-004 Candidate 2).
+    func surface(for role: RenderSurfaceRole) -> IOSurface? {
+        surfacesByRole[role]
     }
 
     // MARK: - Launch / hot-reload / relaunch
@@ -227,20 +238,22 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
     // MARK: - Reply handling (from the helper)
 
     fileprivate func handleFrameReady(
-        role: RenderSurfaceRole, generation: UInt64, contextID: UInt32
+        role: RenderSurfaceRole, generation: UInt64, surface: IOSurface?
     ) {
+        guard generation >= (snapshotsByRole[role]?.generation ?? 0) else { return }
+        if let surface { surfacesByRole[role] = surface }
         updateSnapshot(role: role) {
-            guard generation >= $0.generation else { return }
             $0.generation = generation
-            $0.contextID = contextID
             if case .ready = $0.phase {} else { $0.phase = .ready }
         }
     }
 
     fileprivate func handleEvent(role: RenderSurfaceRole, event: RenderEvent) {
         switch event {
-        case .frameReady(let generation, _, let contextID):
-            handleFrameReady(role: role, generation: generation, contextID: contextID)
+        case .frameReady:
+            // Frames arrive via the @objc reply (handleFrameReady) carrying the
+            // shared IOSurface, not through the Codable event channel.
+            break
         case .title(let title):
             updateSnapshot(role: role) { $0.title = title }
             onSurfaceEvent?(role, event)
@@ -354,7 +367,17 @@ private final class SurfaceConnection {
         self.connection = NSXPCConnection(serviceName: Self.serviceName)
         _ = helperURL
         connection.remoteObjectInterface = NSXPCInterface(with: YAAWRenderServiceProtocol.self)
-        connection.exportedInterface = NSXPCInterface(with: YAAWRenderReplyProtocol.self)
+        let replyInterface = NSXPCInterface(with: YAAWRenderReplyProtocol.self)
+        // IOSurface must be whitelisted as the `surface:` argument of frameReady
+        // so XPC will decode the shared surface (it is NSSecureCoding-compliant
+        // but not in the default allow-list).
+        replyInterface.setClasses(
+            NSSet(object: IOSurface.self) as! Set<AnyHashable>,
+            for: #selector(YAAWRenderReplyProtocol.frameReady(generation:surface:)),
+            argumentIndex: 1,
+            ofReply: false
+        )
+        connection.exportedInterface = replyInterface
         connection.exportedObject = reply
     }
 
@@ -386,6 +409,12 @@ private final class SurfaceConnection {
     static let serviceName = "dev.dopsonbr.YAAW.RenderHost"
 }
 
+/// Moves a non-`Sendable` `IOSurface` from the XPC reply queue to the main actor.
+/// Sending a kernel surface reference between threads is safe.
+private struct UncheckedSurfaceBox: @unchecked Sendable {
+    let surface: IOSurface?
+}
+
 extension RenderSurfaceRole {
     /// App-local diagnostic label (the Kit extension is internal to YAAWKit).
     fileprivate var diagnosticName: String {
@@ -410,10 +439,14 @@ private final class RenderReply: NSObject, YAAWRenderReplyProtocol, @unchecked S
         self.client = client
     }
 
-    func frameReady(generation: UInt64, ioSurfaceRef: NSValue?, contextID: UInt32) {
+    func frameReady(generation: UInt64, surface: IOSurface?) {
         let role = role
+        // IOSurface isn't Sendable; box it to cross into the main actor (passing a
+        // kernel surface reference between threads is safe).
+        let boxed = UncheckedSurfaceBox(surface: surface)
         Task { @MainActor [weak client] in
-            client?.handleFrameReady(role: role, generation: generation, contextID: contextID)
+            client?.handleFrameReady(
+                role: role, generation: generation, surface: boxed.surface)
         }
     }
 
