@@ -192,6 +192,14 @@ enum E2EDriverCommands {
             throw E2EDriverFailure("usage: YAAWE2E send-click --pid <pid> --x <n> --y <n>")
         }
         let point = CGPoint(x: x, y: y)
+        // Move the hardware cursor to the target first: a posted mouseDown is
+        // hit-tested by the window server against the *actual* cursor position,
+        // not the event's location field, so without this the click lands wherever
+        // the pointer happens to be (and never reaches the targeted pane). Warping
+        // also lets the click activate + key the window so first-responder focus
+        // and subsequent key delivery work (the IOSurface model routes input
+        // through the app's focused pane, unlike the old overlay-window helper).
+        CGWarpMouseCursorPosition(point)
         guard
             let mouseDown = CGEvent(
                 mouseEventSource: nil, mouseType: .leftMouseDown,
