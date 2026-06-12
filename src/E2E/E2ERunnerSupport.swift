@@ -40,6 +40,7 @@ enum VisualState: String, CaseIterable {
     case launch
     case projectCreation = "project-creation"
     case files
+    case browserPreview = "browser-preview"
     case nvim
     case git
     case missingDirectory = "missing-directory"

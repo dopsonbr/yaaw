@@ -93,9 +93,15 @@ struct RightPanelView: View {
             filesPanel
         case .browser:
             BrowserPanelPlaceholder(
+                client: renderHostClient,
+                role: selectedRightPanelRole,
                 tab: rightPanel.selectedRightPanelTab,
                 unavailableMessage: rightPanel.selectedBrowserUnavailableMessage,
-                onNavigate: rightPanel.updateSelectedBrowserTab(urlString:)
+                onNavigate: rightPanel.updateSelectedBrowserTab(urlString:),
+                onActivate: activateSelectedRightPanelTerminal
+            )
+            .id(
+                "\(workspace.selectedThreadID?.uuidString ?? "none")-\(rightPanel.selectedRightPanelTab.id)-\(rightPanel.selectedRightPanelTab.urlString ?? "")"
             )
             .accessibilityIdentifier("browser-panel")
         case .nvim:
@@ -224,22 +230,33 @@ struct RightPanelView: View {
             }
         }
     }
+}
 
-    // MARK: - Helpers
+// MARK: - Helpers
 
+// In an extension so the primary `RightPanelView` body stays under the
+// type-body-length limit; same-file `private` members remain accessible to the
+// struct's view builders above.
+extension RightPanelView {
     private var markdownAndHTMLToBrowser: Bool {
         settings.configuration.fileBrowser.markdownAndHTMLDefault == .browserPreview
     }
 
     private var selectedRightPanelRole: RenderSurfaceRole? {
         guard let threadID = workspace.selectedThreadID else { return nil }
-        switch rightPanel.selectedRightPanelTab.kind {
-        case .files, .browser:
+        let tab = rightPanel.selectedRightPanelTab
+        switch tab.kind {
+        case .files:
             return nil
+        case .browser:
+            // A browser tab drives a render surface only once it has a URL to
+            // load; an empty browser tab shows the "Enter a URL" chrome instead.
+            guard let urlString = tab.urlString, !urlString.isEmpty else { return nil }
+            return .browser(threadID: threadID, tabID: tab.id)
         case .git:
             return .lazygit(threadID: threadID)
         case .nvim:
-            return .nvimTab(threadID: threadID, tabID: rightPanel.selectedRightPanelTab.id)
+            return .nvimTab(threadID: threadID, tabID: tab.id)
         }
     }
 
@@ -296,9 +313,12 @@ struct RightPanelView: View {
 /// surfaces the unavailable message. (Delete-by-omission: no in-process WKWebView,
 /// no floating window, no viewport polling.)
 struct BrowserPanelPlaceholder: View {
+    @ObservedObject var client: RenderHostClient
+    let role: RenderSurfaceRole?
     let tab: RightPanelTab
     let unavailableMessage: String?
     let onNavigate: (String) -> Void
+    var onActivate: () -> Void = {}
     @State private var addressText = ""
     @FocusState private var isAddressFocused: Bool
     @Environment(\.fontSettings) private var fonts
@@ -329,22 +349,24 @@ struct BrowserPanelPlaceholder: View {
                     message: unavailableMessage
                 )
                 Spacer()
-            } else if let urlString = tab.urlString, !urlString.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: IconRole.rightPanelMode(.browser).icon.systemSymbolName)
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(dracula(.cyan))
-                    Text("Loading \(urlString)")
-                        .font(fonts.interfaceFont(sizeOffset: -1))
-                        .foregroundStyle(dracula(.comment))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text("The browser runs in an isolated helper process.")
-                        .font(fonts.interfaceFont(sizeOffset: -1))
-                        .foregroundStyle(dracula(.comment))
+            } else if let role, let urlString = tab.urlString, !urlString.isEmpty {
+                // The web content renders out-of-process: the helper rasterizes its
+                // WKWebView into a shared IOSurface that this surface host composites
+                // as the pane layer (ADR-004 Candidate 2 — same wire path as the
+                // terminal). The loading overlay sits on top until the first frame.
+                ZStack {
+                    TerminalSurfaceHostView(client: client, role: role, fonts: fonts)
+                        .accessibilityLabel("Browser preview")
+                    if client.snapshot(for: role).phase != .ready {
+                        browserLoadingOverlay(urlString: urlString)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(dracula(.background))
+            } else if let urlString = tab.urlString, !urlString.isEmpty {
+                browserLoadingOverlay(urlString: urlString)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(dracula(.background))
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: IconRole.rightPanelMode(.browser).icon.systemSymbolName)
@@ -362,8 +384,26 @@ struct BrowserPanelPlaceholder: View {
         .onAppear {
             addressText = tab.urlString ?? ""
             if tab.urlString?.isEmpty ?? true { isAddressFocused = true }
+            onActivate()
         }
         .onChange(of: tab.id) { addressText = tab.urlString ?? "" }
         .onChange(of: tab.urlString) { addressText = tab.urlString ?? "" }
+    }
+
+    @ViewBuilder
+    private func browserLoadingOverlay(urlString: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: IconRole.rightPanelMode(.browser).icon.systemSymbolName)
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(dracula(.cyan))
+            Text("Loading \(urlString)")
+                .font(fonts.interfaceFont(sizeOffset: -1))
+                .foregroundStyle(dracula(.comment))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text("The browser runs in an isolated helper process.")
+                .font(fonts.interfaceFont(sizeOffset: -1))
+                .foregroundStyle(dracula(.comment))
+        }
     }
 }

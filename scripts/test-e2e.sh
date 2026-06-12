@@ -1339,7 +1339,7 @@ assert_no_focus_steal "settings editor probe"
 run_crash_isolation_probe
 assert_no_focus_steal "crash isolation probe"
 
-for state in launch project-creation files nvim git missing-directory bottom-terminal panel-resize panel-collapse; do
+for state in launch project-creation files browser-preview nvim git missing-directory bottom-terminal panel-resize panel-collapse; do
   launch_state "$state"
 done
 

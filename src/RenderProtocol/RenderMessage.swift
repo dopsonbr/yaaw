@@ -171,6 +171,18 @@ extension LaunchPayload {
             appShortcutSignatures: launch.appShortcutSignatures
         )
     }
+
+    /// Builds a launch payload for the browser tool kind. The browser hosts a
+    /// `WKWebView` (no PTY/capture/theme), so only the navigation `command`
+    /// (`["load", urlString]`), working directory, and environment carry over.
+    public init(browser launch: IsolatedTerminalLaunch) {
+        self.init(
+            toolKind: IsolatedToolKind.browser.rawValue,
+            command: launch.command,
+            environment: launch.environment,
+            workingDirectory: launch.workingDirectory
+        )
+    }
 }
 
 extension RenderingPayload {

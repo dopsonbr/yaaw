@@ -16,6 +16,9 @@ public enum RenderSurfaceRole: Equatable, Sendable, Hashable {
     case nvimTab(threadID: UUID, tabID: String)
     /// The lazygit/git surface for a thread.
     case lazygit(threadID: UUID)
+    /// A browser/web-preview surface for a thread's right-panel browser tab.
+    /// The initial URL travels in the launch `command` as `["load", urlString]`.
+    case browser(threadID: UUID, tabID: String)
 }
 
 /// A description of how a surface should be launched. The stores hand this to the

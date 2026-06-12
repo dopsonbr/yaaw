@@ -45,6 +45,8 @@ extension WorkspaceStore {
             return nvimTabLaunch(threadID: threadID, tabID: tabID, role: role)
         case .lazygit(let threadID):
             return lazygitLaunch(threadID: threadID, role: role)
+        case .browser(let threadID, let tabID):
+            return browserLaunch(threadID: threadID, tabID: tabID, role: role)
         }
     }
 
@@ -159,6 +161,31 @@ extension WorkspaceStore {
         )
     }
 
+    private func browserLaunch(threadID: UUID, tabID: String, role: RenderSurfaceRole)
+        -> RenderSurfaceLaunch?
+    {
+        guard let thread = activeThread(id: threadID),
+            requireExistingDirectory(thread.workingDirectory, role: role),
+            let tab = rightPanel?.rightPanelStatesByThreadID[threadID]?.tabs.first(where: {
+                $0.id == tabID
+            }),
+            tab.kind == .browser,
+            let urlString = tab.urlString, !urlString.isEmpty
+        else { return nil }
+        // The browser helper hosts a `WKWebView`, not an exec process: the initial
+        // URL travels in `command` as `["load", urlString]` (the helper parses
+        // `command.first == "load"`). Subsequent navigation goes over the input
+        // channel; a URL change re-activates with a new command (relaunch),
+        // mirroring the nvim file-switch model.
+        return RenderSurfaceLaunch(
+            role: role,
+            title: tab.title,
+            workingDirectory: thread.workingDirectory,
+            command: ["load", urlString],
+            agentCLI: thread.agentCLI
+        )
+    }
+
     // MARK: - Activation
 
     /// Activates (launches or re-focuses) the render surface for a role. Non-agent and
@@ -212,6 +239,8 @@ extension WorkspaceStore {
         case .nvimTab(let threadID, let tabID):
             return nvimTabLaunch(threadID: threadID, tabID: tabID, role: role)
         case .lazygit(let threadID): return lazygitLaunch(threadID: threadID, role: role)
+        case .browser(let threadID, let tabID):
+            return browserLaunch(threadID: threadID, tabID: tabID, role: role)
         case .project: return nil
         }
     }
@@ -306,6 +335,7 @@ extension RenderSurfaceRole {
         case .bottom: return "bottom"
         case .nvim, .nvimTab: return "nvim"
         case .lazygit: return "lazygit"
+        case .browser: return "browser"
         }
     }
 }

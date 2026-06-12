@@ -101,6 +101,12 @@ final class E2ERunner {
                     $0.relativePath == "README.md"
                 }
             }
+        case .browserPreview:
+            // index.html (plain HTML, deterministic render) over the mermaid
+            // README so the screenshot does not depend on async JS rendering.
+            try e2eAssert(
+                stores.rightPanel.openFileInBrowser(relativePath: "index.html"),
+                "visual browser-preview state opened index.html in the browser")
         case .nvim:
             stores.rightPanel.openFileInNvim(relativePath: "README.md")
         case .git, .missingTool:

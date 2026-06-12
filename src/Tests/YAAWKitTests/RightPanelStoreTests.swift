@@ -124,6 +124,38 @@ final class RightPanelStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testBrowserSurfaceLaunchCarriesLoadCommandForOpenedFile() async throws {
+        let root = try storeTemporaryDirectory()
+        let preview = root.appendingPathComponent("index.html")
+        try "<h1>Preview</h1>".write(to: preview, atomically: true, encoding: .utf8)
+        let harness = await makeBrowserHarness(root: root)
+        XCTAssertTrue(harness.rightPanel.openFileInBrowser(relativePath: "index.html"))
+
+        let threadID = try XCTUnwrap(harness.workspace.selectedThreadID)
+        let tabID = harness.rightPanel.selectedRightPanelTab.id
+        let launchResult = await harness.workspace.surfaceLaunch(
+            for: .browser(threadID: threadID, tabID: tabID))
+        let launch = try XCTUnwrap(launchResult)
+
+        // The browser helper hosts a WKWebView; the file URL travels in the launch
+        // command as `["load", urlString]` (the helper parses `command.first`).
+        XCTAssertEqual(launch.command, ["load", preview.standardizedFileURL.absoluteString])
+        XCTAssertEqual(launch.workingDirectory, root)
+    }
+
+    @MainActor
+    func testBrowserSurfaceLaunchIsNilForEmptyBrowserTab() async {
+        let harness = await makeHarness()
+        let threadID = harness.workspace.selectedThreadID ?? UUID()
+        harness.rightPanel.openBrowserTab()
+        let tabID = harness.rightPanel.selectedRightPanelTab.id
+        // An empty browser tab (no URL) has no surface to launch.
+        let launch = await harness.workspace.surfaceLaunch(
+            for: .browser(threadID: threadID, tabID: tabID))
+        XCTAssertNil(launch)
+    }
+
+    @MainActor
     func testBrowserRejectsUnsupportedAndEscapingFilePathsWithoutChangingTab() async {
         let harness = await makeHarness()
         let originalTab = harness.rightPanel.selectedRightPanelTab

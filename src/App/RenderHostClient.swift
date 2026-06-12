@@ -229,7 +229,16 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
         }
         connectionsByRole[role] = connection
         connection.resume()
-        connection.send(.launch(LaunchPayload(terminal: launch)))
+        // The browser surface hosts a WKWebView (toolKind=.browser); every other
+        // role hosts a PTY-backed terminal. The cached `launch` carries the
+        // role-appropriate `command` either way (browser: `["load", url]`).
+        let payload: LaunchPayload
+        if case .browser = role {
+            payload = LaunchPayload(browser: launch)
+        } else {
+            payload = LaunchPayload(terminal: launch)
+        }
+        connection.send(.launch(payload))
         if let viewport = connection.lastViewport {
             connection.send(.resize(viewport))
         }
@@ -447,6 +456,7 @@ extension RenderSurfaceRole {
         case .bottom: "bottom"
         case .nvim, .nvimTab: "nvim"
         case .lazygit: "lazygit"
+        case .browser: "browser"
         }
     }
 }
