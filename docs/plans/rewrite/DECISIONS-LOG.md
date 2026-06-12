@@ -557,3 +557,44 @@ real GUI (the `YAAWE2E` `screenshot`/`send-key`/`send-click`/`frontmost`/
 > markdown render this round; those rest on the verified shared pipeline + the
 > libghostty API, pending the owner's confirmation (DEFERRED #28 — scroll
 > direction/scale sign may need a one-line tweak after real use).
+
+> **[D-031] Render-host helper windows leaking on screen on macOS 26 + the black browser pane** — *(2026-06-12)*
+> **Symptom (from a real run):** the WKWebView (and a terminal) rendered in
+> separate windows floating detached at the bottom corner of the desktop, while
+> the in-app browser pane stayed black.
+> **Root cause:** both `BrowserHostController` and `TerminalHostController` made
+> their off-screen host window "invisible" by ordering it in at
+> `desktopWindow − 1` and trusting the **wallpaper to occlude it**. macOS 26 no
+> longer covers windows at that level, so the helper window — anchored at screen
+> origin `(0,0)` — became visible wherever the app window didn't cover it (the
+> "floating in the corner" bug). Worse, a window *below the desktop level* is in
+> an odd compositing state where `WKWebView.takeSnapshot` returns blank, so the
+> snapshot drawn into the shared IOSurface was black even though WebKit was
+> painting its own backing store (the "browser pane stays black" bug). Both
+> symptoms, one cause.
+> **Options:** (a) move the window fully off-screen — reliable invisibility, but
+> off-all-screens risks WebKit occlusion-throttling the snapshot to blank;
+> (b) keep relying on z-order occlusion at some other level — fragile, the same
+> class of bug; (c) keep the window composited *normally* and hide it with
+> `alphaValue = 0`, forcing `occlusionState` to `.visible` so WebKit never
+> throttles.
+> **Decision:** (c). Unified the two near-identical `Headless*Window` subclasses
+> into one `HeadlessRenderWindow` (`canBecomeKey/Main` + `occlusionState`
+> always `.visible`) and added `orderInHidden(_:)`: `alphaValue = 0`,
+> `ignoresMouseEvents`, `isExcludedFromWindowsMenu`, stationary/ignores-cycle
+> collection behavior, level just *below* normal, `orderFrontRegardless`. **Why:**
+> WindowServer draws nothing for a fully transparent window yet keeps its backing
+> layer tree live, so `takeSnapshot` / libghostty Metal rendering / IOSurface
+> sharing all keep producing real pixels; invisibility no longer depends on the
+> OS wallpaper; the window is never made key, so no focus steal (the E2E
+> `frontmost` assertion still holds).
+> **Verification:** an isolated experiment mirroring the exact window setup
+> (`/tmp/snaptest.swift`) loaded an HTML page into an `alpha = 0`
+> `HeadlessRenderWindow` and `takeSnapshot(afterScreenUpdates: true)` returned the
+> real page pixels (non-black), proving alpha-0 does **not** blank the snapshot —
+> the crux assumption. Build + 331 unit tests + lint (0 serious) + full headless
+> E2E all green. The reload-based `browser-preview` E2E can't load web content
+> (transient tabs), and the owner was mid-meeting, so the in-app markdown render
+> and "no floaters" were not re-screenshotted live this round — they rest on the
+> isolated proof + the unchanged snapshot→IOSurface→pane path, pending the owner's
+> eyeball (DEFERRED #29).
