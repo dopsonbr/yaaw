@@ -1,10 +1,34 @@
 # 004: Render-Helper Cross-Process Compositing Mechanism
 
-- **Status:** Accepted (rewrite §0.1 spike gate)
+- **Status:** Accepted, then **revised by runtime outcome** — Candidate 1
+  (CAContext) was found non-viable cross-process; **Candidate 2 (shared IOSurface)
+  is the implemented, verified-working mechanism** (see "Outcome" below).
 - **Affects:** [Rewrite master plan](../plans/rewrite/00-master-plan.md) Chunk D;
   `YAAWRenderProtocol`, `YAAWRenderHost`, `RenderHostClient`,
   `TerminalSurfaceHostView`.
 - **Supersedes the overlay-window approach** used by the old `YAAWToolHost`.
+
+## Outcome (2026-06-12, verified on a real run)
+
+The spike was completed against the real Chunk-D code on a machine with screen +
+accessibility. **Candidate 1 (CAContext + CALayerHost) is NOT viable** here: the
+helper renders the terminal perfectly into libghostty's `IOSurfaceLayer` and
+publishes a valid `CAContext.contextID`, and the app hosts it in a real
+`CALayerHost`, but the window server does not share that layer's content to the
+host process — the pane stays black even with the source window visible and
+actively rendering. Per the "surface to the owner" clause below, this was brought
+to the owner, who chose **Candidate 2 (shared IOSurface)**.
+
+**Implemented & verified:** the helper shares the IOSurface backing its
+`IOSurfaceLayer` natively over XPC (`frameReady(generation:surface:)`, IOSurface
+whitelisted on the reply `NSXPCInterface`); the app displays it via
+`layer.contents`. The helper window is ordered-in *below the desktop window level*
+so libghostty's display link keeps rendering into the surface while the window
+stays invisible and never key (no focus steal). The agent and bottom terminals
+composite in-pane with no overlay window. The `frameReady` envelope still also
+carries (now-unused) room for the CAContext path; the active path is IOSurface.
+Follow-ups (browser-pane IOSurface, event-driven frame push, size/scale tuning)
+are tracked in `docs/plans/rewrite/DEFERRED-ISSUES.md`.
 
 ## Context
 

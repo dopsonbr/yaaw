@@ -193,6 +193,49 @@ D-008.
 > XPC connection + CAContext compositing remain GUI-verification-bound
 > (DEFERRED-ISSUES #12/#15).
 
+> **[D-016] Render "unavailable" + black-pane bugs fixed; compositing works** — *(post-merge GUI debugging, 2026-06-12, screen+accessibility granted)*
+> With a screen available, debugged the live render path end-to-end. Three fixes,
+> in order of discovery:
+> 1. **"Render helper unavailable"** — `RenderHostClient.defaultHelperURL()` gated
+>    the XPC connection on finding the helper at `Contents/Helpers/`, but
+>    `build_and_run.sh` packages it as an XPC service at `Contents/XPCServices/…`.
+>    Fixed the path → the helper launches, the per-surface `NSXPCConnection`
+>    connects, PTYs run.
+> 2. **`contextID` always 0** — `RemoteLayerContext` read the CAContext id via an
+>    `@objc` protocol declaring `contextID` (capital D); Apple's property is
+>    `contextId` (lowercase d), so the selector missed → 0. (Moot after #3, but a
+>    real bug.)
+> 3. **Black panes** — even with a valid id and a real `CALayerHost`, the window
+>    server did not share the helper's IOSurface-backed layer cross-process: the
+>    helper window renders the terminal *perfectly* (proven by capturing the
+>    helper's own window) but the app's hosted layer stayed black. **CAContext/
+>    CALayerHost (ADR-004 Candidate 1) is not viable here.**
+> Per the owner's decision (see D-018), switched to Candidate 2 (shared IOSurface).
+
+> **[D-017] Helper window: ordered-in below desktop, never key** — *(2026-06-12)*
+> **Finding:** `orderOut` stops libghostty's display link → the surface never
+> renders → nothing to share. The window must be *ordered in* to render, but must
+> not be visible or steal focus.
+> **Decision:** Order the window in at a window level just *below the desktop*
+> window (the wallpaper occludes it → invisible), never make it key. Verified: the
+> display link keeps rendering (IOSurface seed advances), the window is not visible
+> on screen, and frontmost stays another app (no focus steal). Unlike CAContext,
+> IOSurface sharing does not need the helper window composited on a real display —
+> only the display link running.
+
+> **[D-018] Compositing mechanism: IOSurface (Candidate 2), owner-approved** — *(2026-06-12)*
+> **Question asked (per ADR-004's "surface to owner" clause):** CAContext is not
+> viable cross-process; use shared IOSurface, the proven overlay-window fallback,
+> or keep debugging CAContext?
+> **Owner chose: shared IOSurface (Candidate 2).** Implemented: the helper shares
+> the IOSurface backing libghostty's `IOSurfaceLayer` over XPC
+> (`frameReady(generation:surface:)`, IOSurface whitelisted on the reply
+> interface); the app displays it via `layer.contents`. **Verified working** — the
+> agent and bottom terminals composite in-pane (no overlay window), the helper is
+> invisible, no focus steal. ADR-004 updated. Remaining polish (browser-pane
+> IOSurface, frame-pump → event-driven `onPostRender`, size/scale tuning) tracked
+> in DEFERRED-ISSUES.
+
 ## Chunk A — PersistenceActor
 
 > **[D-009] Store concurrency model: async protocol + actor stores** — *(Chunk A, 2026-06-11)*

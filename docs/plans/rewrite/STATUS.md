@@ -16,9 +16,12 @@ and is **complete and verified as far as a headless (no-GUI) environment allows*
   (Chunk E). ✓ Done, 90 parity tests.
 - **Poll-everything → actors + `AsyncStream` + Task cancellation** (Chunks A/B/C/E).
   ✓ Done; every generation counter / in-flight boolean removed.
-- **Overlay-window rendering → typed XPC + CAContext compositing in a headless
-  helper** (Chunk D). ✓ Code complete + compiles + the helper is self-contained;
-  **runtime compositing needs the GUI** (see "What remains").
+- **Overlay-window rendering → typed XPC + shared-IOSurface compositing in a
+  headless helper** (Chunk D). ✓ **Working & verified on a real run** — terminals
+  composite in-pane (no overlay window), the helper is invisible, no focus steal.
+  (CAContext/CALayerHost — ADR-004 Candidate 1 — was found non-viable
+  cross-process and replaced by shared IOSurface, Candidate 2, with owner
+  sign-off; see DECISIONS-LOG D-016/D-018 and ADR-004.)
 
 Everything that can be verified without a screen **is green**: the full package
 builds (debug **and** release), **327 headless tests pass (0 failures)**, both
@@ -78,33 +81,46 @@ synthetic full-corpus operations). See DEFERRED-ISSUES #4/#6.
 | **A** | PersistenceActor: UPSERT + statement cache + sparse-state rebuild + v17; **release-build crash fixed** | ✓ done (114 tests) |
 | **B** | FileIndexActor: sorted-merge, `.git/HEAD` session cache, AsyncStream re-rank | ✓ done (+ FileBrowser tests) |
 | **C** | SessionBindingActor + 4 declarative CLIManifests; drift detection; reversible path encoding | ✓ done (45 tests) |
-| **D** | YAAWRenderProtocol (typed Codable + @objc XPC) + terminal stack; YAAWRenderHost helper (XPC + CAContext); RenderHostClient + TerminalSurfaceHostView | ✓ **code complete + compiles**; runtime compositing GUI-bound |
+| **D** | YAAWRenderProtocol (typed Codable + @objc XPC) + terminal stack; YAAWRenderHost helper (XPC + **shared IOSurface**); RenderHostClient + TerminalSurfaceHostView | ✓ **working & verified** — terminals composite in-pane (IOSurface, Candidate 2; CAContext abandoned). Polish in DEFERRED #20–22 |
 | **E** | AppModel → 5 stores + AppEnvironment; generation counters → Task cancellation; v18 persists per-thread UI state | ✓ done (90 parity tests) |
 | **F** | thin SwiftUI views per store + appearance structure + AX ids + YAAWApp | ✓ **compiles + app launches**; appearance/screenshot parity GUI-bound |
 | **G** | E2E driver + runner + crash-isolation probe + perf gate wiring | ◐ E2E target ported to compile + headless durable-state assertions + `test-e2e.sh` wired; **full GUI run needs a screen + accessibility** |
 | **cutover** | docs, scripts, clean merge | ◐ docs updated; scripts wired; final merge is the owner's call after GUI verification |
 
-## What remains (all GUI-verification-bound)
+## Verified on a real run (2026-06-12, screen + accessibility)
 
-These cannot be verified in a headless environment; they are the owner's
-finish-line, fully scoped in DEFERRED-ISSUES:
+- The signed `.app` launches; the full UI works (sidebar, projects/threads, split
+  layout, right-panel tabs, bottom terminal, theme/chrome, Files browser).
+- The `YAAWRenderHost` XPC service spawns, the per-surface `NSXPCConnection`
+  connects, PTYs run, and **terminals composite in-pane via shared IOSurface** —
+  agent + bottom terminals show live content (codex output, prompt, cursor,
+  JetBrains Mono, colors). No overlay window; helper invisible; no focus steal.
 
-1. **Render-helper runtime + compositing (#12, #15).** Run `script/build_and_run.sh`,
-   create a project → thread → CLI, and confirm: the `YAAWRenderHost` XPC service
-   spawns, the per-surface `NSXPCConnection` resolves, and the terminal composites
-   **in-pane** via `CALayerHost`/`CAContext` with no tearing/scale-drift. If the
-   launchd XPC-service model fights AppKit/Ghostty, switch `RenderHostClient` to a
-   child-`Process` + anonymous `NSXPCListener` endpoint (the helper already runs an
-   NSApplication; the wire protocol is identical). The `frameReady` envelope
-   carries both `contextID` and `ioSurfaceRef`, so the IOSurface fallback needs no
-   protocol change.
+## What remains (the owner's finish-line)
+
+Mostly polish + the GUI-bound acceptance run, fully scoped in DEFERRED-ISSUES:
+
+1. **Compositing polish (#20–#22):** cell-metric/size tuning for pixel-exact text
+   (#20); replace the ~30Hz frame-pump poll with libghostty's `onPostRender`
+   event (#21); browser-pane IOSurface (WKWebView remote layer — #22). Terminals,
+   the primary surface, work today.
 2. **Appearance / screenshot parity (#16).** Capture via the E2E SCK path, diff
-   against `docs/examples/screenshots/current/*`, fix deltas.
-3. **Full E2E run (Chunk G).** Needs the running `.app` + accessibility permission;
-   the headless durable-state assertions + the driver/probe machinery are in place.
+   against `docs/examples/screenshots/current/*`, fix deltas. (Note: SCK
+   per-window capture does include the IOSurface contents — verified.)
+3. **Full E2E run (Chunk G).** Needs the running `.app` + accessibility; the
+   headless durable-state assertions + driver/probe machinery are in place.
 4. **Crash-isolation probe** — `kill -9` a render helper, assert app + siblings
-   survive and the pane recovers (the recovery code path exists in RenderHostClient).
+   survive and the pane recovers (recovery code path exists in RenderHostClient).
 5. **Doc sweep + warnings-as-errors flip** (D-006/D-007) — mechanical, pre-merge.
+
+### Reproducing the working terminal locally
+
+```sh
+script/build_and_run.sh   # then open a project/thread/CLI, or:
+# deterministic: launch with a seeded state DB that has a terminal active —
+YAAW_DATABASE_PATH=<a state .sqlite with a selected thread + bottom terminal> \
+  dist/YAAW.app/Contents/MacOS/YAAW
+```
 
 ## How to finish
 
