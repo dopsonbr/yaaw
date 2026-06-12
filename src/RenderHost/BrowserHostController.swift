@@ -26,7 +26,7 @@ import YAAWRenderProtocol
 @MainActor
 final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate {
     private let webView: WKWebView
-    private let window: HeadlessBrowserWindow
+    private let window: HeadlessRenderWindow
     private let reply: RenderEventReply
 
     private var frameGeneration: UInt64 = 0
@@ -52,7 +52,7 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         webView.autoresizingMask = [.width, .height]
         self.webView = webView
 
-        let window = HeadlessBrowserWindow(
+        let window = HeadlessRenderWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.borderless],
             backing: .buffered,
@@ -66,12 +66,14 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         webView.navigationDelegate = self
         webView.uiDelegate = self
 
-        // The window must be ordered in for WebKit to render into a backing store
-        // (an ordered-out web view snapshots blank). It stays invisible by sitting
-        // below the desktop window level (the wallpaper occludes it) and is never
-        // key (no focus steal) — exactly like the terminal helper window.
-        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
-        window.orderFrontRegardless()
+        // The window must be ordered in (and composited normally) for WebKit to
+        // render into a backing store: an ordered-out web view snapshots blank,
+        // and so does one ordered below the desktop window level on macOS 26. It
+        // stays invisible via `orderInHidden` (alpha 0, occlusionState forced
+        // visible so WebKit never throttles) rather than the old below-the-
+        // wallpaper trick, which macOS 26 no longer hides — that left the web view
+        // floating in the screen corner and snapshotting black.
+        orderInHidden(window)
 
         startSnapshotPump()
 
@@ -372,11 +374,4 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         frameGeneration &+= 1
         return frameGeneration
     }
-}
-
-/// A borderless, off-screen window that can become key so the hosted web view
-/// is interactive while remaining invisible (compositing is remote).
-private final class HeadlessBrowserWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
 }

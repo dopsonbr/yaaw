@@ -20,7 +20,7 @@ import YAAWRenderProtocol
 @MainActor
 final class TerminalHostController {
     private let view: TerminalView
-    private let window: HeadlessTerminalWindow
+    private let window: HeadlessRenderWindow
     private let state: TerminalViewState
     private let pipeline: TerminalPTYPipeline
     // Ghostty's `view.delegate` is `weak`; the controller holds the only strong
@@ -85,11 +85,10 @@ final class TerminalHostController {
         view.controller = state.controller
         view.configuration = options
 
-        // A headless, off-screen, never-fronted window gives the surface a
-        // window to attach to (Ghostty only renders while `window != nil`)
-        // without any visible chrome or focus steal. We composite its layer
-        // remotely instead of showing the window.
-        let window = HeadlessTerminalWindow(
+        // A headless, invisible window gives the surface a window to attach to
+        // (Ghostty only renders while `window != nil`) without any visible chrome
+        // or focus steal. We composite its layer remotely instead of showing it.
+        let window = HeadlessRenderWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.borderless],
             backing: .buffered,
@@ -102,13 +101,11 @@ final class TerminalHostController {
 
         // The window MUST be ordered in (Ghostty's display link only renders into
         // its IOSurface while the window is live; `orderOut` stops rendering). It
-        // stays invisible by sitting below the desktop window level (the wallpaper
-        // occludes it) and is never made key (no focus steal). With IOSurface
-        // sharing the app displays the surface directly, so this window is never
-        // seen — and unlike CAContext, it does not need to be composited on screen.
-        window.level = NSWindow.Level(
-            rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
-        window.orderFrontRegardless()
+        // stays invisible via `orderInHidden` (alpha 0, never key) rather than the
+        // old below-the-wallpaper trick, which macOS 26 no longer hides. With
+        // IOSurface sharing the app displays the surface directly, so this window
+        // is never seen.
+        orderInHidden(window)
         view.setSurfaceVisible(true)
         // self is now fully initialized — safe to capture. Publish the shared
         // IOSurface once the surface attaches (the layer/surface is nil at init).
@@ -476,15 +473,6 @@ private final class TerminalDriverCallbacks: @unchecked Sendable {
             )
         )
     }
-}
-
-/// A borderless, off-screen window that can still become key/main, so the
-/// hosted surface can be first responder for input even though the window is
-/// never ordered in. It hosts the surface only to give Ghostty a window to
-/// attach to and a backing layer to render into; compositing is remote.
-private final class HeadlessTerminalWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
 }
 
 extension LaunchPayload {
