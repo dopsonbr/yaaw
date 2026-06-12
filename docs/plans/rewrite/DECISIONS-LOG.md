@@ -304,3 +304,87 @@ D-008.
 > imperceptible. The headline Chunk-A win — the release-build crash fix (D-011) —
 > is far more important and is done. The full-save/load synthetic-extreme gap is
 > logged in DEFERRED-ISSUES with the closing path.
+
+## Post-rewrite GUI tuning & large-project hardening (2026-06-12, screen + accessibility)
+
+This session resumes after the render fix, with a way to drive + screenshot the
+real GUI (the `YAAWE2E` `screenshot`/`send-key`/`send-click`/`frontmost`/
+`kill-helper` subcommands) and a real large project to test against
+(`~/github/one-thd/order-up`: 38 GB, ~1.58 M files, many worktree threads).
+
+> **[D-019] #20 sizing — already pixel-exact; PTY grid is libghostty-authoritative** — *(2026-06-12)*
+> **Question I'd have asked:** Does the app's fixed 8×17 cell estimate cause
+> wrong text size / wrong PTY winsize, and does it need cell-metric plumbing?
+> **Finding:** No. At 3× native-resolution zoom the composited terminal text is
+> crisp 1:1 (the helper renders the IOSurface at the pane's backing-pixel size, so
+> `contentsGravity = .resize` maps it 1:1). And the PTY winsize is already driven
+> authoritatively by libghostty: `ghostty_surface_receive_resize_cb` fires with the
+> real `cols/rows/cellWidthPixels` whenever the grid changes, and that flows through
+> the in-memory session's `resize:` handler to the PTY driver. The app's 8×17
+> estimate is only a transient before `view.fitToSize()`'s callback corrects it.
+> **Decision:** Don't add cell-metric plumbing. Make the helper *prefer the real
+> fitted grid* (`TerminalViewState.surfaceSize`) over the app estimate when
+> starting/resizing the PTY (estimate kept only as a pre-attach fallback), and
+> document why the explicit `resizeOrStart`-then-`fitToSize` ordering is correct
+> (the libghostty callback is the final word). **Why:** verification showed no
+> visible defect; the change removes the magic-number dependence and the transient
+> wrong winsize without inventing a metrics round-trip the rendering doesn't need.
+
+> **[D-020] #21 + idle CPU — decouple frame delivery from `@Published`; adaptive pump** — *(2026-06-12)*
+> **Question I'd have asked:** The plan wants event-driven frames, not a poll; and a
+> single live terminal pegged the *main app* at ~15% CPU. Hook libghostty
+> `onPostRender`, or keep a timer?
+> **Finding:** (1) libghostty-spm 1.2.4 does **not** vend `onPostRender`/the
+> coordinator publicly — chaining it would mean patching the pinned package
+> (higher-risk, out of scope). (2) The ~15% was **not** the pump: every 30 fps
+> `frameReady` mutated the `@Published snapshotsByRole` generation, firing
+> `objectWillChange` → SwiftUI re-evaluated every `TerminalSurfaceHostView` +
+> `updateNSView` per frame, per blinking cursor.
+> **Decision:** Deliver frames straight to the pane layer through a non-`@Published`
+> sink the pane registers on the client (`setFrameSink`); only the rare phase
+> transition (launching→ready→exited) touches `@Published`. Keep the frame *pump* a
+> deduped seed poll but make it **adaptive** (~30 fps while frames change, ~5 fps
+> after a short idle). **Result:** one live terminal idles at **~0.3%** main-app CPU
+> (was ~15%). The fully event-driven `onPostRender` push is tracked as DEFERRED #21
+> (needs a pin patch). **Why:** the decoupling is the real idle-CPU win the rewrite
+> promised; the pin stays untouched.
+
+> **[D-021] Reset the frame-generation watermark on (re)launch** — *(2026-06-12)*
+> **Finding (latent crash-recovery bug):** the stale-frame guard compared the new
+> helper's frame generation against the *previous* helper's high-water generation.
+> A relaunched/crash-recovered helper restarts its generation at 0, so every new
+> frame was rejected as stale and the recovered pane stayed black.
+> **Decision:** Reset the per-role generation watermark (and drop the stale surface)
+> in `startConnection`, covering launch, hot-relaunch, and crash recovery uniformly.
+> This is what actually lets the crash-isolation probe's pane re-render. (The old
+> `@Published`-generation design had the same latent bug.)
+
+> **[D-022] order-up froze the app at 99% CPU — three compounding root causes** — *(2026-06-12)*
+> **Question I'd have asked:** Adding order-up (38 GB / 1.58 M files / many worktree
+> threads) pegs the app at 99% CPU and stalls behind "Loading…". The file index?
+> **Finding (via `sample`):** Not the file index. Three compounding causes in the
+> **session-link** path:
+> 1. `CatalogJSON.coercedDate` allocated a fresh `ISO8601DateFormatter()` **per date
+>    field per JSONL line** (each init spins up ICU locale data) — ruinous across a
+>    large catalog.
+> 2. `normalizedSessionLinkName` used `.split(whereSeparator: \.isWhitespace)` — the
+>    **key-path literal** forces `swift_getAtKeyPath` dynamic projection per
+>    character (~100× slower than a closure).
+> 3. `exactSessionLinkCandidate` re-filtered + re-normalized order-up's **entire**
+>    candidate list on **every 1 s session-sync poll tick**, and
+>    `reconcileLoadedUnboundSessionLinks` did the same for **every** unbound thread
+>    **on the startup critical path** (blocking "Loading…").
+> **Decision (four fixes):** (a) one shared `ISO8601DateFormatter` behind a
+> `Mutex` (Sendable → clean `static let` under strict concurrency; no
+> `@unchecked Sendable`/`nonisolated(unsafe)`); (b) closure separator instead of the
+> key path (and drop the now-redundant `\r`/`\n` `replacingOccurrences` passes —
+> `isWhitespace` already matches them); (c) memoize the exact-link result keyed by
+> catalog signature + thread match-names, so a poll where nothing changed is an
+> O(1) signature compare; (d) run `reconcileLoadedUnboundSessionLinks` in a
+> background `Task` off the load path (UI never blocks on catalog parsing; the 1 Hz
+> poll does ongoing linking; `awaitLoadReconciliation()` is the deterministic test
+> seam). **Result:** order-up loads immediately; steady-state idle drops from 99%
+> to **~0.3%**; the one-time catalog parse is now an off-critical-path background
+> burst that settles to idle. All 327 tests still green. **Why this is a major fix,
+> not deferred:** "idle CPU ≈ 0" and large-project usability are explicit DoD
+> items, and the app was unusable on a real monorepo.
