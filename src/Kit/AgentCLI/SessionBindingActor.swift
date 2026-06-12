@@ -12,6 +12,16 @@ struct SessionCatalogCacheEntry: Sendable {
     var candidates: [SessionLinkCandidate]
 }
 
+/// Cached exact-link result: the candidate (or `nil`) plus the catalog signature
+/// and thread match-names it was computed against. Lets the 1 Hz session-sync
+/// poll skip re-filtering + re-normalizing the whole candidate list every tick
+/// when neither the catalog nor the thread's match names changed.
+struct ExactLinkCacheEntry: Sendable {
+    var signature: String
+    var matchNames: Set<String>
+    var candidate: SessionLinkCandidate?
+}
+
 /// Interprets declarative ``CLIManifest`` records to bind threads to agent CLI
 /// sessions: command construction, catalog scanning, exact linking, output and
 /// catalog metadata extraction, and capture/activity log reading.
@@ -32,6 +42,8 @@ public actor SessionBindingActor {
     static let catalogCacheLimit = 64
     var catalogCacheByKey: [SessionCatalogCacheKey: SessionCatalogCacheEntry] = [:]
     var catalogCacheInsertionOrder: [SessionCatalogCacheKey] = []
+    /// Memoized exact-link results keyed alongside the catalog cache.
+    var exactLinkCacheByKey: [SessionCatalogCacheKey: ExactLinkCacheEntry] = [:]
 
     /// The maximum capture-log lookback window before an offset is clamped.
     public static let captureLogStaleWindow: UInt64 = 8 * 1024 * 1024

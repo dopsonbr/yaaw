@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Pure helpers for reading values out of decoded JSON objects by key.
 ///
@@ -7,6 +8,15 @@ import Foundation
 /// `topLevelString` reads only the object's own top level — use it for keys that
 /// are ambiguous inside nested message/tool content (e.g. claude's `customTitle`).
 enum CatalogJSON {
+    /// A single shared ISO-8601 parser. `ISO8601DateFormatter` allocation spins up
+    /// ICU locale data, which is ruinous when done per JSONL line across a large
+    /// session catalog (it pegged startup on big projects like order-up). One
+    /// reused instance behind a `Mutex` keeps parsing concurrency-safe (the
+    /// formatter is mutable C state) without per-call allocation. `Mutex` is
+    /// `Sendable`, so this stays a clean `static let` under strict concurrency —
+    /// no `@unchecked Sendable`, no `nonisolated(unsafe)`.
+    private static let iso8601Formatter = Mutex(ISO8601DateFormatter())
+
     /// Decodes a single JSON document from `url`.
     static func object(from url: URL) -> Any? {
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -134,7 +144,7 @@ enum CatalogJSON {
             return Date(
                 timeIntervalSince1970: numeric > 1_000_000_000_000 ? numeric / 1000 : numeric)
         }
-        return ISO8601DateFormatter().date(from: string)
+        return iso8601Formatter.withLock { $0.date(from: string) }
     }
 
     private static func url(fromPath path: String) -> URL? {

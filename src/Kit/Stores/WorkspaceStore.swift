@@ -50,6 +50,10 @@ public final class WorkspaceStore {
     @ObservationIgnored var activeProjectLaunchDescriptorsByThreadID:
         [UUID: AgentCLITerminalLaunchDescriptor] = [:]
     @ObservationIgnored var captureReadOffsetsByThreadID: [UUID: UInt64] = [:]
+    /// Background session-link reconciliation kicked off by ``finishLoad()`` so a
+    /// large session catalog never blocks app startup; awaited via
+    /// ``awaitLoadReconciliation()``.
+    @ObservationIgnored private var loadReconciliationTask: Task<Void, Never>?
 
     init(context: StoreLoadContext, settings: SettingsStore) {
         let environment = context.environment
@@ -135,9 +139,19 @@ public final class WorkspaceStore {
     /// Post-init load work that touches other stores / the async actors:
     /// session-link reconciliation, the initial file-browser publish, and the
     /// global-directory reconciliation diagnostic.
+    ///
+    /// Session-link reconciliation reads + parses every CLI session catalog for
+    /// each unbound thread, which is unbounded in a large workspace (e.g.
+    /// order-up). It therefore runs in a background `Task` rather than on the load
+    /// path, so the UI never sits behind "Loading…" while catalogs are parsed; the
+    /// 1 Hz session-sync poll performs ongoing linking, and `awaitLoadReconciliation`
+    /// is the deterministic seam tests use. The cheap diagnostics + global-directory
+    /// reconcile stay synchronous.
     func finishLoad() async {
-        await reconcileLoadedUnboundSessionLinks(
-            requiresLinks: environment.requiresSessionLinkForLoadedUnboundThreads)
+        let requiresLinks = environment.requiresSessionLinkForLoadedUnboundThreads
+        loadReconciliationTask = Task { [weak self] in
+            await self?.reconcileLoadedUnboundSessionLinks(requiresLinks: requiresLinks)
+        }
         recordDiagnostic(
             category: "Lifecycle",
             name: "app_model_loaded",
@@ -147,6 +161,12 @@ public final class WorkspaceStore {
             ]
         )
         reconcileGlobalProjectDirectory()
+    }
+
+    /// Awaits the background session-link reconciliation kicked off by
+    /// ``finishLoad()``. The deterministic seam for tests / acceptance setup.
+    public func awaitLoadReconciliation() async {
+        await loadReconciliationTask?.value
     }
 
     /// Resolves once every enqueued persistence write has completed (test seam).

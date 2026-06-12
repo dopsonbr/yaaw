@@ -80,6 +80,10 @@ enum StoreHarnessBuilder {
         if systemAppearanceIsDark != true {
             stores.settings.updateSystemAppearance(isDark: systemAppearanceIsDark)
         }
+        // Session-link reconciliation now runs in a background task off the load
+        // path (so a large catalog never blocks startup); await it here so tests
+        // observe the reconciled state deterministically.
+        await stores.workspace.awaitLoadReconciliation()
         await stores.workspace.flushPersistence()
         return StoreHarness(
             stores: stores,

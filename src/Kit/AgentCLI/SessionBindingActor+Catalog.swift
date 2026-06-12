@@ -39,6 +39,7 @@ extension SessionBindingActor {
             if catalogCacheInsertionOrder.count > Self.catalogCacheLimit {
                 let evicted = catalogCacheInsertionOrder.removeFirst()
                 catalogCacheByKey.removeValue(forKey: evicted)
+                exactLinkCacheByKey.removeValue(forKey: evicted)
             }
         }
         catalogCacheByKey[key] = entry
@@ -50,7 +51,35 @@ extension SessionBindingActor {
     public func exactSessionLinkCandidate(for thread: AgentThread) -> SessionLinkCandidate? {
         guard thread.sessionIdentity == nil else { return nil }
         let matchNames = Self.sessionLinkMatchNames(for: thread)
-        guard !matchNames.isEmpty else { return nil }
+        guard !matchNames.isEmpty, let manifest = manifestsByKind[thread.agentCLI] else {
+            return nil
+        }
+        // The 1 Hz session-sync poll calls this every tick for the selected unbound
+        // thread. Filtering + normalizing the whole candidate list each time is
+        // O(catalog) and pegged the CPU on large catalogs (order-up). Memoize the
+        // result keyed by the catalog signature + the thread's match names, so a
+        // poll where neither changed is an O(1) signature compare. (The signature
+        // itself only fingerprints the catalog files, not their contents.)
+        let key = SessionCatalogCacheKey(
+            kind: thread.agentCLI,
+            workingDirectoryPath: thread.workingDirectory.standardizedFileURL.path
+        )
+        let signature = SessionCatalogReader(manifest: manifest).signature(
+            workingDirectory: thread.workingDirectory, homeDirectory: homeDirectory)
+        if let cached = exactLinkCacheByKey[key], cached.signature == signature,
+            cached.matchNames == matchNames
+        {
+            return cached.candidate
+        }
+        let result = computeExactSessionLinkCandidate(for: thread, matchNames: matchNames)
+        exactLinkCacheByKey[key] = ExactLinkCacheEntry(
+            signature: signature, matchNames: matchNames, candidate: result)
+        return result
+    }
+
+    private func computeExactSessionLinkCandidate(
+        for thread: AgentThread, matchNames: Set<String>
+    ) -> SessionLinkCandidate? {
         let matchingCandidates = sessionLinkCandidates(for: thread).filter { candidate in
             guard let candidateName = Self.normalizedSessionLinkName(candidate.displayName) else {
                 return false
@@ -97,11 +126,16 @@ extension SessionBindingActor {
     }
 
     static func normalizedSessionLinkName(_ name: String?) -> String? {
+        // Collapse all whitespace runs (including CR/LF, which `isWhitespace`
+        // already matches — so no separate `replacingOccurrences` passes) to single
+        // spaces. The separator MUST be a direct closure, not the `\.isWhitespace`
+        // key path: a key-path-literal separator forces `swift_getAtKeyPath`
+        // dynamic projection per character, which made this O(chars) call ~100×
+        // slower and pegged the 1 Hz session-sync poll at 99% CPU on large session
+        // catalogs (e.g. order-up). A closure inlines straight to the getter.
         let collapsed =
             name?
-            .replacingOccurrences(of: "\r", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
-            .split(whereSeparator: \.isWhitespace)
+            .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")
         return collapsed?.agentCLINilIfBlank
     }
