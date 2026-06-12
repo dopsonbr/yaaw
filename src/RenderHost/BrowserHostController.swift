@@ -304,11 +304,13 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         else { return }
         let rect = CGRect(x: 0, y: 0, width: surfaceWidth, height: surfaceHeight)
         context.clear(rect)
-        // Flip: a snapshot CGImage is top-left origin, but the surface is sampled
-        // by the pane layer top-left while CGContext draws bottom-left — without
-        // this the page renders upside down.
-        context.translateBy(x: 0, y: CGFloat(surfaceHeight))
-        context.scaleBy(x: 1, y: -1)
+        // No CPU flip: the pane that composites this surface (`TerminalPaneView`)
+        // is `isFlipped` — its hosting layer is geometry-flipped, so it already
+        // samples the surface top-down (the terminal's Ghostty-rendered surface
+        // relies on the same). `CGContext.draw` writes the top-left-origin snapshot
+        // bottom-up into the surface, which the flipped layer reads back upright;
+        // adding a `scaleBy(y: -1)` here double-flips it (page renders upside down,
+        // verified on a real run).
         context.draw(cgImage, in: rect)
         reply.frameReady(generation: nextGeneration(), surface: surface)
     }
