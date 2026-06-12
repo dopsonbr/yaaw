@@ -293,16 +293,21 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
         )
     }
 
-    /// Resolves the helper executable: an XPC service bundle under the app's
-    /// `Contents/Helpers` (release), falling back to a `swift build` sibling.
+    /// Confirms the render-host helper is bundled so the `serviceName` XPC
+    /// connection can resolve it. The connection itself goes through launchd by
+    /// service name (`SurfaceConnection.serviceName`); this is the
+    /// is-it-present gate. Checks the packaged XPC service bundle
+    /// (`Contents/XPCServices/<service-id>.xpc/Contents/MacOS/YAAWRenderHost`,
+    /// staged by `build_and_run.sh`), then a bare `swift build` sibling.
     static func defaultHelperURL() -> URL? {
         let helperName = "YAAWRenderHost"
-        let bundleHelper = Bundle.main.bundleURL
-            .appendingPathComponent("Contents")
-            .appendingPathComponent("Helpers")
+        let serviceHelper = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/XPCServices")
+            .appendingPathComponent("\(SurfaceConnection.serviceName).xpc")
+            .appendingPathComponent("Contents/MacOS")
             .appendingPathComponent(helperName)
-        if FileManager.default.isExecutableFile(atPath: bundleHelper.path) {
-            return bundleHelper
+        if FileManager.default.isExecutableFile(atPath: serviceHelper.path) {
+            return serviceHelper
         }
         guard let executableURL = Bundle.main.executableURL else { return nil }
         let sibling = executableURL.deletingLastPathComponent().appendingPathComponent(helperName)
