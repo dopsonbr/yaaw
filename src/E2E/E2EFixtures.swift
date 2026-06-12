@@ -127,6 +127,10 @@ struct E2EFixtures {
         )
         let stores = await AppStores.make(environment: appEnvironment)
         stores.settings.reloadConfiguration(configuration)
+        // Session-link reconciliation now runs in a background task off the load
+        // path (so a large catalog never blocks startup); await it so the runner's
+        // assertions observe the reconciled link-required state deterministically.
+        await stores.workspace.awaitLoadReconciliation()
         await flush(stores)
         return stores
     }
