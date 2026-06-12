@@ -117,11 +117,14 @@ The GUI-bound acceptance that was previously blocked is now done:
 
 ## What remains (the owner's finish-line)
 
-1. **Public-API doc sweep (D-007).** `YAAW_LINT_DOCS=1 scripts/lint.sh` reports
-   ~708 `AllPublicDeclarationsHaveDocumentation` findings on the verbatim-ported
-   value types. Pure boilerplate, zero behavioral value — the one DoD item the
-   owner deliberately deferred to the cutover gate (D-007). Mechanical.
-2. **Two GUI bugs surfaced by the first full GUI run** (not regressions from the
+Both deferred cutover-gate items are now **done**: warnings-as-errors (D-006 —
+the package builds warnings-clean under `SWIFT_STRICT=1`) and the public-API doc
+sweep (D-007 — `YAAW_LINT_DOCS=1 scripts/lint.sh` passes, 0
+`AllPublicDeclarationsHaveDocumentation` findings across the 43 ported files).
+
+What's left:
+
+1. **Two GUI bugs surfaced by the first full GUI run** (not regressions from the
    rewrite-tuning work, both tracked):
    - **DEFERRED #25 — intermittent empty Files tree** (SwiftUI view-lifecycle:
      entries are cached + in `state`, but the tree doesn't render them on some

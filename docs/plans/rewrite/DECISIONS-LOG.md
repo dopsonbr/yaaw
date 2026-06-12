@@ -459,3 +459,15 @@ real GUI (the `YAAWE2E` `screenshot`/`send-key`/`send-click`/`frontmost`/
 > the first GUI run exposed) and the browser-pane *visual* render unconfirmed
 > (DEFERRED #26 — implemented + wire-verified, but driving the preview was blocked by
 > #25 + this environment's multi-display/active-meeting focus contention).
+
+> **[D-027] Cutover gates closed: warnings-as-errors (D-006) + doc sweep (D-007)** — *(2026-06-12)*
+> The two items the owner explicitly deferred to the cutover gate are now done.
+> **D-006:** the whole package builds warnings-clean under `-warnings-as-errors`;
+> wired as `SWIFT_STRICT=1 scripts/build.sh` (and `scripts/check.sh`). **D-007:** the
+> ~708 `AllPublicDeclarationsHaveDocumentation` findings on the verbatim-ported value
+> types were cleared by a doc-only sweep across 43 YAAWKit files (run as a 10-agent
+> workflow, comments-only, each batch self-verified); `YAAW_LINT_DOCS=1 scripts/lint.sh`
+> now passes. Build clean, 327 tests pass, lint 0 serious, swift-format `--strict`
+> clean. The remaining open items are the two GUI bugs surfaced by the first full GUI
+> run (DEFERRED #25 Files-tree, #26 browser-visual) plus minor tracked deferreds — the
+> branch is otherwise at DoD parity for a clean cutover.
