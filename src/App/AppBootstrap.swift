@@ -65,9 +65,31 @@ final class AppBootstrap {
         }
 
         let isHeadlessE2E = environment["YAAW_E2E_HEADLESS"] == "1"
+        // Sandbox overrides (same `<prefix>` convention as DATABASE_PATH/CONFIG_PATH
+        // above): the E2E suite seeds an isolated capture directory and a PATH that
+        // resolves to fake CLIs. Prod never sets these, so it keeps the defaults.
+        // Without this the launched E2E app writes capture logs to Application
+        // Support and resolves the real CLIs, so the keyboard/activity probes (which
+        // read the suite's capture dir + fake-CLI output) see nothing.
+        var launchEnvironment = environment
+        if let toolPath = environment["\(envPrefix)PATH"] {
+            launchEnvironment["PATH"] = toolPath
+        }
+        let captureDirectory =
+            environment["\(envPrefix)CAPTURE_DIRECTORY"].map {
+                URL(fileURLWithPath: $0, isDirectory: true)
+            } ?? SessionBindingActor.defaultCaptureDirectory()
+        let activityDirectory =
+            environment["\(envPrefix)ACTIVITY_DIRECTORY"].map {
+                URL(fileURLWithPath: $0, isDirectory: true)
+            } ?? SessionBindingActor.defaultActivityDirectory()
+
         let externalToolResolver = PATHAgentCLIExecutableResolver()
         let sessionBindingActor = SessionBindingActor(
-            resolver: externalToolResolver, environment: environment)
+            resolver: externalToolResolver,
+            environment: launchEnvironment,
+            captureDirectory: captureDirectory,
+            activityDirectory: activityDirectory)
         let fileIndexActor = FileIndexActor(store: store)
         let renderHostClient = RenderHostClient(diagnosticRecorder: diagnostics)
 
@@ -82,8 +104,8 @@ final class AppBootstrap {
                 : MacSystemThreadActivityNotificationDispatcher.shared,
             badgeUpdater: MacDockThreadActivityBadgeUpdater.shared,
             diagnosticRecorder: diagnostics,
-            isApplicationActive: { NSApplication.shared.isActive },
-            environment: environment
+            isApplicationActive: { MainActor.assumeIsolated { NSApplication.shared.isActive } },
+            environment: launchEnvironment
         )
 
         let stores = await AppStores.make(environment: appEnvironment)
