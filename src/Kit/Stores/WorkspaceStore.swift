@@ -166,7 +166,11 @@ public final class WorkspaceStore {
     /// reconcile stay synchronous.
     func finishLoad() async {
         let requiresLinks = environment.requiresSessionLinkForLoadedUnboundThreads
-        loadReconciliationTask = Task { [weak self] in
+        // `.background` priority so this one-time catalog-parsing burst (large on a
+        // many-worktree workspace like order-up) yields to higher-priority work —
+        // notably the selected thread's file-index refresh, which otherwise gets
+        // starved on launch and leaves the Files panel stuck "Indexing…" (#25/#27).
+        loadReconciliationTask = Task(priority: .background) { [weak self] in
             await self?.reconcileLoadedUnboundSessionLinks(requiresLinks: requiresLinks)
         }
         recordDiagnostic(
