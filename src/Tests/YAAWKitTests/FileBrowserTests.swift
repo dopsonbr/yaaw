@@ -224,6 +224,26 @@ final class FileBrowserTests: XCTestCase {
             ])
     }
 
+    func testEagerWalkStopsAtEntryCapAndMarksTruncated() throws {
+        let root = try temporaryDirectory()
+        for index in 0..<40 {
+            try writeFile(root.appendingPathComponent("dir-\(index)/file.swift"), contents: "x")
+        }
+
+        // A low cap stops the walk early and marks the result truncated.
+        let capped = try BackgroundFileIndexer.buildIndex(
+            threadID: UUID(), root: root, ignoreRules: [], maxEntries: 10)
+        XCTAssertTrue(capped.isTruncated)
+        XCTAssertGreaterThan(capped.entries.count, 0)
+        XCTAssertLessThanOrEqual(capped.entries.count, 10)
+
+        // Under the default (huge) cap the same tree indexes fully, untruncated.
+        let full = try BackgroundFileIndexer.buildIndex(
+            threadID: UUID(), root: root, ignoreRules: [])
+        XCTAssertFalse(full.isTruncated)
+        XCTAssertEqual(full.entries.count, 80)  // 40 dirs + 40 files
+    }
+
     func testTemporaryDirectoryIndexShowsIgnoredDirectoriesButPrunesDescendants() throws {
         let root = try temporaryDirectory()
         try writeFile(root.appendingPathComponent(".env"), contents: "TOKEN=example")

@@ -142,6 +142,13 @@ struct FileBrowserPanel: View {
         guard let metadata = state.metadata else {
             return state.isIndexing ? "Indexing..." : "No index yet"
         }
+        if state.isIndexTruncated {
+            // Loud, not silent: the project is too large to fully index, so the
+            // browser shows the first N entries (deeper folders still expand, and
+            // search runs over the indexed subset).
+            return
+                "Large project - indexed first \(metadata.fileCount) items; expand folders or search for more"
+        }
         let ignored =
             metadata.ignoredDirectoryCount == 1
             ? "1 collapsed directory" : "\(metadata.ignoredDirectoryCount) collapsed directories"

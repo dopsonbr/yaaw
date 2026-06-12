@@ -28,6 +28,22 @@ public protocol FileIndexing: AnyObject, Sendable {
 /// Concurrent-queue-backed `FileIndexing`. Holds only an immutable `DispatchQueue`,
 /// so it is `Sendable` with no `@unchecked` escape.
 public final class BackgroundFileIndexer: FileIndexing {
+    /// Hard cap on entries from a single eager walk. Bounds memory, the post-walk
+    /// sort, and the SQLite cache write on pathologically large trees (e.g. a
+    /// ~1.5M-file monorepo, where an unbounded walk hangs for minutes). Beyond the
+    /// cap the walk stops and the result is marked truncated; deeper content stays
+    /// reachable via lazy subtree expansion and fuzzy search over the indexed set.
+    public static let maxIndexedEntries = 200_000
+    /// Coarse wall-clock backstop for a single eager walk. The entry cap above is
+    /// the reliable bound (checked every yield); this only stops a tree that is
+    /// slow *per entry* yet under the cap, so the browser can't spin indefinitely.
+    /// It is deliberately generous — a real 38 GB monorepo (~157k non-ignored
+    /// entries) indexes fully in ~15 s, and a complete index (everything
+    /// searchable) beats an early-truncated one. `FileManager`'s enumerator blocks
+    /// in bursts, so this is checked between yields and may overshoot somewhat; the
+    /// walk runs off-main on `queue`, so it only delays the result, never the UI.
+    public static let walkTimeBudget: TimeInterval = 30.0
+
     private let queue: DispatchQueue
 
     /// Creates an indexer running its walks on `queue` (a concurrent, user-initiated
@@ -112,7 +128,8 @@ public final class BackgroundFileIndexer: FileIndexing {
                 indexedAt: indexedAt,
                 fileCount: entries.count,
                 ignoredDirectoryCount: subResult.metadata.ignoredDirectoryCount
-            )
+            ),
+            isTruncated: subResult.isTruncated
         )
     }
 
@@ -135,7 +152,9 @@ public final class BackgroundFileIndexer: FileIndexing {
         root: URL,
         ignoreRules: [String],
         fileManager: FileManager = .default,
-        indexedAt: Date = Date()
+        indexedAt: Date = Date(),
+        maxEntries: Int = BackgroundFileIndexer.maxIndexedEntries,
+        timeBudget: TimeInterval = BackgroundFileIndexer.walkTimeBudget
     ) throws -> FileIndexResult {
         let root = root.standardizedFileURL
         var isDirectory: ObjCBool = false
@@ -156,7 +175,8 @@ public final class BackgroundFileIndexer: FileIndexing {
             throw FileBrowserIndexError.missingRoot(root.path)
         }
         let walk = try walkEntries(
-            enumerator: enumerator, root: root, ignoreMatcher: ignoreMatcher)
+            enumerator: enumerator, root: root, ignoreMatcher: ignoreMatcher,
+            maxEntries: maxEntries, timeBudget: timeBudget)
         var entries = walk.entries
         entries.sort(by: FileBrowserTreeBuilder.sortEntriesForTree)
         return FileIndexResult(
@@ -167,18 +187,41 @@ public final class BackgroundFileIndexer: FileIndexing {
                 indexedAt: indexedAt,
                 fileCount: entries.count,
                 ignoredDirectoryCount: walk.ignoredDirectoryCount
-            )
+            ),
+            isTruncated: walk.isTruncated
         )
     }
 
     private static func walkEntries(
         enumerator: FileManager.DirectoryEnumerator,
         root: URL,
-        ignoreMatcher: FileBrowserIgnoreMatcher
-    ) throws -> (entries: [FileBrowserEntry], ignoredDirectoryCount: Int) {
+        ignoreMatcher: FileBrowserIgnoreMatcher,
+        maxEntries: Int = BackgroundFileIndexer.maxIndexedEntries,
+        timeBudget: TimeInterval = BackgroundFileIndexer.walkTimeBudget
+    ) throws -> (entries: [FileBrowserEntry], ignoredDirectoryCount: Int, isTruncated: Bool) {
         var entries: [FileBrowserEntry] = []
         var ignoredDirectoryCount = 0
+        // Bound the eager walk so a pathologically large/slow tree can't hang the
+        // browser or exhaust memory: stop at the entry cap or the wall-clock budget
+        // (checked periodically — `Date()` per entry would itself be a cost on a
+        // multi-hundred-thousand-entry walk). Deeper content stays reachable via
+        // lazy subtree expansion; the partial index is searchable.
+        let deadline = Date().addingTimeInterval(timeBudget)
+        var isTruncated = false
+        var sinceTimeCheck = 0
         for case let url as URL in enumerator {
+            if entries.count >= maxEntries {
+                isTruncated = true
+                break
+            }
+            sinceTimeCheck += 1
+            if sinceTimeCheck >= 1024 {
+                sinceTimeCheck = 0
+                if Date() > deadline {
+                    isTruncated = true
+                    break
+                }
+            }
             let normalizedPath = FilePathNormalizer.relativePath(for: url, from: root)
             guard !normalizedPath.isEmpty else { continue }
             let resourceValues = try url.resourceValues(forKeys: [.isDirectoryKey])
@@ -202,6 +245,6 @@ public final class BackgroundFileIndexer: FileIndexing {
             }
             entries.append(FileBrowserEntry(relativePath: normalizedPath, isDirectory: isDirectory))
         }
-        return (entries, ignoredDirectoryCount)
+        return (entries, ignoredDirectoryCount, isTruncated)
     }
 }

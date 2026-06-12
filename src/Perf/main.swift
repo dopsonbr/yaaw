@@ -229,6 +229,14 @@ func runFileIndexGates() throws -> [Gate] {
 @main
 struct PerfMain {
     static func main() async {
+        // Ad-hoc probe: time a real directory's eager index walk to confirm the
+        // entry-cap / time-budget bound holds on a pathologically large tree (e.g.
+        // `YAAW_INDEX_PROBE_PATH=~/github/one-thd/order-up`). Returns instead of
+        // running the gate suite when set.
+        if let probePath = ProcessInfo.processInfo.environment["YAAW_INDEX_PROBE_PATH"] {
+            runIndexProbe(path: (probePath as NSString).expandingTildeInPath)
+            return
+        }
         do {
             var gates = try await runPersistenceGates()
             gates.append(contentsOf: try runFileIndexGates())
@@ -260,6 +268,29 @@ struct PerfMain {
             print("perf harness error: \(error)")
             exit(2)
         }
+    }
+}
+
+/// Times the eager index walk on a real directory and reports whether the bound
+/// (entry cap / time budget) kept it responsive. Diagnostic, not a gate.
+func runIndexProbe(path: String) {
+    let root = URL(fileURLWithPath: path, isDirectory: true)
+    print("=== file-index probe: \(root.path) ===")
+    let clock = ContinuousClock()
+    let start = clock.now
+    do {
+        let result = try BackgroundFileIndexer.buildIndex(
+            threadID: UUID(), root: root, ignoreRules: YAAWConfiguration.defaultIgnoreRules)
+        let elapsed = clock.now - start
+        let ms =
+            Double(elapsed.components.seconds) * 1000
+            + Double(elapsed.components.attoseconds) / 1e15
+        print(String(format: "  walked %d entries in %.0f ms", result.entries.count, ms))
+        print("  truncated: \(result.isTruncated)")
+        print("  entry cap: \(BackgroundFileIndexer.maxIndexedEntries)")
+        print(String(format: "  time budget: %.1f s", BackgroundFileIndexer.walkTimeBudget))
+    } catch {
+        print("  probe error: \(error)")
     }
 }
 

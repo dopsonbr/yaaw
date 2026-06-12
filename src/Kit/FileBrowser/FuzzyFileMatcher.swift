@@ -7,11 +7,18 @@ public struct FileIndexResult: Equatable, Sendable {
     public var entries: [FileBrowserEntry]
     /// Metadata describing the index (root, git identity, counts, …).
     public var metadata: FileIndexMetadata
+    /// Whether the eager walk stopped early at the entry cap or time budget (the
+    /// tree is larger than was indexed). In-memory only — not persisted; the
+    /// indexed subset is still searchable and deeper dirs remain lazily expandable.
+    public var isTruncated: Bool
 
     /// Creates a file-index result.
-    public init(entries: [FileBrowserEntry], metadata: FileIndexMetadata) {
+    public init(
+        entries: [FileBrowserEntry], metadata: FileIndexMetadata, isTruncated: Bool = false
+    ) {
         self.entries = entries
         self.metadata = metadata
+        self.isTruncated = isTruncated
     }
 }
 

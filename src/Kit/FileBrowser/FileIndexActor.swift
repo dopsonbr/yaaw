@@ -87,7 +87,9 @@ public actor FileIndexActor {
         key: FileIndexCacheKey
     ) async throws -> FileIndexResult {
         let raw = try await coalescedFullIndex(root: root, ignoreRules: ignoreRules, key: key)
-        return FileIndexResult(entries: raw.entries, metadata: raw.metadata.forThread(threadID))
+        return FileIndexResult(
+            entries: raw.entries, metadata: raw.metadata.forThread(threadID),
+            isTruncated: raw.isTruncated)
     }
 
     private func coalescedFullIndex(
@@ -129,7 +131,8 @@ public actor FileIndexActor {
         metadata.gitIdentity = key.gitIdentity
         metadata.ignoreRulesFingerprint = key.ignoreRulesFingerprint
         metadata.schemaVersion = key.schemaVersion
-        return FileIndexResult(entries: result.entries, metadata: metadata)
+        return FileIndexResult(
+            entries: result.entries, metadata: metadata, isTruncated: result.isTruncated)
     }
 
     // MARK: - Subtree refresh

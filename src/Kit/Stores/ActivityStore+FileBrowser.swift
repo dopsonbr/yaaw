@@ -108,12 +108,22 @@ extension ActivityStore {
         switch result {
         case .success(let result):
             fileIndexMetadataByThreadID[threadID] = result.metadata
+            if result.isTruncated {
+                recordDiagnostic(
+                    category: "Indexing", name: "file_index_truncated",
+                    metadata: [
+                        "thread_id": threadID.uuidString,
+                        "indexed_entry_count": "\(result.entries.count)",
+                        "root": result.metadata.rootPath,
+                    ])
+            }
             if workspace.selectedThreadID == threadID,
                 let thread = workspace.thread(withID: threadID)
             {
                 publishFileBrowserState(
                     for: thread, entries: result.entries, metadata: result.metadata,
-                    searchQuery: fileBrowserState.searchQuery, isIndexing: false)
+                    searchQuery: fileBrowserState.searchQuery, isIndexing: false,
+                    isIndexTruncated: result.isTruncated)
             } else {
                 fileBrowserEntriesByThreadID[threadID] = result.entries
             }
@@ -154,7 +164,8 @@ extension ActivityStore {
         entries: [FileBrowserEntry],
         metadata: FileIndexMetadata?,
         searchQuery: String,
-        isIndexing: Bool
+        isIndexing: Bool,
+        isIndexTruncated: Bool = false
     ) {
         fileBrowserEntriesByThreadID[thread.id] = entries
         if let metadata { fileIndexMetadataByThreadID[thread.id] = metadata }
@@ -171,7 +182,8 @@ extension ActivityStore {
             isVisibleEntryLimitApplied: visible.isLimitApplied,
             isIndexing: isIndexing,
             metadata: metadata,
-            errorMessage: nil
+            errorMessage: nil,
+            isIndexTruncated: isIndexTruncated
         )
         updateSelectedFileAfterVisibleEntriesChanged()
     }

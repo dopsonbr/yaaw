@@ -71,6 +71,11 @@ public struct FileBrowserState: Equatable, Sendable {
     public var isIndexing: Bool
     public var metadata: FileIndexMetadata?
     public var errorMessage: String?
+    /// Whether the eager index walk stopped early at its entry cap / time budget
+    /// (the project is larger than was indexed). The browser shows the indexed
+    /// subset; deeper folders remain lazily expandable and fuzzy search runs over
+    /// what was indexed.
+    public var isIndexTruncated: Bool
 
     public init(
         rootPath: String? = nil,
@@ -82,7 +87,8 @@ public struct FileBrowserState: Equatable, Sendable {
         isVisibleEntryLimitApplied: Bool = false,
         isIndexing: Bool = false,
         metadata: FileIndexMetadata? = nil,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        isIndexTruncated: Bool = false
     ) {
         self.rootPath = rootPath
         self.searchQuery = searchQuery
@@ -94,5 +100,6 @@ public struct FileBrowserState: Equatable, Sendable {
         self.isIndexing = isIndexing
         self.metadata = metadata
         self.errorMessage = errorMessage
+        self.isIndexTruncated = isIndexTruncated
     }
 }
