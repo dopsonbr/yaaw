@@ -3,7 +3,7 @@ import XCTest
 @testable import YAAWKit
 
 final class PersistenceStateTests: PersistenceTestCase {
-    func testSQLiteDoesNotRestoreTransientRightPanelNvimTabs() async throws {
+    func testSQLiteRestoresRightPanelNvimTabs() async throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         let store = try SQLiteYAAWStore(databasePath: path)
         let projectID = UUID()
@@ -32,21 +32,21 @@ final class PersistenceStateTests: PersistenceTestCase {
         let reloaded = try await SQLiteYAAWStore(databasePath: path).load()
         let reloadedState = try XCTUnwrap(reloaded.rightPanelStatesByThreadID[threadID])
 
-        XCTAssertEqual(reloadedState.selectedTabID, RightPanelTab.defaultNvimID)
-        XCTAssertEqual(reloadedState.tabs.map(\.id), RightPanelState.defaultTabs.map(\.id))
-        XCTAssertFalse(reloadedState.tabs.contains { $0.id == selectedTab.id })
+        XCTAssertEqual(reloadedState.selectedTabID, selectedTab.id)
+        XCTAssertEqual(reloadedState.selectedTab.relativePath, "src/App/RootView.swift")
+        XCTAssertTrue(reloadedState.tabs.contains { $0.id == selectedTab.id })
     }
 
-    func testSQLiteDoesNotRestoreTransientRightPanelBrowserTabs() async throws {
+    func testSQLiteRestoresRightPanelBrowserTabs() async throws {
         let path = try temporaryDirectory().appendingPathComponent("state.sqlite")
         let store = try SQLiteYAAWStore(databasePath: path)
         let projectID = UUID()
         let threadID = UUID()
         let root = URL(fileURLWithPath: "/tmp/yaaw", isDirectory: true)
         var state = RightPanelState.defaultState(selectedMode: .files)
-        let selectedTab = state.openBrowserTab(
+        let urlTab = state.openBrowserTab(
             urlString: "https://example.com/docs", relativePath: nil)
-        _ = state.openBrowserTab(
+        let fileTab = state.openBrowserTab(
             urlString: "file:///tmp/yaaw/index.html", relativePath: "index.html")
 
         await store.save(
@@ -70,10 +70,11 @@ final class PersistenceStateTests: PersistenceTestCase {
         let reloadedState = try XCTUnwrap(reloaded.rightPanelStatesByThreadID[threadID])
 
         XCTAssertEqual(reloaded.rightPanelModesByThreadID[threadID], .browser)
-        XCTAssertEqual(reloadedState.selectedTabID, RightPanelTab.defaultBrowserID)
-        XCTAssertEqual(reloadedState.tabs.map(\.id), RightPanelState.defaultTabs.map(\.id))
-        XCTAssertFalse(reloadedState.tabs.contains { $0.id == selectedTab.id })
-        XCTAssertFalse(reloadedState.tabs.contains { $0.relativePath == "index.html" })
+        XCTAssertEqual(reloadedState.selectedTabID, fileTab.id)
+        XCTAssertTrue(reloadedState.tabs.contains { $0.id == urlTab.id })
+        XCTAssertTrue(reloadedState.tabs.contains { $0.id == fileTab.id })
+        XCTAssertEqual(reloadedState.selectedTab.relativePath, "index.html")
+        XCTAssertEqual(reloadedState.selectedTab.urlString, "file:///tmp/yaaw/index.html")
     }
 
     func testSQLiteLayoutStatePersistsThroughReload() async throws {

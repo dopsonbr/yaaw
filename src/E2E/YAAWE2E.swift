@@ -8,7 +8,7 @@ import Foundation
 ///    databases the launched app screenshots. This runs without a GUI and is the
 ///    portion verified in Chunk G.
 /// 2. **Headless driver subcommands** (`screenshot`/`send-key`/`send-click`/
-///    `kill-helper`/`frontmost`): PID-targeted CGEvents + ScreenCaptureKit
+///    `send-scroll`/`kill-helper`/`frontmost`): PID-targeted CGEvents + ScreenCaptureKit
 ///    composites + the crash-isolation kill, used by `scripts/test-e2e.sh`
 ///    against the launched signed app (GUI/accessibility-bound).
 @main

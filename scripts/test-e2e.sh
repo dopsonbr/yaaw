@@ -35,6 +35,11 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
   exit 1
 fi
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+PRODUCTION_APP_NAME="YAAW"
+PRODUCTION_APP_BUNDLE_ID="dev.dopsonbr.YAAW"
+PRODUCTION_APP_BUNDLE=""
+PRODUCTION_APP_BINARY=""
+PRODUCTION_RENDER_HOST_HELPER=""
 
 # The per-surface render helper is now packaged as an NSXPC service bundle
 # (Chunk D, ADR-004): faceless YAAWRenderHost processes that composite their
@@ -60,6 +65,23 @@ terminate_e2e_app() {
     [[ -n "$pid" ]] || continue
     kill "$pid" >/dev/null 2>&1 || true
   done < <(running_e2e_app_pids)
+}
+
+running_production_app_pids() {
+  [[ -n "$PRODUCTION_APP_BINARY" ]] || return 0
+  { ps -axo pid=,args= 2>/dev/null || true; } | awk -v app_binary="$PRODUCTION_APP_BINARY" '
+    index($0, app_binary) > 0 {
+      print $1
+    }
+  '
+}
+
+terminate_production_app() {
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" >/dev/null 2>&1 || true
+  done < <(running_production_app_pids)
 }
 
 wait_for_process_exit() {
@@ -154,12 +176,18 @@ assert_no_focus_steal() {
 
 cleanup() {
   terminate_e2e_app
+  terminate_production_app
   launchctl unsetenv YAAW_E2E_DATABASE_PATH >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_CONFIG_PATH >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_CAPTURE_DIRECTORY >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_PATH >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_KEYBOARD_PROBE >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_E2E_SCROLLBACK_AUTOSCROLL_DELTA_Y >/dev/null 2>&1 || true
   launchctl unsetenv YAAW_E2E_HEADLESS >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_DATABASE_PATH >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_CONFIG_PATH >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_CAPTURE_DIRECTORY >/dev/null 2>&1 || true
+  launchctl unsetenv YAAW_PATH >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
@@ -469,6 +497,163 @@ if nearWhiteRatio > 0.45 {
 SWIFT
 }
 
+assert_browser_region_not_black() {
+  local screenshot_path="$1"
+  local label="$2"
+  local x_start_percent="$3"
+  local x_end_percent="$4"
+  local y_start_percent="$5"
+  local y_end_percent="$6"
+  /usr/bin/swift - "$screenshot_path" "$label" "$x_start_percent" "$x_end_percent" "$y_start_percent" "$y_end_percent" <<'SWIFT'
+import AppKit
+import Foundation
+
+let screenshotPath = CommandLine.arguments[1]
+let label = CommandLine.arguments[2]
+guard CommandLine.arguments.count == 7,
+      let xStartPercent = Int(CommandLine.arguments[3]),
+      let xEndPercent = Int(CommandLine.arguments[4]),
+      let yStartPercent = Int(CommandLine.arguments[5]),
+      let yEndPercent = Int(CommandLine.arguments[6]),
+      let image = NSImage(contentsOfFile: screenshotPath),
+      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+else {
+  fputs("Could not read screenshot or region arguments for \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+let width = cgImage.width
+let height = cgImage.height
+let bytesPerPixel = 4
+let bytesPerRow = width * bytesPerPixel
+var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+guard let context = CGContext(
+  data: &pixels,
+  width: width,
+  height: height,
+  bitsPerComponent: 8,
+  bytesPerRow: bytesPerRow,
+  space: CGColorSpaceCreateDeviceRGB(),
+  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+) else {
+  fputs("Could not create bitmap context for \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+let xRange = max(0, width * xStartPercent / 100)..<min(width, width * xEndPercent / 100)
+let yRange = max(0, height * yStartPercent / 100)..<min(height, height * yEndPercent / 100)
+var pureBlackPixels = 0
+var totalPixels = 0
+for y in yRange {
+  for x in xRange {
+    let offset = y * bytesPerRow + x * bytesPerPixel
+    let red = pixels[offset]
+    let green = pixels[offset + 1]
+    let blue = pixels[offset + 2]
+    if red < 8 && green < 8 && blue < 8 {
+      pureBlackPixels += 1
+    }
+    totalPixels += 1
+  }
+}
+
+guard totalPixels > 0 else {
+  fputs("Empty screenshot region for \(label): \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+let blackRatio = Double(pureBlackPixels) / Double(totalPixels)
+if blackRatio > 0.70 {
+  let percent = String(format: "%.1f", blackRatio * 100)
+  fputs("\(label) browser region is dominantly black in \(screenshotPath): \(percent)% pure-black pixels\n", stderr)
+  exit(1)
+}
+SWIFT
+}
+
+assert_scrollback_sentinel_visibility() {
+  local screenshot_path="$1"
+  local label="$2"
+  local expected="$3"
+  local x_start_percent="$4"
+  local x_end_percent="$5"
+  local y_start_percent="$6"
+  local y_end_percent="$7"
+  /usr/bin/swift - "$screenshot_path" "$label" "$expected" "$x_start_percent" "$x_end_percent" "$y_start_percent" "$y_end_percent" <<'SWIFT'
+import AppKit
+import Foundation
+
+let screenshotPath = CommandLine.arguments[1]
+let label = CommandLine.arguments[2]
+let expected = CommandLine.arguments[3]
+guard CommandLine.arguments.count == 8,
+      let xStartPercent = Int(CommandLine.arguments[4]),
+      let xEndPercent = Int(CommandLine.arguments[5]),
+      let yStartPercent = Int(CommandLine.arguments[6]),
+      let yEndPercent = Int(CommandLine.arguments[7]),
+      let image = NSImage(contentsOfFile: screenshotPath),
+      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+else {
+  fputs("Could not read screenshot or region arguments for \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+let width = cgImage.width
+let height = cgImage.height
+let bytesPerPixel = 4
+let bytesPerRow = width * bytesPerPixel
+var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+guard let context = CGContext(
+  data: &pixels,
+  width: width,
+  height: height,
+  bitsPerComponent: 8,
+  bytesPerRow: bytesPerRow,
+  space: CGColorSpaceCreateDeviceRGB(),
+  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+) else {
+  fputs("Could not create bitmap context for \(screenshotPath)\n", stderr)
+  exit(2)
+}
+
+context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+let xRange = max(0, width * xStartPercent / 100)..<min(width, width * xEndPercent / 100)
+let yRange = max(0, height * yStartPercent / 100)..<min(height, height * yEndPercent / 100)
+var sentinelPixels = 0
+for y in yRange {
+  for x in xRange {
+    let offset = y * bytesPerRow + x * bytesPerPixel
+    let red = pixels[offset]
+    let green = pixels[offset + 1]
+    let blue = pixels[offset + 2]
+    if red < 70 && green > 120 && blue < 130 {
+      sentinelPixels += 1
+    }
+  }
+}
+
+let threshold = 1200
+switch expected {
+case "visible":
+  if sentinelPixels < threshold {
+    fputs("\(label) did not show scrollback sentinel in \(screenshotPath): \(sentinelPixels) green pixels\n", stderr)
+    exit(1)
+  }
+case "hidden":
+  if sentinelPixels >= threshold {
+    fputs("\(label) unexpectedly showed scrollback sentinel in \(screenshotPath): \(sentinelPixels) green pixels\n", stderr)
+    exit(1)
+  }
+default:
+  fputs("Unknown sentinel expectation \(expected)\n", stderr)
+  exit(2)
+}
+SWIFT
+}
+
 launch_state() {
   local state="$1"
   local app_path="${2:-$ARTIFACT_DIR/bin:$PATH}"
@@ -507,8 +692,152 @@ APPLESCRIPT
   assert_no_privacy_prompts "$state"
   capture_window "$screenshot_path"
   assert_no_terminal_launch_failure "$screenshot_path"
+  if [[ "$state" == "browser-preview" || "$state" == "markdown-preview" ]]; then
+    assert_browser_region_not_black "$screenshot_path" "$state" 72 98 17 88
+  fi
   assert_no_focus_steal "visual state $state"
   terminate_e2e_app
+}
+
+production_helper_pids() {
+  [[ -n "$PRODUCTION_RENDER_HOST_HELPER" ]] || return 0
+  { ps -axo pid=,args= 2>/dev/null || true; } | awk -v helper="$PRODUCTION_RENDER_HOST_HELPER" '
+    index($0, helper) > 0 {
+      print $1
+    }
+  '
+}
+
+production_app_pid() {
+  running_production_app_pids | head -n 1
+}
+
+set_production_launch_environment() {
+  local database_path="$1"
+  launchctl setenv YAAW_DATABASE_PATH "$database_path"
+  launchctl setenv YAAW_CONFIG_PATH "$ARTIFACT_DIR/config/settings.yaml"
+  launchctl setenv YAAW_CAPTURE_DIRECTORY "$ARTIFACT_DIR/production-captures"
+  launchctl setenv YAAW_PATH "$ARTIFACT_DIR/bin:$PATH"
+}
+
+wait_for_production_window() {
+  for _ in {1..150}; do
+    if [[ -n "$(running_production_app_pids)" ]] &&
+      osascript <<APPLESCRIPT >/dev/null 2>&1
+tell application "System Events"
+  if exists process "$PRODUCTION_APP_NAME" then
+    tell process "$PRODUCTION_APP_NAME"
+      if (count of windows) > 0 then return
+    end tell
+  end if
+  error "$PRODUCTION_APP_NAME did not expose a window"
+end tell
+APPLESCRIPT
+    then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+launch_production_app() {
+  local database_path="$1"
+  local context="${2:-production launch}"
+
+  terminate_production_app
+  /usr/bin/pkill -f "/Contents/MacOS/$PRODUCTION_APP_NAME\$" >/dev/null 2>&1 || true
+  set_production_launch_environment "$database_path"
+
+  for attempt in 1 2 3; do
+    if [[ "$HEADLESS" == "1" ]]; then
+      /usr/bin/open -g -n -F -a "$PRODUCTION_APP_BUNDLE"
+    else
+      /usr/bin/open -n -F -a "$PRODUCTION_APP_BUNDLE"
+    fi
+    if wait_for_production_window; then
+      return 0
+    fi
+    echo "$PRODUCTION_APP_NAME launch attempt $attempt did not expose a window for $context" >&2
+    terminate_production_app
+    sleep "$attempt"
+  done
+
+  echo "$PRODUCTION_APP_NAME did not expose a window for $context" >&2
+  return 1
+}
+
+capture_production_window() {
+  local output_path="$1"
+
+  if [[ "$HEADLESS" == "1" ]]; then
+    local main_pid
+    main_pid="$(production_app_pid)"
+    if [[ -n "$main_pid" ]]; then
+      local owner_args=()
+      local helper_pid
+      while IFS= read -r helper_pid; do
+        [[ -n "$helper_pid" ]] && owner_args+=(--owner-pid "$helper_pid")
+      done < <(production_helper_pids)
+      if "$E2E_TOOL" screenshot --output "$output_path" --main-pid "$main_pid" \
+        "${owner_args[@]}" 2>/dev/null; then
+        return 0
+      fi
+    fi
+    echo "ScreenCaptureKit capture failed for $output_path; using production region capture fallback." >&2
+  fi
+
+  local window_info
+  window_info="$(osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "System Events"
+  tell process "$PRODUCTION_APP_NAME"
+    set windowPosition to position of window 1
+    set windowSize to size of window 1
+    set windowID to ""
+    try
+      set windowID to value of attribute "AXWindowNumber" of window 1
+    end try
+    return (windowID as string) & "|" & (item 1 of windowPosition as string) & "," & (item 2 of windowPosition as string) & "," & (item 1 of windowSize as string) & "," & (item 2 of windowSize as string)
+  end tell
+end tell
+APPLESCRIPT
+)"
+
+  if [[ -z "$window_info" ]]; then
+    echo "Could not read the $PRODUCTION_APP_NAME window bounds for $output_path" >&2
+    return 1
+  fi
+
+  local bounds="${window_info#*|}"
+  /usr/sbin/screencapture -x -R "$bounds" "$output_path"
+}
+
+run_release_production_preview_probe() {
+  echo "Running release production preview probe..."
+  PRODUCTION_APP_BUNDLE="$(
+    YAAW_BUILD_CONFIGURATION=release ./script/build_and_run.sh --build-only | tail -n 1
+  )"
+  PRODUCTION_APP_BINARY="$PRODUCTION_APP_BUNDLE/Contents/MacOS/$PRODUCTION_APP_NAME"
+  PRODUCTION_RENDER_HOST_HELPER="$PRODUCTION_APP_BUNDLE/Contents/XPCServices/$RENDER_HOST_SERVICE_ID.xpc/Contents/MacOS/YAAWRenderHost"
+
+  if [[ ! -x "$PRODUCTION_APP_BINARY" ]]; then
+    echo "expected production app binary was not created: $PRODUCTION_APP_BINARY" >&2
+    exit 1
+  fi
+
+  local state
+  for state in browser-preview markdown-preview; do
+    local database_path="$ARTIFACT_DIR/states/$state.sqlite"
+    local screenshot_path="$SCREENSHOT_DIR/production-release-$state.png"
+    if ! launch_production_app "$database_path" "release production $state"; then
+      terminate_production_app
+      return 1
+    fi
+    sleep 1
+    capture_production_window "$screenshot_path"
+    assert_browser_region_not_black "$screenshot_path" "production-release-$state" 72 98 17 88
+    terminate_production_app
+  done
 }
 
 wait_for_sql_value() {
@@ -970,6 +1299,41 @@ APPLESCRIPT
   terminate_e2e_app
 }
 
+run_scrollback_probe() {
+  local database_path="$ARTIFACT_DIR/states/scrollback.sqlite"
+  local before_path="$SCREENSHOT_DIR/scrollback-before.png"
+  local after_path="$SCREENSHOT_DIR/scrollback-after.png"
+
+  launchctl setenv YAAW_E2E_SCROLLBACK_AUTOSCROLL_DELTA_Y "40"
+  launch_e2e_app "$database_path" "$ARTIFACT_DIR/bin:$PATH" "scrollback probe"
+  assert_no_privacy_prompts "scrollback probe"
+  focus_workspace_terminal
+  assert_terminal_helper_running "scrollback probe"
+  sleep 1
+
+  capture_window "$before_path" || true
+  assert_terminal_region_not_near_white "$before_path" "scrollback terminal launch" 22 78 12 78 || {
+    terminate_e2e_app
+    launchctl unsetenv YAAW_E2E_SCROLLBACK_AUTOSCROLL_DELTA_Y >/dev/null 2>&1 || true
+    return 1
+  }
+  assert_scrollback_sentinel_visibility "$before_path" "scrollback before scroll" hidden 22 78 12 78 || {
+    terminate_e2e_app
+    launchctl unsetenv YAAW_E2E_SCROLLBACK_AUTOSCROLL_DELTA_Y >/dev/null 2>&1 || true
+    return 1
+  }
+
+  sleep 3.5
+  capture_window "$after_path" || true
+  assert_scrollback_sentinel_visibility "$after_path" "scrollback after scroll" visible 22 78 12 78 || {
+    terminate_e2e_app
+    launchctl unsetenv YAAW_E2E_SCROLLBACK_AUTOSCROLL_DELTA_Y >/dev/null 2>&1 || true
+    return 1
+  }
+  terminate_e2e_app
+  launchctl unsetenv YAAW_E2E_SCROLLBACK_AUTOSCROLL_DELTA_Y >/dev/null 2>&1 || true
+}
+
 run_settings_editor_probe() {
   local database_path="$ARTIFACT_DIR/states/settings-editor.sqlite"
   local screenshot_path="$SCREENSHOT_DIR/settings-editor.png"
@@ -1324,6 +1688,7 @@ if ! swift run -c release YAAWKitPerf; then
   echo "Release perf gates failed (YAAWKitPerf exited nonzero)" >&2
   exit 1
 fi
+run_release_production_preview_probe
 
 # Avoid coordinate-driven UI journeys in this harness. The Swift E2E runner
 # verifies durable state transitions directly, while the launched app states
@@ -1332,6 +1697,8 @@ run_keyboard_input_probe
 assert_no_focus_steal "keyboard input probe"
 run_isolated_terminal_visibility_probe
 assert_no_focus_steal "isolated terminal visibility probe"
+run_scrollback_probe
+assert_no_focus_steal "scrollback probe"
 run_workspace_shortcut_probe
 assert_no_focus_steal "workspace shortcut probe"
 run_settings_editor_probe
@@ -1339,7 +1706,7 @@ assert_no_focus_steal "settings editor probe"
 run_crash_isolation_probe
 assert_no_focus_steal "crash isolation probe"
 
-for state in launch project-creation files browser-preview nvim git missing-directory bottom-terminal panel-resize panel-collapse; do
+for state in launch project-creation files browser-preview markdown-preview nvim git missing-directory bottom-terminal panel-resize panel-collapse; do
   launch_state "$state"
 done
 

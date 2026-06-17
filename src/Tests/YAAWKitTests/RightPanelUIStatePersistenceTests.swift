@@ -93,6 +93,46 @@ final class RightPanelUIStatePersistenceTests: XCTestCase {
         XCTAssertEqual(secondStores.rightPanel.selectedFileRelativePath, "README.md")
     }
 
+    @MainActor
+    func testCreatingThreadThenOpeningMarkdownPreviewPersistsSelectedBrowserTab() async throws {
+        let directory = try storeTemporaryDirectory()
+        let databasePath = directory.appendingPathComponent("state.sqlite")
+        let projectRoot = directory.appendingPathComponent("Project", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectRoot, withIntermediateDirectories: true)
+        let readme = projectRoot.appendingPathComponent("README.md")
+        try "# Preview\n\nFirst render should not be blank.\n".write(
+            to: readme, atomically: true, encoding: .utf8)
+
+        let projectID = UUID()
+        let seed = YAAWSnapshot(
+            projects: [Project(id: projectID, displayName: "Project", rootDirectory: projectRoot)],
+            threads: [],
+            selectedProjectID: projectID,
+            selectedThreadID: nil,
+            selectedRightPanelMode: .files,
+            isGlobalTerminalExpanded: false)
+
+        let firstStore = try SQLiteYAAWStore(databasePath: databasePath)
+        await firstStore.save(seed)
+        let firstEnvironment = AppEnvironment(
+            persistenceStore: firstStore,
+            fileIndexActor: FileIndexActor(
+                store: firstStore, fileIndexer: ImmediateTestFileIndexer()),
+            environment: [:],
+            requiresSessionLinkForLoadedUnboundThreads: false)
+        let firstStores = await AppStores.make(environment: firstEnvironment)
+
+        let threadID = try firstStores.workspace.createThread(agentCLI: .codex)
+        XCTAssertTrue(firstStores.rightPanel.openFileInBrowser(relativePath: "README.md"))
+        await firstStores.rightPanel.flushPersistence()
+
+        let reloaded = try await SQLiteYAAWStore(databasePath: databasePath).load()
+        let restoredState = try XCTUnwrap(reloaded.rightPanelStatesByThreadID[threadID])
+        XCTAssertEqual(restoredState.selectedTab.id, "browser-file:README.md")
+        XCTAssertEqual(restoredState.selectedTab.relativePath, "README.md")
+        XCTAssertEqual(restoredState.selectedTab.urlString, readme.standardizedFileURL.absoluteString)
+    }
+
     func testSchemaVersionIsEighteen() {
         XCTAssertEqual(SQLiteYAAWStore.schemaVersion, 18)
     }

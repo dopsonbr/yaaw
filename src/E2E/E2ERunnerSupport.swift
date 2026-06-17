@@ -41,6 +41,7 @@ enum VisualState: String, CaseIterable {
     case projectCreation = "project-creation"
     case files
     case browserPreview = "browser-preview"
+    case markdownPreview = "markdown-preview"
     case nvim
     case git
     case missingDirectory = "missing-directory"
@@ -49,6 +50,7 @@ enum VisualState: String, CaseIterable {
     case panelResize = "panel-resize"
     case panelCollapse = "panel-collapse"
     case keyboardInput = "keyboard-input"
+    case scrollback
 }
 
 /// A headless-runner assertion failure. The `description` is surfaced on stderr

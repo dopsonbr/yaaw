@@ -11,9 +11,9 @@ import UniformTypeIdentifiers
 /// other apps is irrelevant.
 ///
 /// Ported verbatim from the pre-rewrite `src/E2E/E2EDriverCommands.swift`; the
-/// only addition is the `kill-helper` subcommand used by the crash-isolation
-/// probe (it `SIGKILL`s a render-host helper pid so the script can assert the
-/// app + sibling panes survive and the killed pane recovers).
+/// additions are `send-scroll` for terminal scrollback probes and `kill-helper`
+/// for the crash-isolation probe (it `SIGKILL`s a render-host helper pid so the
+/// script can assert the app + sibling panes survive and the killed pane recovers).
 enum E2EDriverCommands {
     /// Returns true when the invocation was a driver subcommand (handled
     /// here); false hands control back to the artifacts runner.
@@ -28,6 +28,9 @@ enum E2EDriverCommands {
             return true
         case "send-click":
             try sendClick(arguments: arguments)
+            return true
+        case "send-scroll":
+            try sendScroll(arguments: arguments)
             return true
         case "kill-helper":
             try killHelper(arguments: arguments)
@@ -214,6 +217,48 @@ enum E2EDriverCommands {
         usleep(60000)
         mouseUp.postToPid(pid)
         usleep(60000)
+    }
+
+    // MARK: - send-scroll
+
+    private static func sendScroll(arguments: [String]) throws {
+        guard let pid = value(after: "--pid", in: arguments).flatMap(pid_t.init),
+            let x = value(after: "--x", in: arguments).flatMap(Double.init),
+            let y = value(after: "--y", in: arguments).flatMap(Double.init),
+            let deltaY = value(after: "--delta-y", in: arguments).flatMap(Double.init)
+        else {
+            throw E2EDriverFailure(
+                "usage: YAAWE2E send-scroll --pid <pid> --x <n> --y <n> --delta-y <n> "
+                    + "[--delta-x <n>] [--count <n>] [--delay-us <n>] [--precise]")
+        }
+        let deltaX = value(after: "--delta-x", in: arguments).flatMap(Double.init) ?? 0
+        let count = value(after: "--count", in: arguments).flatMap(Int.init) ?? 1
+        let delay = value(after: "--delay-us", in: arguments).flatMap(useconds_t.init) ?? 20_000
+        let precise = arguments.contains("--precise")
+        let units: CGScrollEventUnit = precise ? .pixel : .line
+        let point = CGPoint(x: x, y: y)
+        CGWarpMouseCursorPosition(point)
+        for _ in 0..<max(1, count) {
+            guard
+                let event = CGEvent(
+                    scrollWheelEvent2Source: nil,
+                    units: units,
+                    wheelCount: 2,
+                    wheel1: Int32(deltaY.rounded()),
+                    wheel2: Int32(deltaX.rounded()),
+                    wheel3: 0)
+            else {
+                throw E2EDriverFailure("send-scroll: could not create scroll event")
+            }
+            if precise {
+                event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            }
+            event.location = point
+            event.post(tap: .cghidEventTap)
+            event.postToPid(pid)
+            usleep(delay)
+        }
+        usleep(100_000)
     }
 
     // MARK: - kill-helper (crash-isolation probe)

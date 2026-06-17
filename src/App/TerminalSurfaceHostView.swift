@@ -40,6 +40,7 @@ struct TerminalSurfaceHostView: NSViewRepresentable {
         // surface; this runs only on rare phase/title changes, not per frame.
         nsView.registerFrameSink()
         nsView.display(client.surface(for: role))
+        nsView.scheduleViewportReport()
     }
 }
 
@@ -56,6 +57,7 @@ final class TerminalPaneView: NSView {
     /// backdrop so unrendered frames read as a clean black pane).
     private let surfaceLayer = CALayer()
     private var lastReportedViewport: ResizePayloadKey?
+    private var didRunE2EScrollbackAutoscroll = false
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -233,29 +235,17 @@ final class TerminalPaneView: NSView {
                 hasPreciseScrolling: event.hasPreciseScrollingDeltas))
     }
 
-    /// Auto-focus the agent (project) terminal when it enters the window, so the
-    /// user can type immediately without first clicking it — and so keyboard input
-    /// reaches the pane once the window is keyed, without depending on a pointer
-    /// click. Only claims focus when nothing meaningful holds it (so it never
-    /// steals focus from e.g. the file-search field). Non-project surfaces keep
-    /// click-to-focus. Also pushes the real backing scale to the helper as soon as
-    /// the view has a window, so the first composited frame is rendered at the
-    /// correct density rather than the helper's pre-resize default (blurry-until-
-    /// resized fix; see also `viewDidChangeBackingProperties`).
+    /// Auto-focuses the project terminal only when no text/control view already
+    /// owns focus, and sends the initial backing scale before the first frame.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil { applyBackingScaleAndReportViewport() }
-        guard let window, case .project? = role else { return }
-        let current = window.firstResponder
-        if current == nil || current === window {
-            window.makeFirstResponder(self)
-        }
+        scheduleViewportReport()
+        scheduleE2EScrollbackAutoscrollIfRequested()
+        DispatchQueue.main.async { [weak self] in self?.claimProjectFocusIfAppropriate() }
     }
 
-    /// Fired when the backing scale becomes known or changes (entering a window,
-    /// moving between displays of different density). Re-stamps the layer scale and
-    /// re-sends the viewport so the helper re-renders the shared surface at the new
-    /// density — this is what makes the first frame crisp without a manual resize.
+    /// Re-sends the viewport when the backing scale becomes known or changes.
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         applyBackingScaleAndReportViewport()
@@ -266,6 +256,71 @@ final class TerminalPaneView: NSView {
         layer?.contentsScale = scale
         surfaceLayer.contentsScale = scale
         sendViewportIfNeeded(scale: scale)
+    }
+
+    func scheduleViewportReport(attemptsRemaining: Int = 8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+            guard let self else { return }
+            self.applyBackingScaleAndReportViewport()
+            guard attemptsRemaining > 0, self.window != nil,
+                (self.bounds.width <= 0 || self.bounds.height <= 0)
+            else { return }
+            self.scheduleViewportReport(attemptsRemaining: attemptsRemaining - 1)
+        }
+    }
+
+    private func claimProjectFocusIfAppropriate() {
+        guard let window, case .project? = role else { return }
+        guard Self.canClaimFocus(from: window.firstResponder) else { return }
+        window.makeFirstResponder(self)
+    }
+
+    private func scheduleE2EScrollbackAutoscrollIfRequested() {
+        guard !didRunE2EScrollbackAutoscroll, case .project? = role else { return }
+        guard
+            let rawDelta = ProcessInfo.processInfo.environment[
+                "YAAW_E2E_SCROLLBACK_AUTOSCROLL_DELTA_Y"],
+            let deltaY = Double(rawDelta)
+        else { return }
+        didRunE2EScrollbackAutoscroll = true
+        sendE2EScrollbackAutoscroll(deltaY: deltaY, attemptsRemaining: 20)
+    }
+
+    private func sendE2EScrollbackAutoscroll(deltaY: Double, attemptsRemaining: Int) {
+        guard let client, let role, bounds.width > 0, bounds.height > 0 else {
+            guard attemptsRemaining > 0 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.sendE2EScrollbackAutoscroll(
+                    deltaY: deltaY, attemptsRemaining: attemptsRemaining - 1)
+            }
+            return
+        }
+        let x = Double(bounds.midX)
+        let y = Double(bounds.midY)
+        for index in 0..<720 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0 + Double(index) * 0.002) {
+                client.sendMouse(
+                    role: role,
+                    payload: MousePayload(
+                        action: .scroll,
+                        x: x,
+                        y: y,
+                        scrollDeltaY: deltaY,
+                        hasPreciseScrolling: true))
+            }
+        }
+    }
+
+    private static func canClaimFocus(from responder: NSResponder?) -> Bool {
+        guard let responder else { return true }
+        if responder is TerminalPaneView { return false }
+        if responder is NSTextView || responder is NSTextField || responder is NSControl {
+            return false
+        }
+        if let view = responder as? NSView, view.enclosingScrollView != nil {
+            return false
+        }
+        return true
     }
 
     private func forward(_ data: Data) {

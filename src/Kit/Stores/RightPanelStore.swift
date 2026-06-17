@@ -32,7 +32,7 @@ public final class RightPanelStore {
 
     init(context: StoreLoadContext) {
         let snapshot = context.snapshot
-        self.persistence = StorePersistenceQueue(store: context.environment.persistenceStore)
+        self.persistence = context.persistenceQueue
         self.surfaceManager = context.environment.renderSurfaceManager
         self.selectedThreadID = snapshot.selectedThreadID
 

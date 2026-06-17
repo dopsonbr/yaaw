@@ -48,6 +48,10 @@ final class TerminalHostController {
     /// Unchanged frames before dropping to the idle cadence (~0.6 s at 33 ms).
     private static let idleFrameThreshold = 18
 
+    /// Replayed when the surface attaches so the PTY uses libghostty's real grid.
+    private var lastResizePayload: ResizePayload?
+    private var preciseScrollAccumulator = TerminalPreciseScrollAccumulator()
+
     private var driver: AgentTerminalProcessDriver { pipeline.driver }
 
     init(launch: LaunchPayload, reply: RenderEventReply) {
@@ -107,9 +111,9 @@ final class TerminalHostController {
         // is never seen.
         orderInHidden(window)
         view.setSurfaceVisible(true)
-        // self is now fully initialized — safe to capture. Publish the shared
-        // IOSurface once the surface attaches (the layer/surface is nil at init).
-        eventForwarder.onSurfaceAttached = { [weak self] in self?.publishFrame() }
+        // The first resize can arrive before the IOSurface attaches; re-fit once it
+        // exists so the PTY starts from libghostty's real cell grid.
+        eventForwarder.onSurfaceAttached = { [weak self] in self?.handleSurfaceAttached() }
         startFramePump()
         publishFrame()
     }
@@ -126,17 +130,21 @@ final class TerminalHostController {
             view.frame = NSRect(origin: .zero, size: frame.size)
         }
         applyContentsScale(payload.contentsScale)
-        // Start (idempotently) / resize the PTY, then fit the surface. Fitting
-        // makes libghostty recompute the grid from the *real* font cell metrics
-        // and call back through the in-memory session's receive-resize handler,
-        // which drives the PTY winsize with the emulator's authoritative grid —
-        // that callback fires last, so it is the final word on the winsize. The
-        // explicit call here only guarantees the process starts (using the real
-        // fitted grid when the surface has already attached, else the app's cell
-        // estimate as a pre-attach fallback) rather than depending on a magic
-        // cell size in the app.
-        driver.resizeOrStart(to: authoritativeViewport(fallback: payload))
+        lastResizePayload = payload
+        // Prefer libghostty's fitted grid over the app's pre-attach estimate.
         view.fitToSize()
+        let viewport = authoritativeViewport(fallback: payload)
+        driver.resizeOrStart(to: viewport)
+        publishFrame()
+    }
+
+    /// Re-fits and publishes once libghostty's IOSurface has attached.
+    private func handleSurfaceAttached() {
+        view.fitToSize()
+        if let payload = lastResizePayload {
+            let viewport = authoritativeViewport(fallback: payload)
+            driver.resizeOrStart(to: viewport)
+        }
         publishFrame()
     }
 
@@ -174,8 +182,7 @@ final class TerminalHostController {
         let modifiers = NSEvent.ModifierFlags(rawValue: payload.modifierFlags)
         switch payload.action {
         case .scroll:
-            guard let event = Self.scrollEvent(payload: payload) else { return }
-            view.scrollWheel(with: event)
+            guard dispatchScrollEvent(payload: payload) else { return }
         case .moved:
             guard let event = mouseEvent(type: .mouseMoved, payload: payload, modifiers: modifiers)
             else { return }
@@ -184,6 +191,21 @@ final class TerminalHostController {
             dispatchButtonEvent(payload: payload, modifiers: modifiers)
         }
         publishFrame()
+    }
+
+    private func dispatchScrollEvent(payload: MousePayload) -> Bool {
+        var scrollPayload = payload
+        if payload.hasPreciseScrolling {
+            let delta = preciseScrollAccumulator.add(
+                deltaX: payload.scrollDeltaX,
+                deltaY: payload.scrollDeltaY)
+            guard !delta.isZero else { return false }
+            scrollPayload.scrollDeltaX = Double(delta.x)
+            scrollPayload.scrollDeltaY = Double(delta.y)
+        }
+        guard let event = Self.scrollEvent(payload: scrollPayload) else { return false }
+        view.scrollWheel(with: event)
+        return true
     }
 
     private func dispatchButtonEvent(payload: MousePayload, modifiers: NSEvent.ModifierFlags) {
@@ -229,7 +251,8 @@ final class TerminalHostController {
     }
 
     private static func scrollEvent(payload: MousePayload) -> NSEvent? {
-        let units: CGScrollEventUnit = payload.hasPreciseScrolling ? .pixel : .line
+        let precise = payload.hasPreciseScrolling
+        let units: CGScrollEventUnit = precise ? .pixel : .line
         guard
             let cgEvent = CGEvent(
                 scrollWheelEvent2Source: nil,
@@ -239,6 +262,14 @@ final class TerminalHostController {
                 wheel2: Int32(payload.scrollDeltaX.rounded()),
                 wheel3: 0)
         else { return nil }
+        // Preserve small trackpad deltas that would round to zero in wheelN.
+        if precise {
+            cgEvent.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            cgEvent.setDoubleValueField(
+                .scrollWheelEventPointDeltaAxis1, value: payload.scrollDeltaY)
+            cgEvent.setDoubleValueField(
+                .scrollWheelEventPointDeltaAxis2, value: payload.scrollDeltaX)
+        }
         return NSEvent(cgEvent: cgEvent)
     }
 
@@ -288,20 +319,34 @@ final class TerminalHostController {
     /// `IOSurfaceLayer`; its surface is exposed via `contents` (auto-bridged or a
     /// raw `IOSurfaceRef`) — fall back to KVC keys if a future layer hides it.
     private func currentSurface() -> IOSurface? {
-        guard let contents = view.layer?.contents else { return nil }
-        if let surface = contents as? IOSurface { return surface }
-        let cf = contents as CFTypeRef
-        if CFGetTypeID(cf) == IOSurfaceGetTypeID() {
-            return (cf as! IOSurface)
-        }
+        guard let layer = view.layer else { return nil }
+        if let surface = Self.ioSurface(from: layer.contents) { return surface }
         for key in ["surface", "ioSurface", "contents"] {
-            guard let value = view.layer?.value(forKey: key) else { continue }
-            let valueCF = value as CFTypeRef
-            if CFGetTypeID(valueCF) == IOSurfaceGetTypeID() {
-                return (valueCF as! IOSurface)
-            }
+            if let surface = Self.ioSurface(from: layer.value(forKey: key)) { return surface }
+        }
+        for sublayer in layer.sublayers ?? [] {
+            if let surface = Self.currentSurface(in: sublayer) { return surface }
         }
         return nil
+    }
+
+    private static func currentSurface(in layer: CALayer) -> IOSurface? {
+        if let surface = ioSurface(from: layer.contents) { return surface }
+        for key in ["surface", "ioSurface", "contents"] {
+            if let surface = ioSurface(from: layer.value(forKey: key)) { return surface }
+        }
+        for sublayer in layer.sublayers ?? [] {
+            if let surface = currentSurface(in: sublayer) { return surface }
+        }
+        return nil
+    }
+
+    private static func ioSurface(from value: Any?) -> IOSurface? {
+        guard let value else { return nil }
+        if let surface = value as? IOSurface { return surface }
+        let cf = value as CFTypeRef
+        guard CFGetTypeID(cf) == IOSurfaceGetTypeID() else { return nil }
+        return (cf as! IOSurface)
     }
 
     /// Polls the surface so ongoing terminal output reaches the pane (publishFrame

@@ -212,22 +212,25 @@ public struct RightPanelState: Equatable, Sendable {
         selectedFilePath: String?,
         nvimPath: String?
     ) -> RightPanelState {
-        let selectedKind = tabs.first { $0.id == selectedTabID }?.kind
-        let selectedMode = selectedKind?.mode ?? .files
-        var state = RightPanelState.defaultState(selectedMode: selectedMode)
-        state.expandedFolders = expandedFolders
-        state.selectedFilePath = selectedFilePath
-        state.nvimPath = nvimPath
-        return state
+        RightPanelState(
+            tabs: tabs,
+            selectedTabID: selectedTabID,
+            expandedFolders: expandedFolders,
+            selectedFilePath: selectedFilePath,
+            nvimPath: nvimPath
+        )
     }
 
-    /// A version of this state suitable for persistence: default tabs plus the saved per-thread UI state.
+    /// A version of this state suitable for persistence: normalized tabs plus the
+    /// saved per-thread UI state.
     public var persistenceSnapshot: RightPanelState {
-        var snapshot = RightPanelState.defaultState(selectedMode: selectedMode)
-        snapshot.expandedFolders = expandedFolders
-        snapshot.selectedFilePath = selectedFilePath
-        snapshot.nvimPath = nvimPath
-        return snapshot
+        RightPanelState(
+            tabs: tabs,
+            selectedTabID: selectedTabID,
+            expandedFolders: expandedFolders,
+            selectedFilePath: selectedFilePath,
+            nvimPath: nvimPath
+        )
     }
 
     /// The currently selected tab, falling back to the Files tab if none matches.

@@ -77,7 +77,7 @@ public final class WorkspaceStore {
         let snapshot = context.snapshot
         self.environment = environment
         self.settings = settings
-        self.persistence = StorePersistenceQueue(store: environment.persistenceStore)
+        self.persistence = context.persistenceQueue
 
         let globalChatsDirectory = Self.globalChatsDirectory(
             for: settings.configuration, homeDirectory: environment.homeDirectory)

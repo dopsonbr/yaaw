@@ -56,6 +56,7 @@ extension WorkspaceStore {
         selectedThreadID = thread.id
         selectedProjectID = project.id
         expandedProjectIDs.insert(project.id)
+        persistThread(thread)
         rightPanel?.seedDefaultState(forThreadID: thread.id)
         afterSelectionChanged()
         pushCurrentSelection()
@@ -68,7 +69,6 @@ extension WorkspaceStore {
                 "custom_launch_options": thread.launchOptions.isEmpty ? "false" : "true",
             ]
         )
-        persistThread(thread)
         if let updatedProject = projects.first(where: { $0.id == project.id }) {
             persistProject(updatedProject)
         }

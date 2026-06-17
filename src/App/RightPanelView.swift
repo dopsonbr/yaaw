@@ -386,8 +386,17 @@ struct BrowserPanelPlaceholder: View {
             if tab.urlString?.isEmpty ?? true { isAddressFocused = true }
             onActivate()
         }
-        .onChange(of: tab.id) { addressText = tab.urlString ?? "" }
-        .onChange(of: tab.urlString) { addressText = tab.urlString ?? "" }
+        .onChange(of: tab.id) {
+            addressText = tab.urlString ?? ""
+            onActivate()
+        }
+        .onChange(of: tab.urlString) {
+            addressText = tab.urlString ?? ""
+            onActivate()
+        }
+        .task(id: activationKey) {
+            onActivate()
+        }
     }
 
     @ViewBuilder
@@ -405,5 +414,9 @@ struct BrowserPanelPlaceholder: View {
                 .font(fonts.interfaceFont(sizeOffset: -1))
                 .foregroundStyle(dracula(.comment))
         }
+    }
+
+    private var activationKey: String {
+        "\(role.map(String.init(describing:)) ?? "nil")|\(tab.urlString ?? "")"
     }
 }

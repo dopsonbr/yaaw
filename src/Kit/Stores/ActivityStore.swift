@@ -51,7 +51,7 @@ public final class ActivityStore {
         self.workspace = workspace
         self.settings = settings
         self.rightPanel = rightPanel
-        self.persistence = StorePersistenceQueue(store: context.environment.persistenceStore)
+        self.persistence = context.persistenceQueue
         self.snapshotActivity = context.snapshot.threadActivityByThreadID
         // Loaded "working" activities downgrade to "inactive" on launch (captures
         // in-flight state before a crash); persisted back below if changed.

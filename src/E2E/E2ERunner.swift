@@ -67,15 +67,21 @@ final class E2ERunner {
                 databasePath: databasePath, seed: fixtures.fixtureSeedSnapshot())
             let workspace = stores.workspace
             let threadID = try workspace.createThread(agentCLI: .codex)
+            let sessionIdentity =
+                state == .scrollback ? "codex-e2e-scrollback" : "codex-e2e-001"
+            let sessionName =
+                state == .scrollback ? "Codex Scrollback E2E" : "Codex E2E Session"
             await stores.activity.recordAgentCLIOutput(
                 threadID: threadID,
-                output: "YAAW_SESSION_ID=codex-e2e-001\nYAAW_SESSION_NAME=Codex E2E Session\n")
+                output: "YAAW_SESSION_ID=\(sessionIdentity)\nYAAW_SESSION_NAME=\(sessionName)\n")
             if state == .missingDirectory {
                 try await writeMissingDirectoryVisualState(stores: stores)
             } else {
                 try await applyVisualState(state, stores: stores, threadID: threadID)
             }
             await fixtures.flush(stores)
+            try await assertVisualBrowserStatePersisted(
+                state: state, databasePath: databasePath, threadID: threadID)
         }
     }
 
@@ -92,7 +98,7 @@ final class E2ERunner {
         async throws
     {
         switch state {
-        case .launch, .projectCreation, .missingDirectory, .keyboardInput:
+        case .launch, .projectCreation, .missingDirectory, .keyboardInput, .scrollback:
             break
         case .files:
             stores.activity.refreshSelectedFileBrowser()
@@ -107,6 +113,10 @@ final class E2ERunner {
             try e2eAssert(
                 stores.rightPanel.openFileInBrowser(relativePath: "index.html"),
                 "visual browser-preview state opened index.html in the browser")
+        case .markdownPreview:
+            try e2eAssert(
+                stores.rightPanel.openFileInBrowser(relativePath: "README.md"),
+                "visual markdown-preview state opened README.md in the browser")
         case .nvim:
             stores.rightPanel.openFileInNvim(relativePath: "README.md")
         case .git, .missingTool:
@@ -123,6 +133,33 @@ final class E2ERunner {
             stores.layout.toggleSidebarCollapsed()
             stores.layout.toggleRightPanelCollapsed()
         }
+    }
+
+    private func assertVisualBrowserStatePersisted(
+        state: VisualState,
+        databasePath: URL,
+        threadID: UUID
+    ) async throws {
+        let expectedPath: String
+        switch state {
+        case .browserPreview:
+            expectedPath = "index.html"
+        case .markdownPreview:
+            expectedPath = "README.md"
+        default:
+            return
+        }
+
+        let snapshot = try await SQLiteYAAWStore(databasePath: databasePath).load()
+        let panelState = try e2eUnwrap(
+            snapshot.rightPanelStatesByThreadID[threadID],
+            "\(state.rawValue) right-panel state")
+        try e2eAssert(
+            panelState.selectedTab.relativePath == expectedPath,
+            "\(state.rawValue) restored selected browser tab for \(expectedPath)")
+        try e2eAssert(
+            panelState.selectedTab.urlString?.hasPrefix("file://") == true,
+            "\(state.rawValue) restored a file URL for \(expectedPath)")
     }
 
     // MARK: - Protected-directory security check

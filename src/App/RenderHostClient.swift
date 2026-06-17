@@ -72,6 +72,10 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
     /// Per-role frame sink the pane view registers; called on every new frame to
     /// set the pane layer's contents directly, bypassing `@Published`.
     private var frameSinksByRole: [RenderSurfaceRole: (IOSurface?) -> Void] = [:]
+    /// Last viewport reported by the SwiftUI/AppKit pane, even if it arrived
+    /// before the helper connection existed. Replayed on launch/reconnect so a
+    /// first-open surface does not wait for a manual resize before allocating.
+    private var lastViewportByRole: [RenderSurfaceRole: ResizePayload] = [:]
 
     init(
         helperURLProvider: @escaping @MainActor () -> URL? = RenderHostClient.defaultHelperURL,
@@ -104,6 +108,7 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
         MainActor.assumeIsolated {
             connectionsByRole[role]?.shutdown(expected: true)
             connectionsByRole.removeValue(forKey: role)
+            lastViewportByRole.removeValue(forKey: role)
             snapshotsByRole[role] = RenderSurfaceSnapshot(phase: .exited(nil))
         }
     }
@@ -186,9 +191,19 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
             heightPixels: heightPixels,
             contentsScale: contentsScale
         )
+        lastViewportByRole[role] = payload
         let connection = connectionsByRole[role]
         connection?.lastViewport = payload
         connection?.send(.resize(payload))
+        recordDiagnostic(
+            name: "render_surface_viewport_reported",
+            metadata: [
+                "role": role.diagnosticName,
+                "width": "\(payload.widthPixels)",
+                "height": "\(payload.heightPixels)",
+                "scale": "\(payload.contentsScale)",
+                "connected": connection == nil ? "false" : "true",
+            ])
     }
 
     func sendInput(role: RenderSurfaceRole, data: Data) {
@@ -243,7 +258,8 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
             payload = LaunchPayload(terminal: launch)
         }
         connection.send(.launch(payload))
-        if let viewport = connection.lastViewport {
+        if let viewport = lastViewportByRole[role] ?? connection.lastViewport {
+            connection.lastViewport = viewport
             connection.send(.resize(viewport))
         }
         recordDiagnostic(
@@ -259,11 +275,12 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
             name: "render_surface_helper_died", metadata: ["role": role.diagnosticName])
         updateSnapshot(role: role) { $0.phase = .reconnecting("The render helper exited.") }
         let launch = connection.launch
-        let viewport = connection.lastViewport
+        let viewport = connection.lastViewport ?? lastViewportByRole[role]
         connection.shutdown(expected: true)
         connectionsByRole.removeValue(forKey: role)
         startConnection(role: role, launch: launch)
         if let viewport {
+            lastViewportByRole[role] = viewport
             connectionsByRole[role]?.lastViewport = viewport
             connectionsByRole[role]?.send(.resize(viewport))
         }
@@ -283,6 +300,9 @@ final class RenderHostClient: ObservableObject, RenderSurfaceManaging {
         // First frame only: flip the pane out of its launching/reconnecting
         // overlay. Subsequent frames never touch `@Published`.
         if snapshotsByRole[role]?.phase != .ready {
+            recordDiagnostic(
+                name: "render_surface_first_frame_ready",
+                metadata: ["role": role.diagnosticName, "generation": "\(generation)"])
             updateSnapshot(role: role) { $0.phase = .ready }
         }
     }

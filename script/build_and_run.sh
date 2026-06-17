@@ -221,7 +221,9 @@ open_app() {
     /usr/bin/pgrep -f "/Contents/MacOS/$APP_NAME\$" >/dev/null 2>&1 || break
     sleep 0.2
   done
-  /usr/bin/open -n "$APP_BUNDLE"
+  # `-F` forces LaunchServices to open this exact staged bundle instead of a
+  # previously registered copy with the same production bundle identifier.
+  /usr/bin/open -n -F -a "$APP_BUNDLE"
 }
 
 case "$MODE" in

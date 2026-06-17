@@ -20,7 +20,7 @@ public final class LayoutStore {
     @ObservationIgnored public var selectedThreadID: UUID?
 
     init(context: StoreLoadContext) {
-        self.persistence = StorePersistenceQueue(store: context.environment.persistenceStore)
+        self.persistence = context.persistenceQueue
         self.diagnosticRecorder = context.environment.diagnosticRecorder
         self.layoutState = context.snapshot.layoutState
         self.bottomTerminalExpandedThreadIDs = context.snapshot.bottomTerminalExpandedThreadIDs

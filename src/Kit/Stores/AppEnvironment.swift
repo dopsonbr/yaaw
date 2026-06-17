@@ -111,7 +111,11 @@ public final class AppStores {
     /// Loads the snapshot once and builds the full store set from `environment`.
     public static func make(environment: AppEnvironment) async -> AppStores {
         let snapshot = await environment.persistenceStore.load()
-        let context = StoreLoadContext(environment: environment, snapshot: snapshot)
+        let context = StoreLoadContext(
+            environment: environment,
+            snapshot: snapshot,
+            persistenceQueue: StorePersistenceQueue(store: environment.persistenceStore)
+        )
 
         let settings = SettingsStore(context: context)
         let layout = LayoutStore(context: context)
@@ -139,4 +143,5 @@ public final class AppStores {
 struct StoreLoadContext {
     let environment: AppEnvironment
     let snapshot: YAAWSnapshot
+    let persistenceQueue: StorePersistenceQueue
 }

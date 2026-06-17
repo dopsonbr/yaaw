@@ -404,14 +404,12 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
         reply.frameReady(generation: nextGeneration(), surface: surface)
     }
 
-    /// Whether a snapshot is effectively unpainted. `WKWebView.takeSnapshot` returns
-    /// a fully transparent image when called before the page has painted (right
-    /// after a load, or mid-relayout during a resize). Detected by downsampling to a
-    /// small grid and checking every sampled pixel's alpha: real content is opaque,
-    /// an unpainted snapshot is transparent. (A genuinely transparent page is
-    /// degenerate for a file/markdown preview, so treating it as blank is fine.)
+    /// Rejects transparent or black pre-paint WebKit snapshots so preview panes
+    /// keep showing the loading state instead of a black frame. Legitimate
+    /// documents can be mostly solid white (or otherwise sparse), so those must
+    /// be accepted and allowed to update through the snapshot pump.
     private func isBlank(_ cgImage: CGImage) -> Bool {
-        let side = 12
+        let side = 32
         let byteCount = side * side * 4
         var pixels = [UInt8](repeating: 0, count: byteCount)
         return pixels.withUnsafeMutableBytes { raw in
@@ -426,11 +424,35 @@ final class BrowserHostController: NSObject, WKNavigationDelegate, WKUIDelegate 
                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
             else { return false }
             context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
-            // Alpha is the 4th byte of each RGBA pixel; any opaque pixel => painted.
-            for index in stride(from: 3, to: byteCount, by: 4) where raw[index] != 0 {
-                return false
+            var firstVisibleRGB: (red: UInt8, green: UInt8, blue: UInt8)?
+            var variantPixelCount = 0
+            var visiblePixelCount = 0
+            var pureBlackPixelCount = 0
+            for index in stride(from: 0, to: byteCount, by: 4) {
+                let red = raw[index]
+                let green = raw[index + 1]
+                let blue = raw[index + 2]
+                let alpha = raw[index + 3]
+                guard alpha > 0 else { continue }
+                visiblePixelCount += 1
+                if red < 8 && green < 8 && blue < 8 {
+                    pureBlackPixelCount += 1
+                }
+                guard let first = firstVisibleRGB else {
+                    firstVisibleRGB = (red, green, blue)
+                    continue
+                }
+                if abs(Int(red) - Int(first.red)) > 10
+                    || abs(Int(green) - Int(first.green)) > 10
+                    || abs(Int(blue) - Int(first.blue)) > 10
+                {
+                    variantPixelCount += 1
+                    if variantPixelCount >= 6 { return false }
+                }
             }
-            return true
+            guard visiblePixelCount > 0 else { return true }
+            let blackRatio = Double(pureBlackPixelCount) / Double(visiblePixelCount)
+            return blackRatio > 0.95 && variantPixelCount < 6
         }
     }
 

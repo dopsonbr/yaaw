@@ -78,6 +78,15 @@ struct E2ECommandDoubles {
         if [[ "${1:-}" == "resume" ]]; then
           printf 'YAAW_SESSION_ID=%s\\n' "$2"
           printf 'YAAW_SESSION_NAME=Codex Resumed %s\\n' "$2"
+          if [[ "$2" == "codex-e2e-scrollback" && -t 1 ]]; then
+            for i in $(seq 1 36); do
+              printf '\\033[48;2;0;180;80mSCROLLBACK_SENTINEL_%03d %150s\\033[0m\\n' "$i" ""
+            done
+            for i in $(seq 1 180); do
+              printf 'SCROLLBACK_BOTTOM_%03d default terminal output after sentinel\\n' "$i"
+            done
+            while true; do sleep 1; done
+          fi
         else
           printf 'YAAW_SESSION_ID=codex-e2e-001\\n'
           printf 'YAAW_SESSION_NAME=Codex E2E Session\\n'

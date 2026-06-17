@@ -114,6 +114,7 @@ extension SQLiteYAAWStore {
     func writeRightPanelState(threadID: UUID, state: RightPanelState) throws {
         let deleteStatement = try cachedPrepare(
             "DELETE FROM right_panel_tabs WHERE thread_id = ?")
+        defer { try? resetStatement(deleteStatement) }
         bind(threadID.uuidString, at: 1, in: deleteStatement)
         try stepDone(deleteStatement)
         try resetStatement(deleteStatement)
@@ -128,6 +129,7 @@ extension SQLiteYAAWStore {
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """
         )
+        defer { try? resetStatement(insertStatement) }
         for (index, tab) in tabs.enumerated() {
             bind(threadID.uuidString, at: 1, in: insertStatement)
             bind(tab.id, at: 2, in: insertStatement)
